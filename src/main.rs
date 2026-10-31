@@ -13,6 +13,7 @@ mod hud;
 mod keys;
 mod lootart;
 mod minimap;
+mod online;
 mod petart;
 mod pixel;
 mod render;
@@ -24,32 +25,54 @@ mod icons;
 mod widgets;
 mod windows;
 
-use galebound_core::auth::AccountStore;
-use galebound_core::save::Account;
+use galebound_core::net::{ClientMsg, NetClient, ServerMsg};
+use galebound_core::save::{self, Account};
+use std::time::Duration;
 use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, Conf};
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.7.0";
+pub const VERSION: &str = "0.8.0";
+
+/// How long to wait for the server to answer a menu action.
+pub const REPLY_WAIT: Duration = Duration::from_secs(8);
 
 /// Shared state that outlives individual screens.
 pub struct App {
-    pub store: AccountStore,
+    /// Your account as the server sent it (no password data).
     pub account: Option<Account>,
+    /// The connection to the server, once signed in.
+    pub net: Option<NetClient>,
     pub time: f64,
     pub quit: bool,
-    /// Last save error, shown on screen so problems are never silent.
+    /// Last save / connection problem, shown on screen so it's never silent.
     pub save_error: Option<String>,
 }
 
 impl App {
-    pub fn save_account(&mut self) {
-        if let Some(acc) = &self.account {
-            match self.store.save(acc) {
-                Ok(()) => self.save_error = None,
-                Err(e) => self.save_error = Some(e.to_string()),
-            }
+    /// Send the account's settings to the server.
+    pub fn save_settings(&mut self) {
+        if let (Some(acc), Some(net)) = (&self.account, &self.net) {
+            net.send(&ClientMsg::Settings { text: save::encode_settings(&acc.settings) });
         }
+    }
+
+    /// Ask the server for something that answers with the account (create /
+    /// delete a character) and keep the new copy.
+    pub fn account_request(&mut self, m: ClientMsg) -> Result<(), String> {
+        let net = self.net.as_mut().ok_or("Not connected")?;
+        match net.request(&m, REPLY_WAIT, |r| matches!(r, ServerMsg::Account { .. }))? {
+            ServerMsg::Account { account, .. } => {
+                self.account = Some(save::decode_account(&account)?);
+                Ok(())
+            }
+            _ => Err("Unexpected reply".into()),
+        }
+    }
+
+    /// Lost the server? (checked by the menus)
+    pub fn connection_lost(&self) -> bool {
+        self.net.as_ref().map(|n| n.is_closed()).unwrap_or(true)
     }
 }
 
@@ -84,7 +107,7 @@ fn window_conf() -> Conf {
 async fn main() {
     prevent_quit();
     gfx::init();
-    let mut app = App { store: AccountStore::default_location(), account: None, time: 0.0, quit: false, save_error: None };
+    let mut app = App { account: None, net: None, time: 0.0, quit: false, save_error: None };
     let mut screen = Screen::Login(LoginScreen::new(&app));
 
     loop {
@@ -102,8 +125,12 @@ async fn main() {
             // Save progress before closing the window.
             if let Screen::Play(p) = &mut screen {
                 p.save_now(&mut app);
+                if let Some(n) = &app.net {
+                    n.send(&ClientMsg::Leave);
+                }
             }
-            app.save_account();
+            // give the writer thread a moment to send the last save
+            std::thread::sleep(Duration::from_millis(150));
             break;
         }
         if let Go::To(next) = go {

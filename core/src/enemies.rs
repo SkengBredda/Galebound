@@ -325,6 +325,58 @@ pub enum EState {
     Spit,
 }
 
+/// Every state, indexed by `EState as u32` (for the network).
+pub const ALL_ESTATES: [EState; 11] = [
+    EState::Idle,
+    EState::Walk,
+    EState::Telegraph,
+    EState::Lunge,
+    EState::Recover,
+    EState::Hitstun,
+    EState::Dying,
+    EState::Charge,
+    EState::Stunned,
+    EState::Stomp,
+    EState::Spit,
+];
+
+impl EState {
+    pub fn from_u32(i: u32) -> Option<EState> {
+        ALL_ESTATES.get(i as usize).copied()
+    }
+}
+
+impl EnemyKind {
+    /// Index in `ALL_KINDS` (for the network).
+    pub fn index(self) -> u32 {
+        ALL_KINDS.iter().position(|k| *k == self).unwrap_or(0) as u32
+    }
+    pub fn from_index(i: u32) -> Option<EnemyKind> {
+        ALL_KINDS.get(i as usize).copied()
+    }
+}
+
+/// A hit landed on a monster: lose HP, flash, and get knocked back (bosses
+/// shrug off knockback mid-charge). Shared by the game and the server.
+pub fn apply_hit(e: &mut Enemy, dmg: f32, kb: V2, hitstun: f32) {
+    let def = e.def();
+    e.hp -= dmg;
+    e.flash = 0.12;
+    let frac = (e.hp / e.max_hp).clamp(0.0, 1.0);
+    let scale = (1.0 + 0.6 * (1.0 - frac)) / def.weight;
+    let boss_armor = def.boss && matches!(e.state, EState::Charge | EState::Stomp);
+    if !boss_armor {
+        e.body.vel = V2::new(kb.x * scale, kb.y * scale);
+        if e.body.vel.y < 0.0 {
+            e.body.on_ground = false;
+        }
+        e.state = EState::Hitstun;
+        e.state_t = 0.0;
+        e.think = hitstun * if def.boss { 0.4 } else { 1.0 };
+    }
+    e.facing = -kb.x.signum();
+}
+
 #[derive(Clone, Debug)]
 pub struct Enemy {
     pub id: u32,
@@ -348,6 +400,8 @@ pub struct Enemy {
     pub cooldown: f32,
     /// Aim direction stored at the end of a telegraph (dives / shots).
     pub aim: V2,
+    /// Online: where the server last said it is (the client glides there).
+    pub net: Option<V2>,
 }
 
 impl Enemy {
@@ -375,6 +429,7 @@ impl Enemy {
             home: V2::new(x, feet_y),
             cooldown: rng.range(0.8, d.fire_every),
             aim: V2::ZERO,
+            net: None,
         }
     }
     pub fn def(&self) -> EnemyDef {

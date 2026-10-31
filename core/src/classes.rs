@@ -368,6 +368,13 @@ pub enum ProjStyle {
     Star,
 }
 
+impl ProjStyle {
+    pub fn from_u32(i: u32) -> ProjStyle {
+        use ProjStyle::*;
+        [Arrow, Knife, Orb, Bolt, Caltrop, Shockwave, Star].get(i as usize).copied().unwrap_or(Orb)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AttackDef {
     pub name: &'static str,

@@ -5,18 +5,66 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.7.0.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.8.0 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
 1. Install Rust: https://rustup.rs
 2. **Linux only** – install windowing/GL headers once:
    `sudo apt install libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev`
-3. In this folder:
+3. Start a **server** (see *Hosting for friends* below) - or join a friend's.
+4. Start the **game** in this folder:
 
 ```
 cargo run --release
 ```
+
+On the login screen, put the server's address in the **Server address** box
+(bottom-left): `localhost` if the server runs on your PC, or the host's
+Tailscale address. Then create an account *on that server* and play.
+
+## Hosting for friends (up to 16 players)
+
+The server is a separate program in this folder. It keeps everyone's accounts
+and characters, runs the monsters on every map, and decides who gets the
+loot. Your PC must stay on while people play.
+
+**1. Start the server.** Double-click `start-server.bat` (Windows), or run:
+
+```
+cargo run --release -p galebound-server
+```
+
+The first start builds it (a few minutes). Leave the window open. Windows
+Firewall will ask whether to allow it: allow **private networks**. Type
+`list` to see who's online, `say <message>` to message everyone, and
+`stop` to shut it down. Options: `--port 7777` (default), `--max-players 16`,
+`--data <folder>` (where accounts are saved; default
+`%APPDATA%\Galebound\server` on Windows), `--motd "Welcome!"`.
+
+**2. Set up Tailscale (once).** You and every friend:
+- install Tailscale from https://tailscale.com/download and sign in;
+- you invite friends to your tailnet (admin console -> Users -> Invite), or
+  share just your PC with them (Machines -> your PC -> Share).
+
+Your PC's Tailscale address is shown in the Tailscale app, or run
+`tailscale ip -4`. It looks like `100.101.102.103`.
+
+**3. Friends connect.** They start the game and type your Tailscale address
+in **Server address** (port 7777 is added automatically). You type
+`localhost`.
+
+No port forwarding is needed, nothing is exposed to the internet, and it
+works even if your internet provider uses CGNAT. If you change the port, add it
+to the address: `100.101.102.103:7778`.
+
+**What's shared:** other players appear on your map and minimap with their
+name, level, gear, HP and pet. Monsters are the same for everyone: everyone
+who hits a monster gets EXP when it dies (split by damage, at least 20% each)
+and quest credit. Loot falls for everyone and goes to whoever picks it up
+first (you or your pet). Drop items to hand them to a friend. Walk up to a
+friend's tombstone and press **Talk** (E / V / Space) to revive them. Press
+**Enter** to chat with everyone on the server.
 
 Run the test suite (physics, combat, stats, shops, abilities, class change,
 quests, accounts, bots that walk the zones and towns):
@@ -25,18 +73,23 @@ quests, accounts, bots that walk the zones and towns):
 cargo test --workspace
 ```
 
+The tests include a real server on a real socket with two clients.
+
 ## What's in this build
 
 **Login screen**
+- **Server address** box: `localhost` or a host's Tailscale address.
 - Register / sign in with e-mail + password (validated, minimum 8 characters).
 - Passwords are never stored: each account keeps a random salt and a
   PBKDF2-HMAC-SHA256 hash (120k iterations). 5 wrong attempts = 30 s lockout.
 - **Remember me**: ticking it opens a *shared / public computer* warning you
   must confirm. It stores a random token (not your password); signing in
   without it, or choosing "Use a different account", revokes the token.
-- Saves live in your user data folder
-  (Windows `%APPDATA%\Galebound`, macOS `~/Library/Application Support/Galebound`,
-  Linux `~/.local/share/galebound`). Override with `GALEBOUND_DATA=<dir>`.
+- Accounts and characters are saved **on the server**. Your own computer only
+  keeps the last server address, display settings and any "remember me"
+  token, in your user data folder (Windows `%APPDATA%\Galebound`, macOS
+  `~/Library/Application Support/Galebound`, Linux `~/.local/share/galebound`;
+  override with `GALEBOUND_DATA=<dir>`).
 
 **Novice → class change at level 10.** Every character starts as a
 *Novice* in their own Adventurer's Garb (linen shirt, rope belt, satchel) with
@@ -136,8 +189,8 @@ window, the bag or the hotbar. You can own up to 6 pets; one is out at a time.
 
 **Defeat.** When your HP hits 0 you fall and become a **tombstone** where you
 lay. It stays until you click **Respawn** (back to the last checkpoint with
-full HP; Enter also works), read a **Revive Scroll** (get up on the spot), or
-another player revives you (multiplayer hook: `Sim::revive_by_player`).
+full HP), read a **Revive Scroll** (get up on the spot), or a friend walks
+up and revives you (Talk key at your tombstone; you get up with 30% HP).
 Above level 10, a defeat costs **3% of your current EXP**; a Revive Scroll
 gives it all back. You stay a tombstone even if you log out.
 
@@ -220,7 +273,7 @@ Signs along the way teach the controls and always show *your* current keys.
 | Light attack | J | X | Ctrl |
 | Heavy attack | K | C | Shift |
 | Dodge | L / Shift | Z | Z |
-| Talk / interact | E | V / Enter | Space / Enter |
+| Talk / interact / revive a friend | E | V | Space |
 | Potion | Q | A | Delete / End |
 | Quest log | Tab | Tab | Tab |
 | Inventory / Character / Abilities | I / P / B | I / P / B | I / P / B |
@@ -228,6 +281,7 @@ Signs along the way teach the controls and always show *your* current keys.
 | Pick up loot (hold to keep picking) | F | F | F |
 | Minimap size | N | N | N |
 | Pets window | O | O | O |
+| Chat | Enter | Enter | Enter |
 | Climb ladders / ropes / vines | W / S | Up / Down | Up / Down |
 | Hotbar | 1-8 | 1-8 | 1-8 |
 
@@ -259,7 +313,10 @@ core/        galebound-core: zero-dependency game logic (unit tested)
   auth.rs      accounts, login, lockout, remember-me tokens
   crypto.rs    SHA-256 / HMAC / PBKDF2
   save.rs      save format (plain text, atomic writes)
+  net.rs       multiplayer protocol and connections
+server/      galebound-server: the dedicated server (accounts, monsters, loot, chat)
 src/         the client (macroquad): rendering, UI, input
+  online.rs    server address, "remember me" token, animation codes
   gfx.rs       640x360 pixel canvas, pixel-snapped shapes, pixel text
   pixel.rs     CPU pixel canvas: exact shapes, per-part outlines, shading
   charsprite.rs anime pixel characters: rig, poses, animation frames
@@ -302,18 +359,23 @@ Sprites are generated once and cached as textures (`sprites.rs`). To use an
 artist's sprite sheets later, replace the generator for that sprite; the
 gameplay code doesn't change.
 
-## Road to the "MMO" part
+## How multiplayer works
 
-This build is single-player with local accounts, deliberately structured for
-the next step:
-
-- `galebound-core` has no engine or OS dependencies, so the **same simulation
-  can run on an authoritative server** (e.g. tokio + WebSockets/QUIC).
-- `AccountStore` is the only thing that touches account files; replace its
-  methods with HTTPS calls to a login server and the login screen stays as is.
-- Next milestones: login server + database, shared maps with other players
-  (server-authoritative positions, client-side prediction for your own
-  character), chat, parties, then second-tier class advancements.
+- `server/` (`galebound-server`) uses only the Rust standard library. Each
+  player has one TCP connection carrying short text messages
+  (`core/src/net.rs`). It runs one 60 Hz loop that owns all the state, and
+  sends monster snapshots to each map 15 times a second.
+- **The server decides** accounts and saves, monsters (AI, HP, deaths,
+  respawns, quest bosses), loot on the ground and who gets it, chat and
+  revives. Account files live only on the server, and passwords never leave
+  it: clients get a copy of their account with the password data removed.
+- **Each game client** moves and animates its own character and does its own
+  hit detection, then reports hits. Classic side-scroller MMOs work the same
+  way, and it keeps combat instant even with some lag. The server checks every
+  hit for range and size, and every pick-up for distance. Inventories and
+  quest progress are saved from the client, which is fine for a group of
+  friends. Moving those checks onto the server would be the next step for a
+  public server.
 
 ## A note on the classes
 

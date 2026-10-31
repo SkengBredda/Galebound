@@ -244,62 +244,114 @@ pub fn encode_account(a: &Account) -> String {
     kv("iterations", a.iterations.to_string());
     kv("remember", a.remember_hash.clone().unwrap_or_default());
     kv("created", a.created_unix.to_string());
-    kv("layout", a.settings.layout.key().to_string());
-    kv("tap_up_jump", a.settings.tap_up_to_jump.to_string());
-    kv("damage_numbers", a.settings.show_damage_numbers.to_string());
-    kv("screen_shake", a.settings.screen_shake.to_string());
-    kv("display", a.settings.display.key().to_string());
-    kv("minimap", a.settings.minimap_size.to_string());
-    kv("minimap_whole", a.settings.minimap_whole.to_string());
+    s.push_str(&encode_settings(&a.settings));
     for c in &a.characters {
         s.push_str("[character]\n");
-        let mut kv = |k: &str, v: String| {
-            s.push_str(k);
-            s.push('=');
-            s.push_str(&esc(&v));
-            s.push('\n');
-        };
-        kv("name", c.name.clone());
-        kv("class", c.class.key().to_string());
-        kv("look", c.look.encode());
-        kv("level", c.level.to_string());
-        kv("exp", c.exp.to_string());
-        kv("gold", c.gold.to_string());
-        kv("stats", format!("{},{},{},{}", c.stats.str, c.stats.dex, c.stats.int, c.stats.luk));
-        kv("ap", c.ap.to_string());
-        for st in &c.inventory.slots {
-            kv("item", format!("{},{}", st.id, st.count));
-        }
-        for slot in items::EQUIP_SLOTS {
-            if let Some(id) = &c.inventory.equip[slot.index()] {
-                kv("equip", format!("{},{}", slot.key(), id));
-            }
-        }
-        kv("hotbar", c.hotbar.iter().map(|h| h.encode()).collect::<Vec<_>>().join(" "));
-        kv("hp", c.hp.to_string());
-        kv("mp", c.mp.to_string());
-        kv("map", c.map.clone());
-        kv("pos", format!("{},{}", c.x, c.y));
-        kv("play_seconds", c.play_seconds.to_string());
-        kv("trainee_buys", c.trainee_buys.to_string());
-        if let Some(lost) = c.tomb {
-            kv("tomb", lost.to_string());
-        }
-        for p in &c.pets {
-            // name last: it may contain commas
-            kv("pet", format!("{},{},{},{:.2},{}", p.species.key(), p.level, p.exp, p.hunger, p.name));
-        }
-        if let Some(i) = c.active_pet {
-            kv("active_pet", i.to_string());
-        }
-        for q in &c.quests {
-            kv("quest", format!("{},{},{}", q.id, qstate_str(q.state), q.progress));
-        }
-        for f in &c.flags {
-            kv("flag", f.clone());
-        }
+        s.push_str(&encode_character(c));
     }
     s
+}
+
+/// The settings lines of an account file.
+pub fn encode_settings(st: &Settings) -> String {
+    let mut s = String::new();
+    let mut kv = |k: &str, v: String| {
+        s.push_str(k);
+        s.push('=');
+        s.push_str(&esc(&v));
+        s.push('\n');
+    };
+    kv("layout", st.layout.key().to_string());
+    kv("tap_up_jump", st.tap_up_to_jump.to_string());
+    kv("damage_numbers", st.show_damage_numbers.to_string());
+    kv("screen_shake", st.screen_shake.to_string());
+    kv("display", st.display.key().to_string());
+    kv("minimap", st.minimap_size.to_string());
+    kv("minimap_whole", st.minimap_whole.to_string());
+    s
+}
+
+/// Read settings written by `encode_settings`.
+pub fn decode_settings(text: &str) -> Settings {
+    decode_account(&format!("email=x@x.x\nhash=-\n{}", text)).map(|a| a.settings).unwrap_or_default()
+}
+
+/// One character's block of an account file (without the `[character]` line).
+pub fn encode_character(c: &CharacterSave) -> String {
+    let mut s = String::new();
+    let mut kv = |k: &str, v: String| {
+        s.push_str(k);
+        s.push('=');
+        s.push_str(&esc(&v));
+        s.push('\n');
+    };
+    kv("name", c.name.clone());
+    kv("class", c.class.key().to_string());
+    kv("look", c.look.encode());
+    kv("level", c.level.to_string());
+    kv("exp", c.exp.to_string());
+    kv("gold", c.gold.to_string());
+    kv("stats", format!("{},{},{},{}", c.stats.str, c.stats.dex, c.stats.int, c.stats.luk));
+    kv("ap", c.ap.to_string());
+    for st in &c.inventory.slots {
+        kv("item", format!("{},{}", st.id, st.count));
+    }
+    for slot in items::EQUIP_SLOTS {
+        if let Some(id) = &c.inventory.equip[slot.index()] {
+            kv("equip", format!("{},{}", slot.key(), id));
+        }
+    }
+    kv("hotbar", c.hotbar.iter().map(|h| h.encode()).collect::<Vec<_>>().join(" "));
+    kv("hp", c.hp.to_string());
+    kv("mp", c.mp.to_string());
+    kv("map", c.map.clone());
+    kv("pos", format!("{},{}", c.x, c.y));
+    kv("play_seconds", c.play_seconds.to_string());
+    kv("trainee_buys", c.trainee_buys.to_string());
+    if let Some(lost) = c.tomb {
+        kv("tomb", lost.to_string());
+    }
+    for p in &c.pets {
+        // name last: it may contain commas
+        kv("pet", format!("{},{},{},{:.2},{}", p.species.key(), p.level, p.exp, p.hunger, p.name));
+    }
+    if let Some(i) = c.active_pet {
+        kv("active_pet", i.to_string());
+    }
+    for q in &c.quests {
+        kv("quest", format!("{},{},{}", q.id, qstate_str(q.state), q.progress));
+    }
+    for f in &c.flags {
+        kv("flag", f.clone());
+    }
+    s
+}
+
+/// Read one character written by `encode_character`.
+pub fn decode_character(text: &str) -> Option<CharacterSave> {
+    let a = decode_account(&format!("version={}\nemail=x@x.x\nhash=-\n[character]\n{}", SAVE_VERSION, text)).ok()?;
+    a.characters.into_iter().next().filter(|c| !c.name.trim().is_empty())
+}
+
+/// Character name rules (the same in the game and on the server).
+pub fn validate_name(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    let len = n.chars().count();
+    if !(3..=14).contains(&len) {
+        return Err("Name must be 3-14 characters.".into());
+    }
+    if !n.chars().all(|c| c.is_alphanumeric() || c == ' ') {
+        return Err("Use letters, numbers and spaces only.".into());
+    }
+    if n.contains("  ") {
+        return Err("No double spaces, please.".into());
+    }
+    Ok(n.to_string())
+}
+
+/// An account as sent to its owner: no password hash, salt or token hash.
+pub fn public_account(a: &Account) -> Account {
+    Account { salt_hex: "-".into(), hash_hex: "-".into(), remember_hash: None, ..a.clone() }
 }
 
 pub fn decode_account(text: &str) -> Result<Account, String> {
@@ -538,6 +590,21 @@ mod tests {
         let txt = encode_account(&a);
         let b = decode_account(&txt).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn characters_and_settings_travel_on_their_own() {
+        let mut c = CharacterSave::new("Skeng", Appearance { hair: 2, ..Default::default() });
+        c.level = 9;
+        c.inventory.add("pet_food", 3);
+        c.set_flag("gate_open");
+        c.pets.push(crate::pets::PetSave::new(PetSpecies::Puffling));
+        c.active_pet = Some(0);
+        let back = decode_character(&encode_character(&c)).unwrap();
+        assert_eq!(back, c);
+        let st = Settings { layout: Layout::ClassicMmo, minimap_size: 1, ..Default::default() };
+        assert_eq!(decode_settings(&encode_settings(&st)), st);
+        assert!(decode_character("garbage").is_none());
     }
 
     #[test]

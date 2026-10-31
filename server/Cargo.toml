@@ -1,0 +1,8 @@
+[package]
+name = "galebound-server"
+version = "0.8.0"
+edition = "2021"
+description = "Galebound Online dedicated server: accounts, saves, shared monsters, loot and chat for up to 16 players."
+
+[dependencies]
+galebound-core = { path = "../core" }

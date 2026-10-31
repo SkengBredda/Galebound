@@ -7,6 +7,97 @@ so the whole history is in one place.
 
 ---
 
+## 0.8.0 – Multiplayer
+*31 October 2026*
+
+### Host your own server
+- New **dedicated server** program (`galebound-server`) for up to **16
+  players** (change it with `--max-players`).
+  - Start it with `start-server.bat`, or `cargo run --release -p
+    galebound-server`.
+  - It prints the address to give friends, and remembers everything between
+    restarts.
+- **Built for Tailscale:** friends connect to your PC's Tailscale address, so
+  you need no port forwarding and nothing is exposed to the internet. Step-by-
+  step setup is in the README under *Hosting for friends*.
+- **Server console commands:** `list` (who's online and where), `say
+  <message>` (message everyone) and `stop` (shut down).
+- **Server options:** `--port` (default 7777), `--max-players`, `--data`
+  (where accounts are saved) and `--motd` (a welcome message shown when
+  players join).
+- If the server is full, newcomers are told so ("16 / 16 players") and can
+  try again later.
+- Client and server check they're the same version, and say so clearly if
+  not.
+
+### Accounts live on the server
+- The login screen has a **Server address** box: `localhost` for your own PC,
+  or a friend's Tailscale address. It remembers the last one you used.
+- Accounts, characters, progress and settings are stored **on the server**.
+  Passwords are salted and hashed there and never sent back to players.
+- **Remember me** now works per server: the server gives your computer a
+  token, never your password.
+- Logging into an account from a second computer signs the first one out.
+- **Character names are unique across the whole server.**
+- New characters are always created fresh on the server.
+- As agreed, everyone starts fresh: characters from single-player saves stay
+  on your PC but aren't used online.
+
+### Shared world
+- **See each other:** other players on your map appear with their own look,
+  gear, animations, name and level, HP bar and pet. They also show on your
+  minimap as blue dots.
+- **Shared monsters:** the server runs every map's monsters (movement,
+  attacks, deaths and respawns), so everyone fights the same ones. A monster
+  goes after the nearest player who's still standing.
+- **Shared kills:** everyone who hits a monster gets EXP and quest credit when
+  it dies. EXP is split by damage dealt, and everyone who helped gets at least
+  20% of it.
+- **Quest bosses** (the Bramblehorn and the Thunderhorn) appear when someone
+  on the map has the quest. Everyone there can fight them, and everyone who
+  hits them gets the kill.
+- **Shared loot:** gold and items fall for everyone and go to whoever picks
+  them up first, you or your pet. Drop an item from your bag to hand it to a
+  friend (bound items still can't be dropped).
+- **Revive your friends:** walk up to a friend's tombstone and press Talk
+  (E / V / Space). They get up with 30% HP. The EXP they lost stays lost;
+  only a Revive Scroll gives it back.
+- **Chat:** press **Enter** to talk to everyone on the server, then Enter to
+  send or Esc to cancel. Joins, leaves and server messages show in yellow, and
+  chat fades after a few seconds.
+
+### How it works
+- One TCP connection per player carrying short text messages. The server and
+  the protocol use only the Rust standard library, so there's nothing extra
+  to download.
+- **The server decides:** accounts and saves, monsters, loot, who gets each
+  drop, chat and revives. It checks every hit for range and damage, and every
+  pick-up for distance.
+- **Your game decides:** your own movement and hit detection, so combat
+  feels instant even with some lag. This is how classic side-scrolling MMOs
+  work.
+- Your progress is sent to the server every 30 seconds, after loot and
+  quests (at most every 3 seconds), and when you leave.
+
+### Changes to controls
+- **Enter is now Chat** in every layout. In the Arrow Keys and Classic MMO
+  layouts, Talk is now only **V** and **Space** (they used to include Enter).
+- Respawn is now a button click only (Enter used to work).
+
+### Tests
+- 89 automated tests (up from 79). The new tests cover:
+  - every network message
+  - online monsters, kills, loot and revives in the game
+  - three end-to-end tests that start a real server on a real socket and
+    connect real clients. These check sign-in, unique names, shared
+    monsters, EXP splits, loot races, item drops, chat, revives, quest
+    bosses, saving, remember-me tokens, signing in elsewhere, a full server
+    and version checks.
+- The game was also tested with two game windows connected to one server: the
+  players saw each other, chatted, and one revived the other.
+
+---
+
 ## 0.7.0 – Pets
 *31 October 2026*
 

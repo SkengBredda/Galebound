@@ -169,6 +169,36 @@ impl AccountStore {
 
     // ---------------------------------------------------- remember me
 
+    /// Server side of "remember me": make a fresh token for this account,
+    /// keep only its hash, and return the token for the player's computer.
+    pub fn issue_token(&self, acc: &mut Account) -> Result<String, AuthError> {
+        let token = crypto::random_bytes(32);
+        acc.remember_hash = Some(crypto::to_hex(&crypto::sha256(&token)));
+        self.save(acc)?;
+        Ok(crypto::to_hex(&token))
+    }
+
+    /// Server side: log in with a token from `issue_token`.
+    pub fn login_token(&self, email: &str, token_hex: &str) -> Result<Account, AuthError> {
+        let acc = self.load(&normalize_email(email))?;
+        let token = crypto::from_hex(token_hex).ok_or(AuthError::WrongCredentials)?;
+        let h = crypto::to_hex(&crypto::sha256(&token));
+        match &acc.remember_hash {
+            Some(stored) if crypto::ct_eq(stored.as_bytes(), h.as_bytes()) => Ok(acc),
+            _ => Err(AuthError::WrongCredentials),
+        }
+    }
+
+    /// Every account on disk (the server uses this to keep names unique).
+    pub fn all_accounts(&self) -> Vec<Account> {
+        let Ok(rd) = std::fs::read_dir(self.dir.join("accounts")) else { return Vec::new() };
+        rd.filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "acc").unwrap_or(false))
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .filter_map(|t| save::decode_account(&t).ok())
+            .collect()
+    }
+
     /// Create a fresh token for this account and store it on this computer.
     pub fn remember(&self, acc: &mut Account) -> Result<(), AuthError> {
         let token = crypto::random_bytes(32);

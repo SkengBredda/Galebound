@@ -31,6 +31,7 @@ pub fn fill_keys(text: &str, layout: Layout) -> String {
         ("{Pickup}", Action::Pickup),
         ("{Minimap}", Action::Minimap),
         ("{Pets}", Action::Pets),
+        ("{Chat}", Action::Chat),
     ] {
         if out.contains(tag) {
             out = out.replace(tag, &format!("[{}]", layout.key_label(a)));
@@ -194,6 +195,7 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
             (layout.key_label(Action::Dodge), "Dodge"),
             (layout.key_label(Action::Interact), "Talk"),
             (layout.key_label(Action::Pickup), "Pick up loot (hold)"),
+            (layout.key_label(Action::Chat), "Chat"),
         ];
         let h = 22.0 + rows.len() as f32 * 20.0 + 24.0;
         let y0 = gfx::VH - 40.0 - h;

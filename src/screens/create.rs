@@ -37,17 +37,8 @@ pub struct CreateScreen {
 }
 
 pub fn validate_name(name: &str, existing: &[CharacterSave]) -> Result<String, String> {
-    let n = name.trim();
-    let len = n.chars().count();
-    if !(3..=14).contains(&len) {
-        return Err("Name must be 3-14 characters.".into());
-    }
-    if !n.chars().all(|c| c.is_alphanumeric() || c == ' ') {
-        return Err("Use letters, numbers and spaces only.".into());
-    }
-    if n.contains("  ") {
-        return Err("No double spaces, please.".into());
-    }
+    let n = galebound_core::save::validate_name(name)?;
+    let n = n.as_str();
     if existing.iter().any(|c| c.name.eq_ignore_ascii_case(n)) {
         return Err("You already have a character with that name.".into());
     }
@@ -233,13 +224,15 @@ impl CreateScreen {
             match validate_name(&self.name.text, &existing) {
                 Ok(name) => {
                     let c = CharacterSave::new(&name, self.look);
-                    if let Some(acc) = app.account.as_mut() {
-                        acc.characters.push(c);
+                    let msg = galebound_core::net::ClientMsg::CreateChar { save: galebound_core::save::encode_character(&c) };
+                    match app.account_request(msg) {
+                        Ok(()) => {
+                            let mut sel = SelectScreen::new(app);
+                            sel.select_last(app);
+                            return Go::To(Screen::Select(sel));
+                        }
+                        Err(e) => self.error = Some(e),
                     }
-                    app.save_account();
-                    let mut sel = SelectScreen::new(app);
-                    sel.select_last(app);
-                    return Go::To(Screen::Select(sel));
                 }
                 Err(e) => self.error = Some(e),
             }

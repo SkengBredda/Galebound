@@ -6,7 +6,8 @@ use crate::render::{self, Camera};
 use crate::screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen};
 use crate::settings_panel::SettingsPanel;
 use crate::widgets::{self, ButtonStyle, Ui};
-use crate::{App, Go, Screen};
+use crate::{App, Go, Screen, REPLY_WAIT};
+use galebound_core::net::{ClientMsg, ServerMsg};
 use galebound_core::save::MAX_CHARACTERS;
 use galebound_core::world::{self, Theme};
 use macroquad::prelude::{is_key_pressed, KeyCode};
@@ -15,11 +16,18 @@ pub struct SelectScreen {
     selected: usize,
     confirm_delete: bool,
     settings: Option<SettingsPanel>,
+    error: Option<String>,
 }
 
 impl SelectScreen {
     pub fn new(_app: &App) -> Self {
-        SelectScreen { selected: 0, confirm_delete: false, settings: None }
+        SelectScreen { selected: 0, confirm_delete: false, settings: None, error: None }
+    }
+
+    pub fn with_error(app: &App, e: impl Into<String>) -> Self {
+        let mut s = Self::new(app);
+        s.error = Some(e.into());
+        s
     }
 
     pub fn select_slot(&mut self, i: usize) {
@@ -40,6 +48,22 @@ impl SelectScreen {
         let Some(acc) = app.account.as_ref() else {
             return Go::To(Screen::Login(LoginScreen::new(app)));
         };
+        if app.connection_lost() {
+            app.account = None;
+            app.net = None;
+            return Go::To(Screen::Login(LoginScreen::with_error(app, "Lost connection to the server.")));
+        }
+        // Messages that arrive while browsing (e.g. signed in elsewhere).
+        if let Some(n) = app.net.as_mut() {
+            for m in n.poll() {
+                if let galebound_core::net::ServerMsg::Error { text } = m {
+                    app.account = None;
+                    app.net = None;
+                    return Go::To(Screen::Login(LoginScreen::with_error(app, text)));
+                }
+            }
+        }
+        let server = app.net.as_ref().map(|n| n.addr.clone()).unwrap_or_default();
         let chars = acc.characters.clone();
         let email = acc.email.clone();
         if self.selected >= chars.len().max(1) {
@@ -52,7 +76,7 @@ impl SelectScreen {
         }
 
         gfx::text_centered_outlined("Choose Your Character", gfx::VW * 0.5, 34.0, 40.0, rgb(255, 244, 200));
-        gfx::text_centered_outlined(&format!("Signed in as {}", email), gfx::VW * 0.5, 84.0, 17.0, rgb(230, 240, 255));
+        gfx::text_centered_outlined(&format!("Signed in as {}  on  {}", email, server), gfx::VW * 0.5, 84.0, 17.0, rgb(230, 240, 255));
 
         // Slots
         let slot_w = 300.0;
@@ -115,7 +139,15 @@ impl SelectScreen {
             || (ui.enabled && has && is_key_pressed(KeyCode::Enter))
         {
             let idx = self.selected.min(chars.len() - 1);
-            return Go::To(Screen::Play(Box::new(PlayScreen::new(app, idx))));
+            let reply = match app.net.as_mut() {
+                Some(n) => n.request(&ClientMsg::Enter { slot: idx as u32 }, REPLY_WAIT, |m| matches!(m, ServerMsg::Entered { .. })),
+                None => Err("Not connected".into()),
+            };
+            match reply {
+                Ok(ServerMsg::Entered { id }) => return Go::To(Screen::Play(Box::new(PlayScreen::new(app, idx, id)))),
+                Ok(_) => {}
+                Err(e) => self.error = Some(e),
+            }
         }
         if widgets::button(&ui, gfx::VW * 0.5 + 150.0, by + 8.0, 170.0, 42.0, "Delete", ButtonStyle::Danger, has) {
             self.confirm_delete = true;
@@ -125,6 +157,7 @@ impl SelectScreen {
         }
         if widgets::button(&ui, 24.0, gfx::VH - 64.0, 150.0, 40.0, "Log Out", ButtonStyle::Secondary, true) {
             app.account = None;
+            app.net = None;
             return Go::To(Screen::Login(LoginScreen::new(app)));
         }
         if widgets::button(&ui, gfx::VW - 174.0, gfx::VH - 64.0, 150.0, 40.0, "Quit Game", ButtonStyle::Secondary, true) {
@@ -143,12 +176,9 @@ impl SelectScreen {
                 self.confirm_delete = false;
             }
             if widgets::button(&ui, px + pw - 230.0, py + ph - 76.0, 190.0, 46.0, "Delete forever", ButtonStyle::Danger, true) {
-                if let Some(acc) = app.account.as_mut() {
-                    if self.selected < acc.characters.len() {
-                        acc.characters.remove(self.selected);
-                    }
+                if let Err(e) = app.account_request(ClientMsg::DeleteChar { slot: self.selected as u32 }) {
+                    self.error = Some(e);
                 }
-                app.save_account();
                 self.selected = 0;
                 self.confirm_delete = false;
             }
@@ -161,13 +191,13 @@ impl SelectScreen {
                 if let Some(acc) = app.account.as_mut() {
                     acc.settings = settings;
                 }
-                app.save_account();
+                app.save_settings();
             }
             if close {
                 self.settings = None;
             }
         }
-        if let Some(e) = &app.save_error {
+        if let Some(e) = self.error.as_ref().or(app.save_error.as_ref()) {
             gfx::text_centered_outlined(e, gfx::VW * 0.5, gfx::VH - 30.0, 15.0, widgets::danger());
         }
         Go::Stay

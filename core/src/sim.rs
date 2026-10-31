@@ -13,6 +13,7 @@ use crate::pets::{self, PetSave, PetSpecies};
 use crate::quests::{self, Dialog, DialogAction, QuestEvent};
 use crate::save::{CharacterSave, QuestState, Settings};
 use crate::enemies::{self, EnemyKind};
+use crate::net::{self, ClientMsg, DropNet, EnemyNet, PlayerInfo, PlayerPos, ServerMsg};
 use crate::world::{self, Map};
 
 pub const TICK: f32 = 1.0 / 120.0;
@@ -202,6 +203,8 @@ pub struct GroundDrop {
     pub age: f32,
     /// Set once collected: the drop flies to the collector, then disappears.
     pub taken: Option<(Collector, V2, f32)>,
+    /// Online: seconds left waiting for the server to answer a pick-up.
+    pub pending: f32,
 }
 
 impl GroundDrop {
@@ -236,14 +239,28 @@ pub struct PetActor {
     warned_low: bool,
 }
 
-/// Another player in the same map (filled in by the network layer once
-/// multiplayer exists; shown on the minimap).
+/// The network name of a drop's contents.
+pub fn drop_item_key(k: DropKind) -> String {
+    match k {
+        DropKind::Gold => net::GOLD.to_string(),
+        DropKind::Item(id) => id.to_string(),
+    }
+}
+
+/// Another player on your map (online).
 #[derive(Clone, Debug)]
 pub struct OtherPlayer {
+    pub id: u32,
     pub name: String,
-    /// Feet position.
+    /// Feet position where they're drawn (glides toward the latest update).
     pub pos: V2,
     pub dead: bool,
+    pub info: PlayerInfo,
+    /// Their latest reported state.
+    pub st: PlayerPos,
+    pub pet_pos: V2,
+    /// Seconds since we last heard where they are.
+    pub since: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -404,6 +421,14 @@ pub struct Sim {
     pub others: Vec<OtherPlayer>,
     /// The active pet's body in the world.
     pub pet: Option<PetActor>,
+    /// Playing on a server: monsters, loot and other players come from it.
+    pub online: bool,
+    /// Messages for the server, sent by the host after each frame.
+    pub outbox: Vec<ClientMsg>,
+    /// Our player id on the server.
+    pub my_id: u32,
+    /// Chat and server notices (newest last): (from, text, age).
+    pub chat: Vec<(String, String, f32)>,
 }
 
 fn derive_stats(save: &CharacterSave, buffs: &[Buff]) -> Derived {
@@ -519,6 +544,10 @@ impl Sim {
             last_ground: V2::new(sx, sy),
             others: Vec::new(),
             pet: None,
+            online: false,
+            outbox: Vec::new(),
+            my_id: 0,
+            chat: Vec::new(),
         };
         // Logged out as a tombstone? Still one.
         if sim.save.tomb.is_some() {
@@ -552,6 +581,11 @@ impl Sim {
         self.enemies.clear();
         self.projectiles.clear();
         self.zone_timers = vec![0.0; self.map.spawns.len()];
+        if self.online {
+            // the server sends this map's monsters; ask for any quest boss
+            self.maybe_spawn_boss();
+            return;
+        }
         let fixed = self.map.fixed_enemies.clone();
         for (k, x, y) in fixed {
             self.spawn_enemy(k, x, y, None);
@@ -572,7 +606,11 @@ impl Sim {
         for b in bosses {
             let active = self.save.quest(b.quest).map(|q| q.state == QuestState::Active).unwrap_or(false);
             if active && !self.enemies.iter().any(|e| e.kind == b.kind) {
-                self.spawn_enemy(b.kind, b.x, b.y, None);
+                if self.online {
+                    self.outbox.push(ClientMsg::Boss { kind: b.kind.index() });
+                } else {
+                    self.spawn_enemy(b.kind, b.x, b.y, None);
+                }
             }
         }
     }
@@ -620,6 +658,10 @@ impl Sim {
         self.toasts.retain(|t| t.life > 0.0);
         self.shake = (self.shake - dt * 30.0).max(0.0);
 
+        self.update_others(dt);
+        for c in &mut self.chat {
+            c.2 += dt;
+        }
         if input.pressed(Action::QuestLog) && self.dialog.is_none() {
             self.quest_log_open = !self.quest_log_open;
         }
@@ -1253,28 +1295,18 @@ impl Sim {
         let e = &mut self.enemies[i];
         let center = e.body.center();
         let kind = e.kind;
-        let def = kind.def();
-        let weight = def.weight;
         if kind == EnemyKind::TrainingDummy {
             e.wobble = 1.0;
             e.flash = 0.12;
             e.facing = -kb.x.signum();
-        } else {
-            e.hp -= dmg;
+        } else if self.online {
+            // The server owns its HP: show the hit now, report it, and let
+            // the next snapshot carry the result.
             e.flash = 0.12;
-            let frac = (e.hp / e.max_hp).clamp(0.0, 1.0);
-            let scale = (1.0 + 0.6 * (1.0 - frac)) / weight;
-            let boss_armor = def.boss && matches!(e.state, EState::Charge | EState::Stomp);
-            if !boss_armor {
-                e.body.vel = V2::new(kb.x * scale, kb.y * scale);
-                if e.body.vel.y < 0.0 {
-                    e.body.on_ground = false;
-                }
-                e.state = EState::Hitstun;
-                e.state_t = 0.0;
-                e.think = hitstun * if def.boss { 0.4 } else { 1.0 };
-            }
-            e.facing = -kb.x.signum();
+            let id = e.id;
+            self.outbox.push(ClientMsg::Hit { enemy: id, damage: dmg, kbx: kb.x, kby: kb.y, hitstun });
+        } else {
+            enemies::apply_hit(e, dmg, kb, hitstun);
         }
         self.hitstop = if heavy { 0.07 } else { 0.035 };
         self.shake = self.shake.max(if heavy { 5.0 } else { 2.5 });
@@ -1284,7 +1316,7 @@ impl Sim {
         }
         if kind == EnemyKind::TrainingDummy {
             self.quest_event(QuestEvent::DummyHit { heavy });
-        } else if self.enemies[i].hp <= 0.0 {
+        } else if !self.online && self.enemies[i].hp <= 0.0 {
             self.kill_enemy(i);
         }
     }
@@ -1872,6 +1904,15 @@ impl Sim {
         if self.player.state != PState::Normal || !self.player.body.on_ground {
             return;
         }
+        if interact_key {
+            if let Some(o) = self.revivable().map(|i| self.others[i].clone()) {
+                self.outbox.push(ClientMsg::Revive { target: o.id });
+                let c = self.player.body.center();
+                self.burst(o.pos, FxKind::Heal, 24, 200.0);
+                self.float(V2::new(c.x, c.y - 60.0), format!("Reviving {}...", o.name), FloatKind::Heal);
+                return;
+            }
+        }
         if let Some(i) = self.nearest_npc() {
             if interact_key {
                 let npc = self.map.npcs[i].clone();
@@ -2038,6 +2079,246 @@ impl Sim {
                     }
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ online
+
+    /// Switch to playing on a server. Monsters and loot will come from it.
+    pub fn go_online(&mut self, my_id: u32) {
+        self.online = true;
+        self.my_id = my_id;
+        self.enemies.clear();
+        self.drops.clear();
+        self.others.clear();
+        self.populate_map();
+    }
+
+    /// A dead friend close enough to revive (the Interact key).
+    pub fn revivable(&self) -> Option<usize> {
+        if self.player.state == PState::Dead {
+            return None;
+        }
+        let f = self.player.body.feet();
+        self.others.iter().position(|o| o.dead && (o.pos.x - f.x).abs() < 80.0 && (o.pos.y - f.y).abs() < 60.0)
+    }
+
+    fn update_others(&mut self, dt: f32) {
+        let k = 1.0 - (-dt * 15.0).exp();
+        for o in &mut self.others {
+            o.since += dt;
+            let t = V2::new(o.st.x, o.st.y);
+            if (t - o.pos).len() > 400.0 {
+                o.pos = t;
+            } else {
+                o.pos = o.pos + (t - o.pos) * k;
+            }
+            let pt = V2::new(o.st.pet_x, o.st.pet_y);
+            o.pet_pos = if (pt - o.pet_pos).len() > 400.0 { pt } else { o.pet_pos + (pt - o.pet_pos) * k };
+            o.dead = o.st.dead;
+        }
+    }
+
+    /// The server says we (and anyone else who helped) beat a monster.
+    fn net_kill(&mut self, enemy: u32, kind: EnemyKind, exp: u32) {
+        let at = self.enemies.iter().find(|e| e.id == enemy).map(|e| e.body.center()).unwrap_or(self.player.body.center());
+        self.burst(at, FxKind::Spark, 20, 260.0);
+        self.float(V2::new(at.x, at.y - 50.0), format!("+{} EXP", exp), FloatKind::Exp);
+        self.gain_exp(exp);
+        self.quest_event(QuestEvent::Killed(kind));
+        let def = kind.def();
+        if def.boss {
+            self.toast(&format!("{} defeated!", def.name), "Return to turn in your quest.");
+            self.shake = 10.0;
+        }
+        self.wants_save = true;
+    }
+
+    /// Apply one message from the server.
+    pub fn net_apply(&mut self, m: ServerMsg) {
+        match m {
+            ServerMsg::Enemies(list) => self.net_enemies(list),
+            ServerMsg::Shot(s) => {
+                let style = crate::classes::ProjStyle::from_u32(s.style);
+                self.projectiles.push(Projectile {
+                    team: Team::Enemy,
+                    pos: V2::new(s.x, s.y),
+                    vel: V2::new(s.vx, s.vy),
+                    w: s.size,
+                    h: s.size,
+                    gravity: s.gravity,
+                    life: s.life,
+                    max_life: s.life,
+                    pierce: s.pierce,
+                    damage: s.damage,
+                    kb: V2::new(s.kbx, s.kby),
+                    hitstun: 0.3,
+                    style,
+                    hit_ids: vec![],
+                    grounded: s.grounded,
+                    heavy: s.pierce,
+                    crit_bonus: 0.0,
+                    magic: matches!(style, ProjStyle::Orb | ProjStyle::Star | ProjStyle::Bolt),
+                });
+            }
+            ServerMsg::Shake { amount } => {
+                if self.settings.screen_shake {
+                    self.shake = self.shake.max(amount);
+                }
+            }
+            ServerMsg::Kill { enemy, kind, exp } => {
+                if let Some(k) = EnemyKind::from_index(kind) {
+                    self.net_kill(enemy, k, exp);
+                }
+            }
+            ServerMsg::DropAdd(d) => {
+                let kind = if d.item == net::GOLD {
+                    DropKind::Gold
+                } else {
+                    match items::item(&d.item) {
+                        Some(def) => DropKind::Item(def.id),
+                        None => return,
+                    }
+                };
+                if self.drops.iter().any(|x| x.id == d.id) {
+                    return;
+                }
+                let mut body = Body::new(d.x, d.y, 18.0, 18.0);
+                body.vel = V2::new(d.vx, d.vy);
+                self.drops.push(GroundDrop { id: d.id, kind, count: d.count, body, age: 0.0, taken: None, pending: 0.0 });
+            }
+            ServerMsg::DropGone { id, by } => {
+                if let Some(i) = self.drops.iter().position(|d| d.id == id && d.taken.is_none()) {
+                    // someone else took it: it flies to them (or just vanishes)
+                    match self.others.iter().find(|o| o.id == by) {
+                        Some(o) => self.drops[i].taken = Some((Collector::Pet(u32::MAX), V2::new(o.pos.x, o.pos.y - 32.0), 0.0)),
+                        None if by == self.my_id => {}
+                        None => {
+                            self.drops.remove(i);
+                        }
+                    }
+                }
+            }
+            ServerMsg::Granted { drop, item, count } => self.net_granted(drop, &item, count),
+            ServerMsg::PlayerInfo(info) => {
+                if info.id == self.my_id {
+                    return;
+                }
+                match self.others.iter_mut().find(|o| o.id == info.id) {
+                    Some(o) => {
+                        o.name = info.name.clone();
+                        o.info = info;
+                    }
+                    None => self.others.push(OtherPlayer {
+                        id: info.id,
+                        name: info.name.clone(),
+                        pos: V2::ZERO,
+                        dead: false,
+                        info,
+                        st: PlayerPos::default(),
+                        pet_pos: V2::ZERO,
+                        since: 99.0,
+                    }),
+                }
+            }
+            ServerMsg::PlayerPos(p) => {
+                if let Some(o) = self.others.iter_mut().find(|o| o.id == p.id) {
+                    if o.since > 5.0 {
+                        // first update (or after a long gap): appear right there
+                        o.pos = V2::new(p.x, p.y);
+                        o.pet_pos = V2::new(p.pet_x, p.pet_y);
+                    }
+                    o.st = p;
+                    o.since = 0.0;
+                }
+            }
+            ServerMsg::PlayerGone { id } => self.others.retain(|o| o.id != id),
+            ServerMsg::Revived { by } => {
+                self.revive_by_player(&by);
+            }
+            ServerMsg::Chat { from, text } => self.push_chat(&from, &text),
+            ServerMsg::System { text } => self.push_chat("", &text),
+            _ => {}
+        }
+    }
+
+    pub fn push_chat(&mut self, from: &str, text: &str) {
+        self.chat.push((from.to_string(), text.to_string(), 0.0));
+        if self.chat.len() > 60 {
+            self.chat.remove(0);
+        }
+    }
+
+    fn net_enemies(&mut self, list: Vec<EnemyNet>) {
+        self.enemies.retain(|e| list.iter().any(|n| n.id == e.id));
+        for n in list {
+            let (Some(kind), Some(state)) = (EnemyKind::from_index(n.kind), enemies::EState::from_u32(n.state)) else { continue };
+            let i = match self.enemies.iter().position(|e| e.id == n.id) {
+                Some(i) => i,
+                None => {
+                    let mut e = Enemy::new(n.id, kind, 0.0, 0.0, None, &mut self.rng);
+                    e.body.pos = V2::new(n.x, n.y);
+                    self.enemies.push(e);
+                    self.enemies.len() - 1
+                }
+            };
+            let e = &mut self.enemies[i];
+            e.net = Some(V2::new(n.x, n.y));
+            e.body.vel = V2::new(n.vx, n.vy);
+            e.facing = n.facing as f32;
+            if e.state != state || (n.state_t < e.state_t - 0.2) {
+                e.state = state;
+                e.state_t = n.state_t;
+            }
+            e.hp = n.hp;
+            e.max_hp = n.max_hp;
+            e.boss_phase2 = n.phase2;
+        }
+    }
+
+    fn net_granted(&mut self, drop: u32, item: &str, count: u32) {
+        let at = self.drops.iter().find(|d| d.id == drop).map(|d| d.body.center()).unwrap_or(self.player.body.center());
+        if item == net::GOLD {
+            let bonus = self.active_pet().map(|p| p.gold_find()).unwrap_or(0.0);
+            let amount = (count as f32 * (1.0 + bonus)).round() as u32;
+            self.save.gold += amount;
+            self.float(V2::new(at.x, at.y - 30.0), format!("+{} gold", amount), FloatKind::Loot);
+        } else if let Some(def) = items::item(item) {
+            let left = self.save.inventory.add(def.id, count);
+            if left > 0 {
+                // bag filled up meanwhile: put the rest back on the ground
+                self.outbox.push(ClientMsg::DropItem(DropNet { id: 0, item: def.id.to_string(), count: left, x: at.x - 9.0, y: at.y - 9.0, vx: 0.0, vy: -200.0 }));
+            }
+            let got = count - left;
+            if got > 0 {
+                let label = if got > 1 { format!("+{}x {}", got, def.name) } else { format!("+ {}", def.name) };
+                self.float(V2::new(at.x, at.y - 30.0), label, FloatKind::Loot);
+            }
+        }
+        // fly to whoever picked it up: the pet if it went for it, else you
+        let pet_at = self.pet.as_ref().filter(|a| a.target == Some(drop)).map(|a| V2::new(a.pos.x, a.pos.y - 14.0));
+        if let Some(d) = self.drops.iter_mut().find(|d| d.id == drop) {
+            d.taken = Some(match pet_at {
+                Some(p) => (Collector::Pet(0), p, 0.0),
+                None => (Collector::Player, self.player.body.center(), 0.0),
+            });
+        }
+        self.wants_save = true;
+    }
+
+    /// What others see of us (sent when it changes).
+    pub fn my_info(&self, look: &str) -> PlayerInfo {
+        let pet = self.active_pet();
+        PlayerInfo {
+            id: self.my_id,
+            name: self.save.name.clone(),
+            look: look.to_string(),
+            weapon: self.save.inventory.equip[EquipSlot::Weapon.index()].clone().unwrap_or_default(),
+            level: self.save.level,
+            class: self.save.class.key().to_string(),
+            pet: pet.map(|p| p.species.key().to_string()).unwrap_or_default(),
+            pet_name: pet.map(|p| p.name.clone()).unwrap_or_default(),
+            pet_level: pet.map(|p| p.level).unwrap_or(0),
         }
     }
 
@@ -2238,11 +2519,16 @@ impl Sim {
 
     /// Toss a drop into the world from `at`.
     pub fn spawn_drop(&mut self, kind: DropKind, count: u32, at: V2, spread: f32) {
+        if self.online {
+            let vx = self.rng.range(-1.0, 1.0) * spread;
+            self.outbox.push(ClientMsg::DropItem(DropNet { id: 0, item: drop_item_key(kind), count, x: at.x - 9.0, y: at.y - 9.0, vx, vy: -360.0 }));
+            return;
+        }
         let id = self.next_id;
         self.next_id += 1;
         let mut body = Body::new(at.x - 9.0, at.y - 9.0, 18.0, 18.0);
         body.vel = V2::new(self.rng.range(-1.0, 1.0) * spread, self.rng.range(-430.0, -300.0));
-        self.drops.push(GroundDrop { id, kind, count, body, age: 0.0, taken: None });
+        self.drops.push(GroundDrop { id, kind, count, body, age: 0.0, taken: None, pending: 0.0 });
     }
 
     fn update_drops(&mut self, dt: f32) {
@@ -2265,6 +2551,7 @@ impl Sim {
                 d.body.pos = V2::new(n.x - d.body.w * 0.5, n.y - d.body.h * 0.5);
                 continue;
             }
+            d.pending = (d.pending - dt).max(0.0);
             physics::apply_gravity(&mut d.body, dt, false, 1.0);
             physics::move_and_collide(&mut d.body, &lvl, dt);
             if d.body.on_ground {
@@ -2272,9 +2559,11 @@ impl Sim {
             }
         }
         let kill_y = self.map.kill_y;
+        let online = self.online;
         self.drops.retain(|d| match d.taken {
             Some((_, _, t)) => t < COLLECT_FLY,
-            None => d.age < DROP_LIFE && d.body.pos.y < kill_y,
+            // online, the server says when loot expires
+            None => online || (d.age < DROP_LIFE && d.body.pos.y < kill_y),
         });
     }
 
@@ -2282,7 +2571,7 @@ impl Sim {
     pub fn drop_near(&self, pos: V2, reach: f32) -> Option<usize> {
         let mut best: Option<(usize, f32)> = None;
         for (i, d) in self.drops.iter().enumerate() {
-            if d.taken.is_some() || d.age < 0.25 {
+            if d.taken.is_some() || d.age < 0.25 || d.pending > 0.0 {
                 continue;
             }
             let c = d.body.center();
@@ -2327,6 +2616,18 @@ impl Sim {
     /// Move a drop into the bag (or gold purse) and start its fly-in.
     fn collect(&mut self, i: usize, who: Collector, to: V2) -> Result<(), String> {
         let d = self.drops[i].clone();
+        if self.online {
+            // Ask the server; whoever asks first gets it.
+            if let DropKind::Item(id) = d.kind {
+                if !self.save.inventory.room_for(id, 1) {
+                    return Err("Your bag is full".into());
+                }
+            }
+            self.drops[i].pending = 2.0;
+            self.outbox.push(ClientMsg::PickUp { drop: d.id, pet: matches!(who, Collector::Pet(_)) });
+            let _ = to;
+            return Ok(());
+        }
         let at = d.body.center();
         match d.kind {
             DropKind::Gold => {
@@ -2370,11 +2671,16 @@ impl Sim {
         }
         let (_, taken) = self.save.inventory.take_slot(idx, n).ok_or("No item")?;
         let c = self.player.body.center();
+        if self.online {
+            self.outbox.push(ClientMsg::DropItem(DropNet { id: 0, item: def.id.to_string(), count: taken, x: c.x - 9.0, y: c.y - 9.0, vx: self.player.facing * 150.0, vy: -320.0 }));
+            self.wants_save = true;
+            return Ok(());
+        }
         let id = self.next_id;
         self.next_id += 1;
         let mut body = Body::new(c.x - 9.0, c.y - 9.0, 18.0, 18.0);
         body.vel = V2::new(self.player.facing * 150.0, -320.0);
-        self.drops.push(GroundDrop { id, kind: DropKind::Item(def.id), count: taken, body, age: 0.0, taken: None });
+        self.drops.push(GroundDrop { id, kind: DropKind::Item(def.id), count: taken, body, age: 0.0, taken: None, pending: 0.0 });
         self.wants_save = true;
         Ok(())
     }
@@ -2469,6 +2775,21 @@ impl Sim {
     // ------------------------------------------------------------------ enemies
 
     fn update_enemies(&mut self, dt: f32) {
+        if self.online {
+            // Glide toward the server's positions between snapshots.
+            let k = 1.0 - (-dt * 14.0).exp();
+            for e in &mut self.enemies {
+                e.state_t += dt;
+                e.flash = (e.flash - dt).max(0.0);
+                e.wobble = (e.wobble - dt * 2.5).max(0.0);
+                if let Some(t) = e.net {
+                    let t = t + e.body.vel * dt;
+                    e.net = Some(t);
+                    e.body.pos = e.body.pos + (t - e.body.pos) * k;
+                }
+            }
+            return;
+        }
         let solids = self.solids_with_gates();
         let lvl = Level { solids: &solids, platforms: &self.map.platforms, bounds: self.map.bounds() };
         let ctx = enemies::Ctx { level: &lvl, player: self.player.body.center(), player_alive: self.player.state != PState::Dead, dt };
@@ -2521,6 +2842,9 @@ impl Sim {
     }
 
     fn update_spawns(&mut self, dt: f32) {
+        if self.online {
+            return;
+        }
         for zi in 0..self.map.spawns.len() {
             if self.zone_timers[zi] > 0.0 {
                 self.zone_timers[zi] -= dt;
@@ -3570,6 +3894,121 @@ mod tests {
         s.spawn_drop(DropKind::Gold, 100, c, 0.0);
         run(&mut s, 3.0, InputState::default());
         assert_eq!(s.save.gold, 110);
+    }
+
+    fn online_sim() -> Sim {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.change_map("dawnwind_glade", 3700.0);
+        s.go_online(7);
+        run(&mut s, 0.5, InputState::default());
+        s.outbox.clear();
+        s
+    }
+
+    fn enemy_net(id: u32, kind: EnemyKind, x: f32, y: f32, hp: f32) -> EnemyNet {
+        EnemyNet { id, kind: kind.index(), x, y, vx: 0.0, vy: 0.0, facing: -1, state: 0, state_t: 0.0, hp, max_hp: 50.0, phase2: false }
+    }
+
+    #[test]
+    fn online_monsters_come_from_the_server() {
+        let mut s = online_sim();
+        assert!(s.enemies.is_empty(), "no local monsters online");
+        let f = s.player.body.feet();
+        let ey = f.y - EnemyKind::Mossling.def().h;
+        s.net_apply(ServerMsg::Enemies(vec![enemy_net(500, EnemyKind::Mossling, f.x + 30.0, ey, 50.0)]));
+        assert_eq!(s.enemies.len(), 1);
+        // Our hits are reported, not applied: the server owns their HP.
+        s.player.facing = 1.0;
+        s.player.invuln = 99.0;
+        run(&mut s, 0.02, press(&[Action::Light], &[]));
+        run(&mut s, 0.6, InputState::default());
+        let hit = s.outbox.iter().find_map(|m| if let ClientMsg::Hit { enemy, damage, .. } = m { Some((*enemy, *damage)) } else { None });
+        assert!(matches!(hit, Some((500, d)) if d > 0.0), "hit reported: {:?}", s.outbox);
+        assert_eq!(s.enemies[0].hp, 50.0, "HP unchanged until the server says so");
+        // Snapshots move it smoothly and update its HP.
+        s.net_apply(ServerMsg::Enemies(vec![enemy_net(500, EnemyKind::Mossling, f.x + 90.0, ey, 20.0)]));
+        run(&mut s, 0.5, InputState::default());
+        assert!((s.enemies[0].body.pos.x - (f.x + 90.0)).abs() < 3.0);
+        assert_eq!(s.enemies[0].hp, 20.0);
+        // The kill comes from the server, with EXP and quest credit.
+        quests::accept(&mut s.save, "mossling_trouble");
+        let exp = s.save.exp;
+        s.net_apply(ServerMsg::Kill { enemy: 500, kind: EnemyKind::Mossling.index(), exp: 9 });
+        assert_eq!(s.save.exp, exp + 9);
+        assert_eq!(s.save.quest("mossling_trouble").unwrap().progress, 1);
+        // Gone from the next snapshot = gone here.
+        s.net_apply(ServerMsg::Enemies(vec![]));
+        assert!(s.enemies.is_empty());
+        // Monster shots arrive and can hurt us.
+        s.player.invuln = 0.0;
+        s.player.state = PState::Normal;
+        let hp = s.player.hp;
+        let c = s.player.body.center();
+        s.net_apply(ServerMsg::Shot(net::ShotNet { x: c.x - 60.0, y: c.y, vx: 600.0, vy: 0.0, size: 14.0, gravity: 0.0, life: 2.0, pierce: false, damage: 20.0, kbx: 200.0, kby: -100.0, style: 2, grounded: false }));
+        run(&mut s, 0.3, InputState::default());
+        assert!(s.player.hp < hp, "shot hit");
+    }
+
+    #[test]
+    fn online_loot_is_claimed_through_the_server() {
+        let mut s = online_sim();
+        let c = s.player.body.center();
+        s.net_apply(ServerMsg::DropAdd(DropNet { id: 900, item: "moss_clump".into(), count: 2, x: c.x + 20.0, y: c.y, vx: 0.0, vy: -100.0 }));
+        s.net_apply(ServerMsg::DropAdd(DropNet { id: 901, item: net::GOLD.into(), count: 30, x: c.x + 40.0, y: c.y, vx: 0.0, vy: -100.0 }));
+        run(&mut s, 1.0, InputState::default());
+        assert_eq!(s.drops.len(), 2, "drops fall onto the ground here too");
+        run(&mut s, 0.02, press(&[Action::Pickup], &[]));
+        let asked: Vec<u32> = s.outbox.iter().filter_map(|m| if let ClientMsg::PickUp { drop, .. } = m { Some(*drop) } else { None }).collect();
+        assert_eq!(asked.len(), 1);
+        assert_eq!(s.save.inventory.count("moss_clump") + s.save.gold, 0, "nothing until the server agrees");
+        s.net_apply(ServerMsg::Granted { drop: 900, item: "moss_clump".into(), count: 2 });
+        assert_eq!(s.save.inventory.count("moss_clump"), 2);
+        // Someone else takes the gold.
+        s.net_apply(ServerMsg::DropGone { id: 901, by: 3 });
+        run(&mut s, 0.5, InputState::default());
+        assert!(s.drops.is_empty());
+        assert_eq!(s.save.gold, 0);
+        // Dropping an item sends it to the server for everyone to see.
+        s.outbox.clear();
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "moss_clump").unwrap();
+        s.drop_item(i, 1).unwrap();
+        assert!(s.outbox.iter().any(|m| matches!(m, ClientMsg::DropItem(d) if d.item == "moss_clump" && d.count == 1)));
+        assert!(s.drops.is_empty(), "it appears when the server confirms");
+    }
+
+    #[test]
+    fn online_players_and_revives() {
+        let mut s = online_sim();
+        let f = s.player.body.feet();
+        s.net_apply(ServerMsg::PlayerInfo(PlayerInfo { id: 3, name: "Friend".into(), level: 9, ..Default::default() }));
+        s.net_apply(ServerMsg::PlayerPos(PlayerPos { id: 3, x: f.x + 40.0, y: f.y, dead: true, ..Default::default() }));
+        run(&mut s, 0.2, InputState::default());
+        assert_eq!(s.others.len(), 1);
+        assert!(s.others[0].dead);
+        assert_eq!(s.revivable(), Some(0));
+        run(&mut s, 0.02, press(&[Action::Interact], &[]));
+        assert!(s.outbox.iter().any(|m| *m == ClientMsg::Revive { target: 3 }));
+        // We fall; a friend revives us (keeping the EXP loss).
+        s.save.level = 12;
+        s.save.exp = 1000;
+        s.player.invuln = 0.0;
+        s.player.state = PState::Normal;
+        s.hurt_player(99999.0, 0.0, V2::ZERO, false);
+        assert_eq!(s.save.exp, 970);
+        s.net_apply(ServerMsg::Revived { by: "Friend".into() });
+        assert_ne!(s.player.state, PState::Dead);
+        assert_eq!(s.save.exp, 970);
+        // Chat and leaving.
+        s.net_apply(ServerMsg::Chat { from: "Friend".into(), text: "welcome back".into() });
+        assert_eq!(s.chat.last().unwrap().1, "welcome back");
+        s.net_apply(ServerMsg::PlayerGone { id: 3 });
+        assert!(s.others.is_empty());
+        // Quest bosses are requested from the server instead of spawned.
+        s.outbox.clear();
+        quests::accept(&mut s.save, "the_bramblehorn");
+        s.change_map("dawnwind_glade", 5000.0);
+        assert!(s.outbox.iter().any(|m| *m == ClientMsg::Boss { kind: EnemyKind::Bramblehorn.index() }));
+        assert!(s.enemies.is_empty());
     }
 
     #[test]

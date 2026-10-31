@@ -978,3 +978,60 @@ pub fn pet_label(sim: &Sim, cam: &Camera, time: f32) {
         gfx::text_centered_outlined("Hungry!", a.pos.x, top - u(11.0), 16.0, alpha(rgb(255, 170, 120), pulse));
     }
 }
+
+/// Other players on this map: their character, tombstone and pet.
+pub fn others(sim: &Sim, cam: &Camera, time: f32) {
+    gfx::set_cam(cam.x, cam.y);
+    for o in &sim.others {
+        if o.since > 10.0 || o.pos.x < cam.x - 120.0 || o.pos.x > cam.x + gfx::VIEW_W + 120.0 {
+            continue;
+        }
+        let f = o.pos;
+        // their pet first, so it's behind them
+        if o.st.pet_on {
+            if let Some(sp) = galebound_core::pets::PetSpecies::from_key(&o.info.pet) {
+                let frame = (o.st.pet_frame % 2) as u8;
+                let tex = sprites::get(&format!("pet_{}_{}", sp.key(), frame), || crate::petart::pet(sp, frame));
+                let lift = if sp.flies() { u(16.0) + ((time * 3.0).sin() * 2.0).round() * u(1.0) } else { 0.0 };
+                gfx::ellipse(o.pet_pos.x, o.pet_pos.y - u(1.0), u(7.0), u(2.0), 0.0, rgba(0, 0, 0, 60));
+                sprite_at(&tex, o.pet_pos.x, o.pet_pos.y - lift, o.st.pet_facing < 0, WHITE);
+            }
+        }
+        if o.dead {
+            let tex = sprites::get("tombstone", crate::lootart::tombstone);
+            char_shadow(f.x, f.y, 1.0);
+            sprite_at(&tex, f.x, f.y, false, WHITE);
+            continue;
+        }
+        let look = Appearance::decode(&o.info.look).unwrap_or_default();
+        let weapon = if o.info.weapon.is_empty() { None } else { galebound_core::items::weapon_art(&o.info.weapon) };
+        let anim = crate::online::anim_from_code(o.st.anim);
+        let frame = (o.st.frame as u8).min(anim.frames().saturating_sub(1));
+        let weapon = if anim == Anim::Climb { None } else { weapon };
+        let tex = sprites::character(&look, weapon, anim, frame);
+        char_shadow(f.x, f.y, 1.0);
+        draw_char(&tex, f.x, f.y, o.st.facing < 0, WHITE);
+    }
+}
+
+/// Names, HP bars and the revive prompt for other players (drawn on top).
+pub fn other_labels(sim: &Sim, cam: &Camera) {
+    gfx::set_cam(cam.x, cam.y);
+    let revive = sim.revivable();
+    for (i, o) in sim.others.iter().enumerate() {
+        if o.since > 10.0 || o.pos.x < cam.x - 120.0 || o.pos.x > cam.x + gfx::VIEW_W + 120.0 {
+            continue;
+        }
+        let f = o.pos;
+        name_tag(f.x, f.y, &format!("{}  Lv.{}", o.name, o.info.level), None, rgb(150, 210, 255));
+        if !o.dead && o.st.hp < 0.999 {
+            let (w, y) = (u(28.0), f.y - u(70.0));
+            gfx::rect(f.x - w * 0.5, y, w, u(3.0), rgba(20, 16, 30, 200));
+            gfx::rect(f.x - w * 0.5, y, w * o.st.hp.clamp(0.0, 1.0), u(3.0), rgb(226, 72, 80));
+        }
+        if revive == Some(i) && sim.dialog.is_none() {
+            let key = sim.settings.layout.key_label(galebound_core::input::Action::Interact);
+            gfx::text_centered_outlined(&format!("[{}] Revive {}", key, o.name), f.x, f.y - u(46.0), 16.0, rgb(140, 255, 170));
+        }
+    }
+}

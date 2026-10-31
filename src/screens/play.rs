@@ -9,14 +9,21 @@ use crate::screens::{login::LoginScreen, select::SelectScreen};
 use crate::settings_panel::SettingsPanel;
 use crate::widgets::{self, Ui};
 use crate::windows::{self, Windows};
-use crate::{App, Go, Screen};
+use crate::{App, Go, Screen, REPLY_WAIT};
 use galebound_core::appearance::Appearance;
+use galebound_core::net::{self, ClientMsg, PlayerInfo, PlayerPos, ServerMsg};
 use galebound_core::input::Action;
 use galebound_core::save::DISPLAY_MODES;
 use galebound_core::sim::{PState, Sim, TICK, TOMB_DELAY};
 use macroquad::prelude::{get_frame_time, is_key_pressed, KeyCode};
 
 const AUTOSAVE_SECS: f32 = 30.0;
+/// Online saves are at most this often (loot pick-ups ask for a save each).
+const SAVE_GAP: f32 = 3.0;
+/// Position updates per second.
+const POS_HZ: f32 = 15.0;
+/// Chat lines fade after this many seconds (unless the chat box is open).
+const CHAT_FADE: f32 = 12.0;
 const MAX_TICKS_PER_FRAME: u32 = 12;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -59,15 +66,29 @@ pub struct PlayScreen {
     windows: Windows,
     menu_anim: f32,
     menu_sel: usize,
+    /// Typing a chat message.
+    chat_open: bool,
+    chat_text: String,
+    pos_t: f32,
+    ping_t: f32,
+    since_save: f32,
+    last_info: Option<PlayerInfo>,
 }
 
 impl PlayScreen {
-    pub fn new(app: &App, slot: usize) -> Self {
+    /// Enter the world as `slot`, playing on the server as player `my_id`.
+    pub fn new(app: &App, slot: usize, my_id: u32) -> Self {
         let acc = app.account.as_ref().expect("logged in");
         let save = acc.characters[slot].clone();
         let look = save.look;
         let seed = (app.time * 1_000_003.0) as u64 ^ 0xA5A5;
-        let sim = Sim::new(save, acc.settings.clone(), seed);
+        let mut sim = Sim::new(save, acc.settings.clone(), seed);
+        sim.go_online(my_id);
+        if let Some(n) = &app.net {
+            if !n.motd.is_empty() {
+                sim.push_chat("", &n.motd);
+            }
+        }
         crate::display::apply(acc.settings.display);
         let mut cam = Camera { x: 0.0, y: 0.0 };
         cam.snap(&sim);
@@ -87,6 +108,12 @@ impl PlayScreen {
             windows: Windows::default(),
             menu_anim: 0.0,
             menu_sel: 0,
+            chat_open: false,
+            chat_text: String::new(),
+            pos_t: 0.0,
+            ping_t: 0.0,
+            since_save: 0.0,
+            last_info: None,
         }
     }
 
@@ -113,25 +140,173 @@ impl PlayScreen {
         &mut self.windows
     }
 
-    /// Write the character back into the account and to disk.
+    /// Send the character's progress (and settings) to the server.
     pub fn save_now(&mut self, app: &mut App) {
         let snap = self.sim.snapshot();
+        if let Some(n) = &app.net {
+            n.send(&ClientMsg::Save { save: galebound_core::save::encode_character(&snap) });
+        }
         if let Some(acc) = app.account.as_mut() {
             if self.slot < acc.characters.len() {
                 acc.characters[self.slot] = snap;
             }
             acc.settings = self.sim.settings.clone();
         }
-        app.save_account();
+        app.save_settings();
         self.sim.wants_save = false;
         self.autosave = AUTOSAVE_SECS;
+        self.since_save = 0.0;
         self.saved_flash = 1.5;
+    }
+
+    /// Messages from the server. Returns where to go if we lost it.
+    fn network_in(&mut self, app: &mut App) -> Option<Go> {
+        let Some(n) = app.net.as_mut() else {
+            return Some(Go::To(Screen::Login(LoginScreen::with_error(app, "Not connected to a server."))));
+        };
+        for m in n.poll() {
+            match m {
+                // kicked: signed in elsewhere, or the server is shutting down
+                ServerMsg::Error { text } if text.contains("another computer") || text.contains("shutting down") => {
+                    app.net = None;
+                    app.account = None;
+                    return Some(Go::To(Screen::Login(LoginScreen::with_error(app, text))));
+                }
+                ServerMsg::Error { text } => self.sim.push_chat("", &text),
+                m => self.sim.net_apply(m),
+            }
+        }
+        if n.is_closed() {
+            app.net = None;
+            app.account = None;
+            return Some(Go::To(Screen::Login(LoginScreen::with_error(app, "Lost connection to the server. Your progress up to the last save is safe."))));
+        }
+        None
+    }
+
+    /// Tell the server what we did and where we are.
+    fn network_out(&mut self, app: &mut App, dt: f32) {
+        let Some(n) = app.net.as_ref() else { return };
+        for m in self.sim.outbox.drain(..) {
+            n.send(&m);
+        }
+        let info = self.sim.my_info(&self.look.encode());
+        if self.last_info.as_ref() != Some(&info) {
+            n.send(&ClientMsg::Info(info.clone()));
+            self.last_info = Some(info);
+        }
+        self.pos_t -= dt;
+        if self.pos_t <= 0.0 {
+            self.pos_t = 1.0 / POS_HZ;
+            let p = &self.sim.player;
+            let (anim, frame) = render::player_anim(p);
+            let f = p.body.feet();
+            let mut pos = PlayerPos {
+                id: self.sim.my_id,
+                x: f.x,
+                y: f.y,
+                facing: if p.facing < 0.0 { -1 } else { 1 },
+                anim: crate::online::anim_code(anim),
+                frame: frame as u32,
+                hp: (p.hp / p.max_hp).clamp(0.0, 1.0),
+                dead: p.state == PState::Dead,
+                ..Default::default()
+            };
+            if let Some(a) = &self.sim.pet {
+                pos.pet_on = true;
+                pos.pet_x = a.pos.x;
+                pos.pet_y = a.pos.y;
+                pos.pet_facing = if a.facing < 0.0 { -1 } else { 1 };
+                pos.pet_frame = if a.moving { ((a.anim_t * 10.0) as u32) % 2 } else { 0 };
+            }
+            n.send(&ClientMsg::Pos { map: self.sim.map.key.to_string(), pos });
+        }
+        self.ping_t -= dt;
+        if self.ping_t <= 0.0 {
+            self.ping_t = 3.0;
+            n.send(&ClientMsg::Ping { t: app.time });
+        }
+    }
+
+    /// Typing in the chat box: Enter sends, Esc cancels. Returns true when
+    /// it used this frame's keys (so they don't also open menus).
+    fn chat_input(&mut self, app: &App) -> bool {
+        while let Some(c) = macroquad::prelude::get_char_pressed() {
+            if self.chat_open && !c.is_control() && self.chat_text.chars().count() < net::CHAT_MAX {
+                self.chat_text.push(c);
+            }
+        }
+        if !self.chat_open {
+            return false;
+        }
+        if is_key_pressed(KeyCode::Backspace) {
+            self.chat_text.pop();
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            self.chat_open = false;
+            self.chat_text.clear();
+            self.input.consumed();
+        } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+            let t = self.chat_text.trim().to_string();
+            if !t.is_empty() {
+                if let Some(n) = &app.net {
+                    n.send(&ClientMsg::Chat { text: t });
+                }
+            }
+            self.chat_open = false;
+            self.chat_text.clear();
+            self.input.consumed();
+        }
+        true
+    }
+
+    /// Recent chat (bottom-left), and the text box while typing.
+    fn draw_chat(&self) {
+        let (x, w) = (14.0, 520.0);
+        let bottom = if self.chat_open { gfx::VH - 120.0 } else { gfx::VH - 262.0 };
+        let lines: Vec<&(String, String, f32)> = self.sim.chat.iter().rev().filter(|c| self.chat_open || c.2 < CHAT_FADE).take(if self.chat_open { 12 } else { 6 }).collect();
+        if self.chat_open {
+            gfx::rrect(x, bottom - lines.len() as f32 * 22.0 - 10.0, w, lines.len() as f32 * 22.0 + 10.0, 6.0, rgba(14, 16, 30, 170));
+        }
+        for (i, (from, text, age)) in lines.iter().enumerate() {
+            let a = if self.chat_open { 1.0 } else { ((CHAT_FADE - age) / 2.0).clamp(0.0, 1.0) };
+            let y = bottom - (i + 1) as f32 * 22.0;
+            let col = if from.is_empty() { rgb(255, 220, 130) } else { rgb(240, 244, 255) };
+            let line = if from.is_empty() { text.clone() } else { format!("{}: {}", from, text) };
+            let line = gfx::wrap(&line, w - 16.0, 14.0).into_iter().next().unwrap_or_default();
+            gfx::text_outlined(&line, x + 8.0, y, 14.0, gfx::alpha(col, a));
+        }
+        if self.chat_open {
+            let y = gfx::VH - 112.0;
+            gfx::rrect(x, y, w, 30.0, 6.0, rgba(14, 16, 30, 220));
+            gfx::rect_lines(x + 1.0, y + 1.0, w - 2.0, 28.0, 1.0, rgba(120, 220, 255, 160));
+            let caret = if (self.sim.time * 2.0) as i32 % 2 == 0 { "_" } else { "" };
+            gfx::text(&format!("> {}{}", self.chat_text, caret), x + 10.0, y + 7.0, 14.0, rgb(255, 255, 255));
+            gfx::text_outlined("Enter: send   Esc: cancel", x + w - 200.0, y - 20.0, 12.0, rgb(190, 200, 220));
+        }
     }
 
     pub fn frame(&mut self, app: &mut App) -> Go {
         let dt = get_frame_time().min(0.1);
         let layout = self.sim.settings.layout;
+        if let Some(go) = self.network_in(app) {
+            return go;
+        }
+        let typed = self.chat_input(app);
         self.input.poll(layout);
+        if typed && !self.chat_open {
+            // the Enter / Esc that closed the chat box does nothing else
+            self.input.consumed();
+        } else if self.chat_open {
+            // typing: the keys spell words, they don't move you
+            self.input.consumed();
+            self.input = InputCollector::default();
+        } else if self.menu == Menu::Closed && self.sim.dialog.is_none() && self.input.pressed(Action::Chat) {
+            self.chat_open = true;
+            self.chat_text.clear();
+            self.input.consumed();
+            while macroquad::prelude::get_char_pressed().is_some() {}
+        }
 
         if is_key_pressed(KeyCode::F1) {
             self.show_controls = !self.show_controls;
@@ -197,9 +372,11 @@ impl PlayScreen {
             }
             self.cam.follow(&self.sim, dt);
             self.autosave -= dt;
-            if self.sim.wants_save || self.autosave <= 0.0 {
+            self.since_save += dt;
+            if (self.sim.wants_save && self.since_save > SAVE_GAP) || self.autosave <= 0.0 {
                 self.save_now(app);
             }
+            self.network_out(app, dt);
             if menu_open {
                 self.input.consumed();
             }
@@ -222,6 +399,7 @@ impl PlayScreen {
         render::npcs(&self.sim, &cam, time);
         render::drops(&self.sim, &cam, time);
         render::pet(&self.sim, &cam, time);
+        render::others(&self.sim, &cam, time);
         render::enemies(&self.sim, &cam);
         render::player(&self.sim, &cam, &self.look);
         render::tufts(&self.sim, &cam);
@@ -231,7 +409,9 @@ impl PlayScreen {
         render::lighting(&self.sim, &cam, time);
         render::drop_labels(&self.sim, &cam);
         render::pet_label(&self.sim, &cam, time);
-        hud::draw(&self.sim, self.show_controls && !self.windows.any_open(&self.sim), time);
+        render::other_labels(&self.sim, &cam);
+        hud::draw(&self.sim, self.show_controls && !self.chat_open && !self.windows.any_open(&self.sim), time);
+        self.draw_chat();
         {
             let ui = Ui { enabled: self.menu == Menu::Closed, ..Ui::begin() };
             let act = crate::minimap::frame(&self.sim, &ui);
@@ -375,12 +555,19 @@ impl PlayScreen {
             Some(MenuItem::Graphics) => self.menu = Menu::Graphics,
             Some(MenuItem::Select) => {
                 self.save_now(app);
+                if let Some(n) = app.net.as_mut() {
+                    let _ = n.request(&ClientMsg::Leave, REPLY_WAIT, |m| matches!(m, ServerMsg::Left));
+                }
                 let mut s = SelectScreen::new(app);
                 s.select_slot(self.slot);
                 return Go::To(Screen::Select(s));
             }
             Some(MenuItem::Logout) => {
                 self.save_now(app);
+                if let Some(n) = app.net.as_mut() {
+                    let _ = n.request(&ClientMsg::Leave, REPLY_WAIT, |m| matches!(m, ServerMsg::Left));
+                }
+                app.net = None;
                 app.account = None;
                 return Go::To(Screen::Login(LoginScreen::new(app)));
             }
@@ -460,7 +647,7 @@ impl PlayScreen {
         let scroll = widgets::button(&ui, x + w - 30.0 - bw, by, bw, 46.0, &label, widgets::ButtonStyle::Secondary, scrolls > 0);
         gfx::text_centered("Respawn: back to the last checkpoint.", x + w * 0.5, y + h - 50.0, 12.0, rgb(190, 180, 200));
         gfx::text_centered("Other players can also revive you.", x + w * 0.5, y + h - 30.0, 12.0, rgb(190, 180, 200));
-        if respawn || is_key_pressed(KeyCode::Enter) {
+        if respawn {
             self.sim.respawn();
         } else if scroll {
             if let Err(e) = self.sim.revive_with_scroll() {

@@ -4,8 +4,12 @@ use crate::gfx::{self, rgb, rgba};
 use crate::render::{self, Camera};
 use crate::screens::select::SelectScreen;
 use crate::widgets::{self, ButtonStyle, TextField, Ui};
-use crate::{App, Go, Screen};
-use galebound_core::auth::{self, Remembered};
+use crate::online::{self, Remembered};
+use crate::{App, Go, Screen, REPLY_WAIT};
+use galebound_core::auth;
+use galebound_core::net::{self, ClientMsg, NetClient, ServerMsg};
+use galebound_core::save;
+use std::time::Duration;
 use galebound_core::world::Theme;
 use macroquad::prelude::{is_key_down, is_key_pressed, KeyCode};
 
@@ -20,6 +24,7 @@ enum Focus {
     Email,
     Password,
     Confirm,
+    Server,
 }
 
 /// Work that runs one frame after the button press, so the "Signing in..."
@@ -45,14 +50,20 @@ pub struct LoginScreen {
     pending: Pending,
     pending_frames: u8,
     remembered: Option<Remembered>,
+    /// Address of the server to sign in to.
+    server: TextField,
 }
 
 impl LoginScreen {
     pub fn new(app: &App) -> Self {
-        let remembered = app.store.remembered();
+        let _ = app;
+        let remembered = online::remembered();
         let mut email = TextField::new("you@example.com", false, 254);
+        let mut server = TextField::new("localhost", false, 120);
+        server.text = online::last_server();
         if let Some(r) = &remembered {
             email.text = r.email.clone();
+            server.text = r.server.clone();
         }
         LoginScreen {
             mode: Mode::Login,
@@ -67,7 +78,15 @@ impl LoginScreen {
             pending: Pending::None,
             pending_frames: 0,
             remembered,
+            server,
         }
+    }
+
+    /// Back at the login screen with an explanation (lost connection, kicked...).
+    pub fn with_error(app: &App, e: impl Into<String>) -> Self {
+        let mut s = Self::new(app);
+        s.error = Some(e.into());
+        s
     }
 
     fn focused_field(&mut self) -> &mut TextField {
@@ -75,6 +94,7 @@ impl LoginScreen {
             Focus::Email => &mut self.email,
             Focus::Password => &mut self.password,
             Focus::Confirm => &mut self.confirm,
+            Focus::Server => &mut self.server,
         }
     }
 
@@ -87,38 +107,73 @@ impl LoginScreen {
     fn run_pending(&mut self, app: &mut App) -> Go {
         let p = self.pending;
         self.pending = Pending::None;
-        let result = match p {
-            Pending::Login => app.store.login(&self.email.text, &self.password.text),
-            Pending::Register => app.store.register(&self.email.text, &self.password.text, &self.confirm.text),
+        let server = match p {
+            Pending::Remembered => self.remembered.as_ref().map(|r| r.server.clone()).unwrap_or_default(),
+            _ => self.server.text.trim().to_string(),
+        };
+        if server.is_empty() {
+            self.error = Some("Enter the server address (localhost if the server runs on this PC).".into());
+            return Go::Stay;
+        }
+        // (Re)connect if needed.
+        let want = net::with_port(&server);
+        if app.net.as_ref().map(|n| n.is_closed() || n.addr != want).unwrap_or(true) {
+            app.net = None;
+            match NetClient::connect(&server, Duration::from_secs(5)) {
+                Ok(n) => app.net = Some(n),
+                Err(e) => {
+                    self.error = Some(e);
+                    return Go::Stay;
+                }
+            }
+        }
+        online::set_last_server(&server);
+        let email = self.email.text.trim().to_string();
+        let msg = match p {
+            Pending::Login => ClientMsg::Login { email: email.clone(), password: self.password.text.clone(), remember: self.remember },
+            Pending::Register => ClientMsg::Register { email: email.clone(), password: self.password.text.clone(), confirm: self.confirm.text.clone() },
             Pending::Remembered => match &self.remembered {
-                Some(r) => app.store.login_remembered(r),
+                Some(r) => ClientMsg::LoginToken { email: r.email.clone(), token: r.token.clone() },
                 None => return Go::Stay,
             },
             Pending::None => return Go::Stay,
         };
+        let net = app.net.as_mut().unwrap();
+        let mut result = net.request(&msg, REPLY_WAIT, |m| matches!(m, ServerMsg::Account { .. }));
+        // A new account with "remember me" ticked: sign in once more for the token.
+        if p == Pending::Register && self.remember && result.is_ok() {
+            let again = ClientMsg::Login { email: email.clone(), password: self.password.text.clone(), remember: true };
+            result = net.request(&again, REPLY_WAIT, |m| matches!(m, ServerMsg::Account { .. }));
+        }
         match result {
-            Ok(mut acc) => {
-                if p != Pending::Remembered {
-                    if self.remember {
-                        if let Err(e) = app.store.remember(&mut acc) {
-                            self.error = Some(e.to_string());
-                        }
-                    } else if self.remembered.as_ref().map(|r| r.email == acc.email).unwrap_or(false) {
-                        // Logged in normally with "remember" off: clear the old token.
-                        app.store.forget(Some(&mut acc));
+            Ok(ServerMsg::Account { account, token }) => {
+                let acc = match save::decode_account(&account) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        self.error = Some(format!("The server sent a bad account: {}", e));
+                        return Go::Stay;
                     }
+                };
+                if !token.is_empty() {
+                    online::remember(&Remembered { server: server.clone(), email: acc.email.clone(), token });
+                } else if p != Pending::Remembered && self.remembered.as_ref().map(|r| r.email == acc.email).unwrap_or(false) {
+                    // Signed in normally with "remember" off: forget the old login.
+                    online::forget();
+                    net.send(&ClientMsg::Forget);
                 }
                 self.password.text.clear();
                 self.confirm.text.clear();
                 app.account = Some(acc);
                 Go::To(Screen::Select(SelectScreen::new(app)))
             }
+            Ok(_) => Go::Stay,
             Err(e) => {
                 if p == Pending::Remembered {
                     self.remembered = None;
-                    self.error = Some("Your saved login has expired. Please sign in again.".into());
+                    online::forget();
+                    self.error = Some(if e.contains("incorrect") { "Your saved login has expired. Please sign in again.".to_string() } else { e });
                 } else {
-                    self.error = Some(e.to_string());
+                    self.error = Some(e);
                 }
                 Go::Stay
             }
@@ -143,7 +198,7 @@ impl LoginScreen {
             self.pending_frames += 1;
             let (px, py, pw, ph) = (440.0, 300.0, 400.0, 120.0);
             widgets::panel(px, py, pw, ph);
-            let msg = if self.pending == Pending::Register { "Creating your account..." } else { "Signing in..." };
+            let msg = if self.pending == Pending::Register { "Creating your account..." } else { "Connecting..." };
             widgets::title(msg, px + pw * 0.5, py + 46.0, 24.0);
             if self.pending_frames >= 2 {
                 return self.run_pending(app);
@@ -162,15 +217,14 @@ impl LoginScreen {
                 let (px, py, pw, ph) = (440.0, 180.0, 400.0, 230.0);
                 widgets::panel(px, py, pw, ph);
                 widgets::title("Welcome back!", px + pw * 0.5, py + 28.0, 28.0);
-                gfx::text_centered(&r.email, px + pw * 0.5, py + 72.0, 20.0, widgets::ink_soft());
+                gfx::text_centered(&format!("{}  on  {}", r.email, r.server), px + pw * 0.5, py + 72.0, 16.0, widgets::ink_soft());
                 if widgets::button(&ui, px + 40.0, py + 108.0, pw - 80.0, 48.0, "Continue", ButtonStyle::Primary, true)
                     || (ui.enabled && is_key_pressed(KeyCode::Enter))
                 {
                     self.start(Pending::Remembered);
                 }
                 if widgets::button(&ui, px + 40.0, py + 166.0, pw - 80.0, 38.0, "Use a different account", ButtonStyle::Secondary, true) {
-                    let mut acc = app.store.load(&r.email).ok();
-                    app.store.forget(acc.as_mut());
+                    online::forget();
                     self.remembered = None;
                     self.email.text.clear();
                 }
@@ -194,10 +248,12 @@ impl LoginScreen {
             self.focus = match (self.focus, self.mode, shift) {
                 (Focus::Email, _, false) => Focus::Password,
                 (Focus::Password, Mode::Register, false) => Focus::Confirm,
-                (Focus::Password, Mode::Login, false) => Focus::Email,
-                (Focus::Confirm, _, false) => Focus::Email,
-                (Focus::Email, Mode::Register, true) => Focus::Confirm,
-                (Focus::Email, Mode::Login, true) => Focus::Password,
+                (Focus::Password, Mode::Login, false) => Focus::Server,
+                (Focus::Confirm, _, false) => Focus::Server,
+                (Focus::Server, _, false) => Focus::Email,
+                (Focus::Email, _, true) => Focus::Server,
+                (Focus::Server, Mode::Register, true) => Focus::Confirm,
+                (Focus::Server, Mode::Login, true) => Focus::Password,
                 (Focus::Password, _, true) => Focus::Email,
                 (Focus::Confirm, _, true) => Focus::Password,
             };
@@ -256,6 +312,14 @@ impl LoginScreen {
             self.focus = Focus::Email;
         }
 
+        // The server to connect to (bottom-left).
+        let (sx, sy, sw) = (24.0, gfx::VH - 160.0, 360.0);
+        widgets::panel(sx - 10.0, sy - 46.0, sw + 20.0, 134.0);
+        if self.server.draw(&ui, sx + 12.0, sy, sw - 24.0, 38.0, "Server address", self.focus == Focus::Server, app.time) {
+            self.focus = Focus::Server;
+        }
+        gfx::text("localhost or a Tailscale IP", sx + 12.0, sy + 50.0, 12.0, widgets::ink_soft());
+
         if let Some(e) = &self.error {
             widgets::message(e, gfx::VW * 0.5, py + ph + 14.0, true);
         } else if let Some(i) = &self.info {
@@ -295,7 +359,7 @@ impl LoginScreen {
 
 fn footer(save_error: &Option<String>) {
     gfx::text_centered_outlined(
-        "Accounts are stored on this computer for now. Passwords are salted and hashed.",
+        "Your account lives on the server you sign in to. Passwords are salted and hashed there.",
         gfx::VW * 0.5,
         gfx::VH - 34.0,
         15.0,
