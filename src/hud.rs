@@ -28,6 +28,8 @@ pub fn fill_keys(text: &str, layout: Layout) -> String {
         ("{Abilities}", Action::Abilities),
         ("{QuestLog}", Action::QuestLog),
         ("{WorldMap}", Action::WorldMap),
+        ("{Pickup}", Action::Pickup),
+        ("{Minimap}", Action::Minimap),
     ] {
         if out.contains(tag) {
             out = out.replace(tag, &format!("[{}]", layout.key_label(a)));
@@ -60,7 +62,8 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
     bar(26.0, 48.0, 306.0, 22.0, p.hp / p.max_hp, rgb(226, 72, 80), &format!("HP {}/{}", p.hp.ceil() as i32, p.max_hp as i32));
     bar(26.0, 74.0, 306.0, 22.0, p.mp / p.max_mp, rgb(70, 130, 236), &format!("MP {}/{}", p.mp.floor() as i32, p.max_mp as i32));
     // potions & gold
-    let pots = sim.save.inventory.count("hp_potion") + sim.save.inventory.count("hp_potion_big");
+    let inv = &sim.save.inventory;
+    let pots = inv.count("hp_potion") + inv.count("hp_potion_big") + inv.count("trainee_hp_potion");
     gfx::circle(36.0, 114.0, 8.0, rgb(230, 70, 90));
     gfx::rect(32.0, 102.0, 8.0, 6.0, rgb(200, 200, 210));
     gfx::text_outlined(&format!("x{}  [{}]", pots, layout.key_label(Action::Potion)), 52.0, 106.0, 16.0, rgb(255, 255, 255));
@@ -94,11 +97,10 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
     let et = format!("EXP {}/{} ({:.1}%)", sim.save.exp, need, frac * 100.0);
     gfx::text_outlined(&et, gfx::VW - 20.0 - gfx::text_w(&et, 13.0), gfx::VH - 32.0, 13.0, rgb(255, 245, 210));
 
-    // ---------------------------------------------- map name + quest tracker (top-right)
+    // ---------------------------------------------- quest tracker (top-right, under the minimap)
     let tx = gfx::VW - 360.0;
-    gfx::text_outlined(sim.map.name, tx, 18.0, 20.0, rgb(255, 255, 255));
     let qlines = quests::tracker_lines(&sim.save);
-    let mut y = 50.0;
+    let mut y = crate::minimap::bottom(sim) + 6.0;
     if !qlines.is_empty() {
         let lh = gfx::line_h(14.0);
         let shown: Vec<_> = qlines.iter().take(4).collect();
@@ -175,6 +177,7 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
             (layout.key_label(Action::Heavy), "Heavy / signature"),
             (layout.key_label(Action::Dodge), "Dodge"),
             (layout.key_label(Action::Interact), "Talk"),
+            (layout.key_label(Action::Pickup), "Pick up loot (hold)"),
         ];
         let h = 22.0 + rows.len() as f32 * 20.0 + 24.0;
         let y0 = gfx::VH - 40.0 - h;
@@ -189,7 +192,13 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
 
     // ---------------------------------------------- dialog
     if let Some(d) = &sim.dialog {
-        let (x, w, h) = (180.0, 920.0, 190.0);
+        // Quest offers show their rewards in the same window, before you accept.
+        let offer = match d.dialog.action {
+            quests::DialogAction::OfferQuest(id) if d.on_last_line() => quests::quest_def(id),
+            _ => None,
+        };
+        let (x, w) = (180.0, 920.0);
+        let h = if offer.is_some() { 262.0 } else { 190.0 };
         let y = gfx::VH - h - 30.0;
         widgets::panel(x, y, w, h);
         // speaker tag
@@ -199,6 +208,9 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
         let line = d.message.clone().unwrap_or_else(|| d.dialog.lines.get(d.line).cloned().unwrap_or_default());
         let line = fill_keys(&line, layout);
         gfx::text_wrapped(&line, x + 34.0, y + 34.0, w - 68.0, 19.0, widgets::ink());
+        if let Some(def) = offer {
+            quest_rewards(def, x + 30.0, y + h - 132.0, w - 60.0);
+        }
         if let Some(choices) = d.choices() {
             for (i, c) in choices.iter().enumerate() {
                 let bx = x + w - 470.0 + i as f32 * 230.0;
@@ -255,8 +267,37 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
     // ---------------------------------------------- death overlay
     if p.state == PState::Dead {
         let a = (p.state_t / 0.8).min(1.0);
-        gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(20, 0, 10, (120.0 * a) as u8));
-        gfx::text_centered_outlined("You have been defeated", gfx::VW * 0.5, gfx::VH * 0.4, 40.0, alpha(rgb(255, 210, 210), a));
-        gfx::text_centered_outlined("Returning to the last checkpoint...", gfx::VW * 0.5, gfx::VH * 0.4 + 56.0, 18.0, alpha(shade(rgb(255, 255, 255), 0.9), a));
+        gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(20, 0, 10, (90.0 * a) as u8));
+    }
+}
+
+/// "Rewards" strip: EXP, gold and item icons with names.
+pub fn quest_rewards(def: &quests::QuestDef, x: f32, y: f32, w: f32) {
+    gfx::rrect(x, y, w, 64.0, 8.0, rgb(232, 216, 182));
+    gfx::text("Rewards", x + 14.0, y + 6.0, 14.0, widgets::ink_soft());
+    let mut cx = x + 14.0;
+    let cy = y + 26.0;
+    for (id, label) in quests::reward_list(def) {
+        let item = galebound_core::items::item(id);
+        let tw = gfx::text_w(&label, 16.0);
+        let iw = if item.is_some() { 46.0 } else if label.ends_with("gold") { 22.0 } else { 0.0 };
+        if cx + iw + tw > x + w - 10.0 {
+            break;
+        }
+        match item {
+            Some(d) => {
+                let t = crate::sprites::get(&format!("icon_i_{}", d.id), || crate::icons::item(d));
+                let tier = crate::icons::tier_color(d.tier);
+                gfx::rrect(cx, cy - 4.0, 36.0, 36.0, 5.0, rgb(92, 64, 42));
+                gfx::rrect(cx + 2.0, cy - 2.0, 32.0, 32.0, 4.0, rgb(250, 240, 214));
+                gfx::rect(cx + 4.0, cy + 26.0, 28.0, 2.0, rgb(tier[0], tier[1], tier[2]));
+                gfx::tex(&t, cx, cy - 4.0, 1.0, false, Color::new(1.0, 1.0, 1.0, 1.0));
+            }
+            None if label.ends_with("gold") => gfx::circle(cx + 8.0, cy + 14.0, 8.0, rgb(240, 196, 70)),
+            None => {}
+        }
+        let col = if label.ends_with("EXP") { rgb(140, 80, 200) } else if label.ends_with("gold") { rgb(170, 120, 20) } else { widgets::ink() };
+        gfx::text(&label, cx + iw, cy + 6.0, 16.0, col);
+        cx += iw + tw + 26.0;
     }
 }

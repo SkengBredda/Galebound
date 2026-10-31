@@ -626,6 +626,20 @@ pub fn player_anim(p: &Player) -> (Anim, u8) {
 pub fn player(sim: &Sim, cam: &Camera, look: &Appearance) {
     gfx::set_cam(cam.x, cam.y);
     let p = &sim.player;
+    // Defeated: after the fall animation, a tombstone drops where you lie.
+    if p.state == PState::Dead && p.state_t > galebound_core::sim::TOMB_DELAY {
+        let f = p.body.feet();
+        let t = ((p.state_t - galebound_core::sim::TOMB_DELAY) / 0.28).min(1.0);
+        // falls in from above with a small bounce
+        let drop = if t < 1.0 { (1.0 - t * t) * u(70.0) } else { 0.0 };
+        let land = p.state_t - galebound_core::sim::TOMB_DELAY - 0.28;
+        let bounce = if (0.0..0.15).contains(&land) { (land / 0.15 * std::f32::consts::PI).sin() * u(3.0) } else { 0.0 };
+        let tex = sprites::get("tombstone", crate::lootart::tombstone);
+        char_shadow(f.x, f.y, 1.0);
+        sprite_at(&tex, f.x, f.y - drop - bounce, false, WHITE);
+        name_tag(f.x, f.y, &sim.save.name, None, rgb(200, 200, 210));
+        return;
+    }
     let flick = p.invuln > 0.0 && p.state != PState::Dodge && ((sim.time * 20.0) as i32 % 2 == 0);
     let a = if flick { 0.35 } else { 1.0 };
     let f = p.body.feet();
@@ -864,4 +878,62 @@ pub fn particles(sim: &Sim, cam: &Camera) {
         };
         gfx::text_centered_outlined(&f.text, f.pos.x, f.pos.y, size, alpha(c, f.life.min(1.0)));
     }
+}
+
+/// Loot and gold lying on the ground, with a pick-up hint on the nearest one.
+pub fn drops(sim: &Sim, cam: &Camera, time: f32) {
+    use galebound_core::sim::{DropKind, COLLECT_FLY, DROP_LIFE};
+    gfx::set_cam(cam.x, cam.y);
+    for d in &sim.drops {
+        let f = d.body.feet();
+        if f.x < cam.x - 60.0 || f.x > cam.x + gfx::VIEW_W + 60.0 {
+            continue;
+        }
+        // Blink during the last 10 seconds before vanishing.
+        let left = DROP_LIFE - d.age;
+        if d.taken.is_none() && left < 10.0 && ((time * 8.0) as i32) % 2 == 0 {
+            continue;
+        }
+        let (a, k) = match d.taken {
+            Some((_, _, t)) => (1.0 - t / COLLECT_FLY, 1.0 - 0.5 * t / COLLECT_FLY),
+            None => (1.0, 1.0),
+        };
+        let bob = if d.body.on_ground && d.taken.is_none() { ((time * 3.0 + d.id as f32).sin() * 1.5).round() * u(1.0) } else { 0.0 };
+        let (tex, glow) = match d.kind {
+            DropKind::Gold => {
+                let size = if d.count >= 100 { 2 } else if d.count >= 20 { 1 } else { 0 };
+                (sprites::get(&format!("coins{}", size), || crate::lootart::coin_pile(size)), rgb(255, 220, 110))
+            }
+            DropKind::Item(id) => {
+                let Some(def) = galebound_core::items::item(id) else { continue };
+                let t = crate::icons::tier_color(def.tier.max(1));
+                (sprites::get(&format!("icon_i_{}", def.id), || crate::icons::item(def)), rgb(t[0], t[1], t[2]))
+            }
+        };
+        if d.body.on_ground && d.taken.is_none() {
+            let pulse = 0.18 + 0.08 * (time * 4.0 + d.id as f32).sin();
+            gfx::ellipse(f.x, f.y - u(1.0), u(9.0), u(2.5), 0.0, alpha(glow, pulse));
+        }
+        let w = u(tex.width()) * k;
+        let h = u(tex.height()) * k;
+        gfx::tex(&tex, f.x - w * 0.5, f.y - h - u(1.0) + bob, k, false, Color::new(1.0, 1.0, 1.0, a));
+    }
+}
+
+/// The pick-up hint over the nearest drop (drawn after everything else in the world).
+pub fn drop_labels(sim: &Sim, cam: &Camera) {
+    use galebound_core::sim::PICKUP_REACH;
+    if sim.player.state == PState::Dead || sim.dialog.is_some() {
+        return;
+    }
+    gfx::set_cam(cam.x, cam.y);
+    let Some(i) = sim.drop_near(sim.player.body.center(), PICKUP_REACH) else { return };
+    let d = &sim.drops[i];
+    let f = d.body.feet();
+    let key = sim.settings.layout.key_label(galebound_core::input::Action::Pickup);
+    let label = format!("[{}] {}", key, d.name());
+    let w = gfx::text_w(&label, 16.0) + u(6.0);
+    let y = f.y - u(36.0);
+    gfx::rrect(f.x - w * 0.5, y - u(2.0), w, u(11.0), u(2.0), rgba(24, 22, 40, 200));
+    gfx::text_centered(&label, f.x, y, 16.0, rgb(255, 255, 255));
 }

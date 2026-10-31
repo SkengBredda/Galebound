@@ -12,7 +12,8 @@ use crate::windows::{self, Windows};
 use crate::{App, Go, Screen};
 use galebound_core::appearance::Appearance;
 use galebound_core::input::Action;
-use galebound_core::sim::{Sim, TICK};
+use galebound_core::save::DISPLAY_MODES;
+use galebound_core::sim::{PState, Sim, TICK, TOMB_DELAY};
 use macroquad::prelude::{get_frame_time, is_key_pressed, KeyCode};
 
 const AUTOSAVE_SECS: f32 = 30.0;
@@ -26,6 +27,7 @@ enum MenuItem {
     Character,
     Abilities,
     Settings,
+    Graphics,
     Select,
     Logout,
     Quit,
@@ -36,6 +38,7 @@ enum Menu {
     Closed,
     Pause,
     Settings,
+    Graphics,
 }
 
 pub struct PlayScreen {
@@ -64,6 +67,7 @@ impl PlayScreen {
         let look = save.look;
         let seed = (app.time * 1_000_003.0) as u64 ^ 0xA5A5;
         let sim = Sim::new(save, acc.settings.clone(), seed);
+        crate::display::apply(acc.settings.display);
         let mut cam = Camera { x: 0.0, y: 0.0 };
         cam.snap(&sim);
         PlayScreen {
@@ -139,6 +143,10 @@ impl PlayScreen {
             if self.input.pressed(Action::WorldMap) {
                 self.windows.toggle_map();
             }
+            if self.input.pressed(Action::Minimap) {
+                crate::minimap::cycle(&mut self.sim.settings);
+                self.sim.wants_save = true;
+            }
         }
         // Pause menu toggling (only when no dialog is open; Esc closes dialogs and windows first).
         if self.menu == Menu::Closed && self.input.pressed(Action::Menu) && self.sim.dialog.is_none() {
@@ -208,6 +216,7 @@ impl PlayScreen {
         render::decos(&self.sim, &cam, 1, time);
         render::signs_and_portals(&self.sim, &cam, time);
         render::npcs(&self.sim, &cam, time);
+        render::drops(&self.sim, &cam, time);
         render::enemies(&self.sim, &cam);
         render::player(&self.sim, &cam, &self.look);
         render::tufts(&self.sim, &cam);
@@ -215,9 +224,20 @@ impl PlayScreen {
         render::particles(&self.sim, &cam);
         render::decos(&self.sim, &cam, 2, time);
         render::lighting(&self.sim, &cam, time);
+        render::drop_labels(&self.sim, &cam);
         hud::draw(&self.sim, self.show_controls && !self.windows.any_open(&self.sim), time);
+        {
+            let ui = Ui { enabled: self.menu == Menu::Closed, ..Ui::begin() };
+            let act = crate::minimap::frame(&self.sim, &ui);
+            if ui.enabled && crate::minimap::apply(&mut self.sim.settings, act) {
+                self.sim.wants_save = true;
+            }
+        }
         if self.menu == Menu::Closed && self.sim.dialog.is_none() {
             self.windows.frame(&mut self.sim, dt);
+        }
+        if self.sim.player.state == PState::Dead && self.sim.player.state_t > TOMB_DELAY && self.menu == Menu::Closed {
+            self.death_panel();
         }
         if self.saved_flash > 0.0 {
             gfx::text_outlined("Saved", gfx::VW - 80.0, gfx::VH - 50.0, 15.0, rgba(180, 255, 200, (255.0 * self.saved_flash.min(1.0)) as u8));
@@ -230,6 +250,12 @@ impl PlayScreen {
         match self.menu {
             Menu::Closed => Go::Stay,
             Menu::Pause => self.pause_menu(app),
+            Menu::Graphics => {
+                if self.graphics_panel() {
+                    self.save_now(app);
+                }
+                Go::Stay
+            }
             Menu::Settings => {
                 let panel = self.settings_panel.get_or_insert_with(SettingsPanel::new);
                 let (changed, close) = panel.frame(&mut self.sim.settings);
@@ -259,13 +285,14 @@ impl PlayScreen {
         gfx::text_outlined("GALEBOUND", x + 34.0, 40.0, 26.0, rgb(255, 236, 170));
         gfx::text(&format!("{}  -  Lv.{} {}", self.sim.save.name, self.sim.save.level, self.sim.player.info.name), x + 36.0, 80.0, 14.0, rgb(190, 200, 225));
         gfx::rect(x + 34.0, 106.0, w - 68.0, 1.0, rgba(255, 255, 255, 50));
-        let items: [(&str, MenuItem); 9] = [
+        let items: [(&str, MenuItem); 10] = [
             ("Resume", MenuItem::Resume),
             ("World Map", MenuItem::Map),
             ("Inventory", MenuItem::Inventory),
             ("Character", MenuItem::Character),
             ("Abilities", MenuItem::Abilities),
             ("Controls & Settings", MenuItem::Settings),
+            ("Graphics", MenuItem::Graphics),
             ("Character Select", MenuItem::Select),
             ("Log Out", MenuItem::Logout),
             ("Quit Game", MenuItem::Quit),
@@ -283,11 +310,11 @@ impl PlayScreen {
         }
         let mut y = 130.0;
         for (i, (label, item)) in items.iter().enumerate() {
-            if i == 6 {
+            if i == 7 {
                 y += 18.0;
                 gfx::rect(x + 34.0, y - 10.0, w - 68.0, 1.0, rgba(255, 255, 255, 40));
             }
-            let h = 44.0;
+            let h = 40.0;
             let hover = gfx::mouse_in(x, y, w, h);
             if hover {
                 self.menu_sel = i;
@@ -302,7 +329,7 @@ impl PlayScreen {
                 _ if sel => rgb(255, 255, 255),
                 _ => rgb(196, 204, 226),
             };
-            gfx::text(label, x + 40.0 + if sel { 6.0 } else { 0.0 }, y + 12.0, 18.0, col);
+            gfx::text(label, x + 40.0 + if sel { 6.0 } else { 0.0 }, y + 10.0, 18.0, col);
             if hover && ui.clicked {
                 chosen = Some(*item);
             }
@@ -333,6 +360,7 @@ impl PlayScreen {
                 self.windows.abilities = true;
             }
             Some(MenuItem::Settings) => self.menu = Menu::Settings,
+            Some(MenuItem::Graphics) => self.menu = Menu::Graphics,
             Some(MenuItem::Select) => {
                 self.save_now(app);
                 let mut s = SelectScreen::new(app);
@@ -354,5 +382,78 @@ impl PlayScreen {
             self.menu_anim = 0.0;
         }
         Go::Stay
+    }
+
+    /// Graphics options (from the pause menu). Returns true if a setting changed.
+    fn graphics_panel(&mut self) -> bool {
+        let ui = Ui::begin();
+        let mut changed = false;
+        gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(10, 14, 30, 160));
+        let (w, h) = (520.0, 360.0);
+        let (x, y) = ((gfx::VW - w) * 0.5, (gfx::VH - h) * 0.5);
+        widgets::panel(x, y, w, h);
+        widgets::title("Graphics", x + w * 0.5, y + 22.0, 28.0);
+        gfx::text("Display mode", x + 40.0, y + 74.0, 18.0, widgets::ink());
+        let help = [
+            "A normal window you can move and resize.",
+            "A borderless window that covers the whole screen. Alt-Tab friendly.",
+            "Takes over the whole screen.",
+        ];
+        let mut hovered = None;
+        for (i, &m) in DISPLAY_MODES.iter().enumerate() {
+            let by = y + 104.0 + i as f32 * 56.0;
+            let cur = self.sim.settings.display == m;
+            let style = if cur { widgets::ButtonStyle::Primary } else { widgets::ButtonStyle::Secondary };
+            if widgets::button(&ui, x + 40.0, by, w - 80.0, 44.0, m.name(), style, true) && !cur {
+                self.sim.settings.display = m;
+                crate::display::apply(m);
+                changed = true;
+            }
+            if gfx::mouse_in(x + 40.0, by, w - 80.0, 44.0) {
+                hovered = Some(i);
+            }
+        }
+        let cur = DISPLAY_MODES.iter().position(|m| *m == self.sim.settings.display).unwrap_or(0);
+        gfx::text_wrapped(help[hovered.unwrap_or(cur)], x + 40.0, y + h - 82.0, w - 200.0, 14.0, widgets::ink_soft());
+        let back = widgets::button(&ui, x + w - 150.0, y + h - 70.0, 110.0, 40.0, "Back", widgets::ButtonStyle::Secondary, true);
+        if back || is_key_pressed(KeyCode::Escape) {
+            self.menu = Menu::Pause;
+            self.menu_anim = 1.0;
+        }
+        changed
+    }
+
+    /// Shown while you lie as a tombstone: Respawn, or read a Revive Scroll.
+    fn death_panel(&mut self) {
+        let ui = Ui::begin();
+        let (w, h) = (500.0, 210.0);
+        let (x, y) = ((gfx::VW - w) * 0.5, 170.0);
+        let a = ((self.sim.player.state_t - TOMB_DELAY) / 0.4).clamp(0.0, 1.0);
+        gfx::rrect(x, y, w, h, 12.0, rgba(24, 14, 26, (225.0 * a) as u8));
+        gfx::rect_lines(x + 3.0, y + 3.0, w - 6.0, h - 6.0, 1.0, rgba(255, 180, 180, (70.0 * a) as u8));
+        gfx::text_centered_outlined("You have been defeated", x + w * 0.5, y + 20.0, 32.0, gfx::alpha(rgb(255, 214, 214), a));
+        let lost = self.sim.death_exp_lost();
+        let sub = if lost > 0 {
+            format!("You lost {} EXP. A Revive Scroll will restore it.", lost)
+        } else if self.sim.save.level > galebound_core::sim::DEATH_PENALTY_LEVEL {
+            "No EXP lost this time.".to_string()
+        } else {
+            format!("No EXP is lost until level {}.", galebound_core::sim::DEATH_PENALTY_LEVEL + 1)
+        };
+        gfx::text_centered(&sub, x + w * 0.5, y + 66.0, 15.0, gfx::alpha(rgb(230, 220, 236), a));
+        let scrolls = self.sim.save.inventory.count("revive_scroll");
+        let (bw, by) = (210.0, y + 104.0);
+        let respawn = widgets::button(&ui, x + 30.0, by, bw, 46.0, "Respawn", widgets::ButtonStyle::Primary, true);
+        let label = format!("Revive Scroll ({})", scrolls);
+        let scroll = widgets::button(&ui, x + w - 30.0 - bw, by, bw, 46.0, &label, widgets::ButtonStyle::Secondary, scrolls > 0);
+        gfx::text_centered("Respawn: back to the last checkpoint.", x + w * 0.5, y + h - 50.0, 12.0, rgb(190, 180, 200));
+        gfx::text_centered("Other players can also revive you.", x + w * 0.5, y + h - 30.0, 12.0, rgb(190, 180, 200));
+        if respawn || is_key_pressed(KeyCode::Enter) {
+            self.sim.respawn();
+        } else if scroll {
+            if let Err(e) = self.sim.revive_with_scroll() {
+                self.sim.toast(&e, "");
+            }
+        }
     }
 }

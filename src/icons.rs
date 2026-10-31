@@ -62,6 +62,35 @@ pub fn item(def: &ItemDef) -> Canvas {
             }
         }),
         ItemKind::Material => outlined(|c| material(c, def.id)),
+        ItemKind::Special(items::Special::Revive) => outlined(|c| {
+            // a rolled parchment scroll tied with a red ribbon
+            let paper = rgb(236, 222, 180);
+            c.rect(3, 5, 12, 8, paper);
+            c.disc(3.5, 9.0, 3.0, shadow(paper, 0.15));
+            c.disc(14.5, 9.0, 3.0, shadow(paper, 0.15));
+            c.disc(14.5, 9.0, 1.2, shadow(paper, 0.4));
+            c.rect(5, 7, 7, 1, rgb(170, 140, 100));
+            c.rect(5, 10, 6, 1, rgb(170, 140, 100));
+            c.rect(8, 4, 2, 10, rgb(210, 60, 70));
+            c.rect(7, 13, 1, 3, rgb(210, 60, 70));
+            c.rect(10, 13, 1, 3, rgb(210, 60, 70));
+            c.set(9, 8, rgb(255, 240, 150));
+        }),
+        ItemKind::Special(items::Special::SkillReset) => outlined(|c| {
+            // a golden ticket with a circular arrow
+            let t = rgb(240, 200, 90);
+            c.rect(2, 4, 14, 10, t);
+            c.rect(2, 8, 1, 2, rgb(0, 0, 0));
+            c.rect(15, 8, 1, 2, rgb(0, 0, 0));
+            c.rect(3, 5, 12, 1, light(t, 0.4));
+            let arrow = rgb(140, 70, 190);
+            for (x, y) in [(7, 6), (8, 6), (9, 6), (10, 7), (11, 8), (11, 9), (10, 10), (9, 11), (8, 11), (7, 11), (6, 10), (6, 9)] {
+                c.set(x, y, arrow);
+            }
+            c.set(6, 6, arrow);
+            c.set(6, 7, arrow);
+            c.set(5, 7, arrow);
+        }),
         ItemKind::Equip(EquipSlot::Weapon) => weapon_icon(items::weapon_art(def.id).unwrap_or(Weapon::Club), accent),
         ItemKind::Equip(EquipSlot::Armor) => outlined(|c| {
             let body = match def.look {

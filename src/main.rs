@@ -6,10 +6,13 @@
 
 mod art;
 mod charsprite;
+mod display;
 mod font;
 mod gfx;
 mod hud;
 mod keys;
+mod lootart;
+mod minimap;
 mod pixel;
 mod render;
 mod screens;
@@ -26,7 +29,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.1.0 prototype";
+pub const VERSION: &str = "0.6.0";
 
 /// Shared state that outlives individual screens.
 pub struct App {
@@ -62,10 +65,13 @@ pub enum Go {
 }
 
 fn window_conf() -> Conf {
+    let mode = display::saved_mode();
+    display::started_in(mode);
     Conf {
         window_title: GAME_TITLE.to_owned(),
-        window_width: 1280,
-        window_height: 720,
+        window_width: display::WINDOW_W as i32,
+        window_height: display::WINDOW_H as i32,
+        fullscreen: mode != galebound_core::save::DisplayMode::Windowed,
         window_resizable: true,
         high_dpi: true,
         sample_count: 4,

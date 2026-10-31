@@ -13,7 +13,41 @@ use crate::input::Layout;
 use std::path::PathBuf;
 
 pub const MAX_CHARACTERS: usize = 3;
-pub const SAVE_VERSION: u32 = 3;
+pub const SAVE_VERSION: u32 = 4;
+
+/// How the game window is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayMode {
+    Windowed,
+    /// A borderless window covering the whole screen.
+    WindowedFullscreen,
+    Fullscreen,
+}
+
+pub const DISPLAY_MODES: &[DisplayMode] = &[DisplayMode::Windowed, DisplayMode::WindowedFullscreen, DisplayMode::Fullscreen];
+
+impl DisplayMode {
+    pub fn key(self) -> &'static str {
+        match self {
+            DisplayMode::Windowed => "windowed",
+            DisplayMode::WindowedFullscreen => "borderless",
+            DisplayMode::Fullscreen => "fullscreen",
+        }
+    }
+    pub fn from_key(s: &str) -> Option<DisplayMode> {
+        DISPLAY_MODES.iter().copied().find(|m| m.key() == s)
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            DisplayMode::Windowed => "Windowed",
+            DisplayMode::WindowedFullscreen => "Windowed Fullscreen",
+            DisplayMode::Fullscreen => "Fullscreen",
+        }
+    }
+}
+
+/// Minimap sizes, cycled with the Minimap key. 0 = hidden.
+pub const MINIMAP_SIZES: u8 = 4;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -22,11 +56,24 @@ pub struct Settings {
     pub tap_up_to_jump: bool,
     pub show_damage_numbers: bool,
     pub screen_shake: bool,
+    pub display: DisplayMode,
+    /// 0 hidden, 1 small, 2 medium, 3 large.
+    pub minimap_size: u8,
+    /// Show the whole map (true) or just the area around you (false).
+    pub minimap_whole: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { layout: Layout::Wasd, tap_up_to_jump: false, show_damage_numbers: true, screen_shake: true }
+        Settings {
+            layout: Layout::Wasd,
+            tap_up_to_jump: false,
+            show_damage_numbers: true,
+            screen_shake: true,
+            display: DisplayMode::Windowed,
+            minimap_size: 2,
+            minimap_whole: false,
+        }
     }
 }
 
@@ -66,6 +113,11 @@ pub struct CharacterSave {
     pub quests: Vec<QuestEntry>,
     pub flags: Vec<String>,
     pub play_seconds: u64,
+    /// Discounted trainee potions bought so far (the first few are 40% off).
+    pub trainee_buys: u32,
+    /// Set while the character lies as a tombstone: the EXP lost on death
+    /// (a Revive Scroll gives it back).
+    pub tomb: Option<u32>,
 }
 
 impl CharacterSave {
@@ -98,6 +150,8 @@ impl CharacterSave {
             quests: Vec::new(),
             flags: Vec::new(),
             play_seconds: 0,
+            trainee_buys: 0,
+            tomb: None,
         }
     }
     pub fn has_flag(&self, f: &str) -> bool {
@@ -188,6 +242,9 @@ pub fn encode_account(a: &Account) -> String {
     kv("tap_up_jump", a.settings.tap_up_to_jump.to_string());
     kv("damage_numbers", a.settings.show_damage_numbers.to_string());
     kv("screen_shake", a.settings.screen_shake.to_string());
+    kv("display", a.settings.display.key().to_string());
+    kv("minimap", a.settings.minimap_size.to_string());
+    kv("minimap_whole", a.settings.minimap_whole.to_string());
     for c in &a.characters {
         s.push_str("[character]\n");
         let mut kv = |k: &str, v: String| {
@@ -218,6 +275,10 @@ pub fn encode_account(a: &Account) -> String {
         kv("map", c.map.clone());
         kv("pos", format!("{},{}", c.x, c.y));
         kv("play_seconds", c.play_seconds.to_string());
+        kv("trainee_buys", c.trainee_buys.to_string());
+        if let Some(lost) = c.tomb {
+            kv("tomb", lost.to_string());
+        }
         for q in &c.quests {
             kv("quest", format!("{},{},{}", q.id, qstate_str(q.state), q.progress));
         }
@@ -280,6 +341,9 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                 "tap_up_jump" => a.settings.tap_up_to_jump = pb(&v),
                 "damage_numbers" => a.settings.show_damage_numbers = pb(&v),
                 "screen_shake" => a.settings.screen_shake = pb(&v),
+                "display" => a.settings.display = DisplayMode::from_key(&v).unwrap_or(DisplayMode::Windowed),
+                "minimap" => a.settings.minimap_size = (pu(&v) as u8).min(MINIMAP_SIZES - 1),
+                "minimap_whole" => a.settings.minimap_whole = pb(&v),
                 _ => {}
             },
             Some(c) => match k {
@@ -334,6 +398,8 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                     }
                 }
                 "play_seconds" => c.play_seconds = v.parse().unwrap_or(0),
+                "trainee_buys" => c.trainee_buys = pu(&v),
+                "tomb" => c.tomb = Some(pu(&v)),
                 "quest" => {
                     let p: Vec<&str> = v.split(',').collect();
                     if p.len() == 3 {
@@ -416,13 +482,15 @@ mod tests {
         c.quests.push(QuestEntry { id: "first_breeze".into(), state: QuestState::Done, progress: 1 });
         c.set_flag("met_elder");
         c.x = 123.5;
+        c.trainee_buys = 4;
+        c.tomb = Some(17);
         let a = Account {
             email: "a@b.co".into(),
             salt_hex: "00ff".into(),
             hash_hex: "abcd".into(),
             iterations: 10,
             remember_hash: Some("ee".into()),
-            settings: Settings { layout: Layout::Arrows, ..Default::default() },
+            settings: Settings { layout: Layout::Arrows, display: DisplayMode::WindowedFullscreen, minimap_size: 3, minimap_whole: true, ..Default::default() },
             characters: vec![c],
             created_unix: 42,
         };

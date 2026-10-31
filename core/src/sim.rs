@@ -4,7 +4,7 @@
 
 use crate::classes::{self, AttackDef, AttackKind, ClassId, ClassInfo, MainStat, ProjStyle};
 use crate::input::{Action, InputState, HOTBAR_ACTIONS};
-use crate::items::{self, Effect, EquipSlot, ItemKind};
+use crate::items::{self, Effect, EquipSlot, ItemKind, Special};
 use crate::skills::{self, HotbarSlot, SkillDef, SkillEffect, HOTBAR_SLOTS};
 use crate::stats::{self, Derived, StatMods};
 use crate::math::{approach, Aabb, Rng, V2};
@@ -31,6 +31,20 @@ pub const WAYSTONE_COST: u32 = 25;
 const INTERACT_RANGE: f32 = 90.0;
 const CLIMB_SPEED: f32 = 190.0;
 const CLIMB_REACH: f32 = 18.0;
+/// Seconds loot stays on the ground before it vanishes.
+pub const DROP_LIFE: f32 = 120.0;
+/// How far from the player (horizontally) loot can be picked up.
+pub const PICKUP_REACH: f32 = 70.0;
+/// Holding the pick-up key grabs another item this often.
+const PICKUP_REPEAT: f32 = 0.12;
+/// How long a picked-up item takes to fly to whoever collected it.
+pub const COLLECT_FLY: f32 = 0.18;
+/// Characters above this level lose EXP when they die...
+pub const DEATH_PENALTY_LEVEL: u32 = 10;
+/// ...this share of their current EXP (a Revive Scroll gives it back).
+pub const DEATH_EXP_LOSS: f32 = 0.03;
+/// Seconds of the defeat animation before the tombstone drops.
+pub const TOMB_DELAY: f32 = 0.7;
 
 /// A climbable the player can grab right now (`up` = pressing Up, else Down).
 fn find_climb(climbs: &[world::Climb], body: &Body, up: bool) -> Option<usize> {
@@ -161,6 +175,59 @@ impl Player {
 }
 
 pub use crate::enemies::{EState, Enemy};
+
+/// What's lying on the ground.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DropKind {
+    Item(&'static str),
+    Gold,
+}
+
+/// Who picked a drop up. Pets use the same pick-up path as players.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Collector {
+    Player,
+    Pet(u32),
+}
+
+/// Loot or gold lying in the world, waiting to be picked up.
+#[derive(Clone, Debug)]
+pub struct GroundDrop {
+    pub id: u32,
+    pub kind: DropKind,
+    /// Stack size (or amount of gold).
+    pub count: u32,
+    pub body: Body,
+    pub age: f32,
+    /// Set once collected: the drop flies to the collector, then disappears.
+    pub taken: Option<(Collector, V2, f32)>,
+}
+
+impl GroundDrop {
+    pub fn name(&self) -> String {
+        match self.kind {
+            DropKind::Gold => format!("{} gold", self.count),
+            DropKind::Item(id) => {
+                let n = items::item(id).map(|d| d.name).unwrap_or(id);
+                if self.count > 1 {
+                    format!("{}x {}", self.count, n)
+                } else {
+                    n.to_string()
+                }
+            }
+        }
+    }
+}
+
+/// Another player in the same map (filled in by the network layer once
+/// multiplayer exists; shown on the minimap).
+#[derive(Clone, Debug)]
+pub struct OtherPlayer {
+    pub name: String,
+    /// Feet position.
+    pub pos: V2,
+    pub dead: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Team {
@@ -311,6 +378,13 @@ pub struct Sim {
     pub teleport_open: bool,
     /// Set when the player's look may have changed (gear); the host refreshes.
     pub look_changed: bool,
+    /// Loot and gold on the ground.
+    pub drops: Vec<GroundDrop>,
+    pickup_cd: f32,
+    /// Last place the player stood (a tombstone lands here after a fall).
+    pub last_ground: V2,
+    /// Other players on this map (empty until multiplayer).
+    pub others: Vec<OtherPlayer>,
 }
 
 fn derive_stats(save: &CharacterSave, buffs: &[Buff]) -> Derived {
@@ -417,7 +491,17 @@ impl Sim {
             shop_open: None,
             teleport_open: false,
             look_changed: true,
+            drops: Vec::new(),
+            pickup_cd: 0.0,
+            last_ground: V2::new(sx, sy),
+            others: Vec::new(),
         };
+        // Logged out as a tombstone? Still one.
+        if sim.save.tomb.is_some() {
+            sim.player.state = PState::Dead;
+            sim.player.state_t = TOMB_DELAY + 1.0;
+            sim.player.hp = 0.0;
+        }
         sim.populate_map();
         if sim.save.quests.is_empty() && sim.map.key == world::START_MAP {
             sim.toast("Welcome to Galebound!", "Talk to Elder Wynn (the '!' above her head) to begin.");
@@ -528,6 +612,7 @@ impl Sim {
         }
 
         self.update_player(input, dt);
+        self.update_drops(dt);
         self.update_enemies(dt);
         self.update_projectiles(dt);
         self.update_spawns(dt);
@@ -680,8 +765,10 @@ impl Sim {
         p.buffs.retain(|b| b.left > 0.0);
         let buffs_expired = p.buffs.len() != before;
 
-        // Regen: MP always, HP out of combat.
-        p.mp = (p.mp + p.stats.mp_regen * dt).min(p.max_mp);
+        // Regen: MP always, HP out of combat (never while defeated).
+        if p.state != PState::Dead {
+            p.mp = (p.mp + p.stats.mp_regen * dt).min(p.max_mp);
+        }
         if p.since_hurt > 6.0 && p.state != PState::Dead {
             p.hp = (p.hp + p.max_hp * 0.015 * dt).min(p.max_hp);
         }
@@ -695,11 +782,12 @@ impl Sim {
             p.mp = p.mp.min(p.max_mp);
         }
         if p.state == PState::Dead {
-            if p.state_t > 2.2 {
-                self.respawn();
-            }
+            // Lies there as a tombstone until Respawn, a revive or a Revive Scroll.
+            self.update_dead(input, dt);
             return;
         }
+        self.pickup_cd = (self.pickup_cd - dt).max(0.0);
+        let p = &mut self.player;
 
         let ax = input.axis_x();
         let down = input.held(Action::Down);
@@ -966,6 +1054,9 @@ impl Sim {
             let lvl = Level { solids: &solids, platforms: &self.map.platforms, bounds: self.map.bounds() };
             physics::move_and_collide(&mut p.body, &lvl, dt);
         }
+        if p.body.on_ground && p.state != PState::Dead {
+            self.last_ground = p.body.feet();
+        }
         if p.body.on_ground && !was_ground {
             p.jumped_from_ground = false;
             if vy_before > 400.0 {
@@ -987,6 +1078,12 @@ impl Sim {
         // Potion
         if input.pressed(Action::Potion) {
             self.drink_potion();
+        }
+
+        // Pick up loot: press to grab the nearest drop, hold to keep grabbing.
+        if input.pressed(Action::Pickup) || (input.held(Action::Pickup) && self.pickup_cd <= 0.0) {
+            self.pick_up();
+            self.pickup_cd = PICKUP_REPEAT;
         }
 
         // Fell out of the world
@@ -1179,19 +1276,16 @@ impl Sim {
         let def = kind.def();
         let (exp, gold) = (def.exp, def.gold);
         self.burst(c, FxKind::Spark, 20, 260.0);
-        self.save.gold += gold;
         self.float(V2::new(c.x, c.y - 50.0), format!("+{} EXP", exp), FloatKind::Exp);
-        // Loot goes straight into the bag.
-        let mut dy = 74.0;
+        // Gold and loot spill onto the ground: pick them up with the Pickup key.
+        if gold > 0 {
+            self.spawn_drop(DropKind::Gold, gold, c, 70.0);
+        }
         for &(id, chance) in kind.drops() {
             if self.rng.f() < chance {
-                let Some(def) = items::item(id) else { continue };
-                if self.save.inventory.add(id, 1) == 0 {
-                    self.float(V2::new(c.x, c.y - dy), format!("+ {}", def.name), FloatKind::Loot);
-                } else {
-                    self.float(V2::new(c.x, c.y - dy), "Bag full!".into(), FloatKind::Info);
+                if let Some(def) = items::item(id) {
+                    self.spawn_drop(DropKind::Item(def.id), 1, c, 170.0);
                 }
-                dy += 20.0;
             }
         }
         self.gain_exp(exp);
@@ -1243,7 +1337,7 @@ impl Sim {
 
     /// The Potion key drinks the strongest HP potion you carry.
     fn drink_potion(&mut self) {
-        let best = ["hp_potion_big", "hp_potion", "elixir"].into_iter().find(|id| self.save.inventory.count(id) > 0);
+        let best = ["hp_potion_big", "trainee_hp_potion", "hp_potion", "elixir"].into_iter().find(|id| self.save.inventory.count(id) > 0);
         match best {
             Some(id) => {
                 self.use_item(id);
@@ -1335,10 +1429,39 @@ impl Sim {
             &format!("{} ability points refunded. Main stats: {} and {}.", self.save.ap, info.primary.name(), info.secondary.name()),
         );
         self.learn_new_skills(0);
+        // A Skill Reset Coupon, so the new build can be redone later.
+        if self.save.inventory.add("skill_reset_coupon", 1) > 0 {
+            let f = self.player.body.center();
+            self.spawn_drop(DropKind::Item("skill_reset_coupon"), 1, f, 40.0);
+        }
+        self.toast("Skill Reset Coupon received", "Use it from your bag any time to refund every ability point you've spent.");
         self.quest_event(QuestEvent::ChangedClass);
         self.look_changed = true;
         self.wants_save = true;
         Ok(())
+    }
+
+    /// Skill Reset Coupon: refund every spent ability point.
+    pub fn reset_ability_points(&mut self) -> Result<u32, String> {
+        if self.player.state == PState::Dead {
+            return Err("You can't do that while defeated".into());
+        }
+        if self.save.inventory.count("skill_reset_coupon") == 0 {
+            return Err("You need a Skill Reset Coupon".into());
+        }
+        let spent = (self.save.stats.total() - stats::START_STATS.total()).max(0) as u32;
+        if spent == 0 {
+            return Err("You haven't spent any ability points".into());
+        }
+        self.save.inventory.remove("skill_reset_coupon", 1);
+        self.save.stats = stats::START_STATS;
+        self.save.ap += spent;
+        self.recompute_stats();
+        let c = self.player.body.center();
+        self.burst(c, FxKind::LevelUp, 30, 260.0);
+        self.toast("Ability points reset", &format!("{} points refunded. Spend them in the Character window.", spent));
+        self.wants_save = true;
+        Ok(spent)
     }
 
     /// Abilities the character can use right now.
@@ -1470,8 +1593,10 @@ impl Sim {
     /// Drink / use a consumable by id. Returns true if it was used.
     pub fn use_item(&mut self, id: &str) -> bool {
         let Some(def) = items::item(id) else { return false };
-        let ItemKind::Consumable(effect) = def.kind else {
-            return false;
+        let effect = match def.kind {
+            ItemKind::Consumable(e) => e,
+            ItemKind::Special(sp) => return self.use_special(def, sp),
+            _ => return false,
         };
         if self.save.inventory.count(id) == 0 {
             self.info_float(&format!("No {} left", def.name));
@@ -1521,6 +1646,24 @@ impl Sim {
         true
     }
 
+    fn use_special(&mut self, def: &'static items::ItemDef, sp: Special) -> bool {
+        if self.save.inventory.count(def.id) == 0 {
+            self.info_float(&format!("No {} left", def.name));
+            return false;
+        }
+        let r = match sp {
+            Special::Revive => self.revive_with_scroll(),
+            Special::SkillReset => self.reset_ability_points().map(|_| ()),
+        };
+        match r {
+            Ok(()) => true,
+            Err(e) => {
+                self.info_float(&e);
+                false
+            }
+        }
+    }
+
     /// Why this character can't equip the item, if they can't.
     pub fn equip_problem(&self, id: &str) -> Option<String> {
         let def = items::item(id)?;
@@ -1550,6 +1693,9 @@ impl Sim {
                 }
             }
             Some(ItemKind::Material) => self.info_float("Sell it to any shop"),
+            Some(ItemKind::Special(_)) => {
+                self.use_item(&id);
+            }
             None => {}
         }
     }
@@ -1591,6 +1737,9 @@ impl Sim {
 
     /// Fast travel to another town's waystone.
     pub fn teleport(&mut self, key: &str) -> Result<(), String> {
+        if self.player.state == PState::Dead {
+            return Err("You can't travel while defeated".into());
+        }
         if !world::WAYSTONES.contains(&key) || !self.save.has_flag(&format!("ws_{}", key)) {
             return Err("You haven't visited that waystone yet".into());
         }
@@ -1618,14 +1767,14 @@ impl Sim {
         }
     }
 
-    /// Buy from the open shop.
-    pub fn buy(&mut self, id: &str, n: u32) -> Result<(), String> {
+    /// Buy from the open shop. Returns the gold spent.
+    pub fn buy(&mut self, id: &str, n: u32) -> Result<u32, String> {
         let shop = self.shop_open.and_then(items::shop).ok_or("The shop is closed")?;
         if !shop.stock.contains(&id) {
             return Err("Not sold here".into());
         }
-        let def = items::item(id).ok_or("Unknown item")?;
-        let cost = def.price * n;
+        let discounts_left = items::TRAINEE_DISCOUNT_BUYS.saturating_sub(self.save.trainee_buys);
+        let (cost, discounted) = items::purchase_cost(id, n, discounts_left).ok_or("Unknown item")?;
         if self.save.gold < cost {
             return Err("Not enough gold".into());
         }
@@ -1633,9 +1782,21 @@ impl Sim {
             return Err("Your bag is full".into());
         }
         self.save.gold -= cost;
+        self.save.trainee_buys += discounted;
         self.save.inventory.add(id, n);
         self.wants_save = true;
-        Ok(())
+        Ok(cost)
+    }
+
+    /// Price of one more of this item for this character (trainee discounts applied).
+    pub fn unit_price(&self, id: &str) -> u32 {
+        let left = items::TRAINEE_DISCOUNT_BUYS.saturating_sub(self.save.trainee_buys);
+        items::purchase_cost(id, 1, left).map(|c| c.0).unwrap_or(0)
+    }
+
+    /// Discounted trainee potions this character can still buy.
+    pub fn trainee_discounts_left(&self) -> u32 {
+        items::TRAINEE_DISCOUNT_BUYS.saturating_sub(self.save.trainee_buys)
     }
 
     /// Sell `n` from an inventory slot to the open shop.
@@ -1645,7 +1806,10 @@ impl Sim {
         }
         let st = self.save.inventory.slots.get(idx).ok_or("No item")?;
         let def = items::item(&st.id).ok_or("Unknown item")?;
-        if def.price == 0 {
+        if def.bound {
+            return Err(format!("{} is bound to you and can't be sold", def.name));
+        }
+        if !def.can_sell() {
             return Err("Can't sell that".into());
         }
         let (_, sold) = self.save.inventory.take_slot(idx, n).ok_or("No item")?;
@@ -1739,6 +1903,9 @@ impl Sim {
         }
         self.particles.clear();
         self.floats.clear();
+        self.drops.clear();
+        self.others.clear();
+        self.last_ground = self.player.body.feet();
         self.populate_map();
         self.map_changed = true;
         self.wants_save = true;
@@ -1746,7 +1913,13 @@ impl Sim {
         self.toast(name, "");
     }
 
-    fn respawn(&mut self) {
+    /// The Respawn button: back to the nearest checkpoint behind you with full
+    /// HP and Mana. Any EXP lost on death stays lost.
+    pub fn respawn(&mut self) -> bool {
+        if self.player.state != PState::Dead {
+            return false;
+        }
+        self.save.tomb = None;
         let (sx, _) = self.map.spawn;
         // Respawn at the furthest checkpoint behind the player.
         let px = self.player.body.pos.x;
@@ -1761,8 +1934,225 @@ impl Sim {
         if let Some(name) = boss {
             self.toast("You were defeated...", &format!("The {} regains its strength. Jump or dodge over its charge!", name));
         } else {
-            self.toast("You were defeated...", "Your progress is safe. Back on your feet!");
+            self.toast("Back on your feet", "You return to the last checkpoint.");
         }
+        self.wants_save = true;
+        true
+    }
+
+    /// Read a Revive Scroll while defeated: stand up where you fell and get
+    /// back any EXP the defeat cost.
+    pub fn revive_with_scroll(&mut self) -> Result<(), String> {
+        if self.player.state != PState::Dead {
+            return Err("Use it when you've been defeated".into());
+        }
+        if self.save.inventory.count("revive_scroll") == 0 {
+            return Err("You don't have a Revive Scroll".into());
+        }
+        self.save.inventory.remove("revive_scroll", 1);
+        let lost = self.save.tomb.take().unwrap_or(0);
+        self.save.exp += lost;
+        self.stand_up(0.5);
+        let body = if lost > 0 { format!("{} EXP restored.", lost) } else { "No EXP lost.".to_string() };
+        self.toast("Revived!", &body);
+        Ok(())
+    }
+
+    /// Another player revived you (for multiplayer). The EXP loss stands.
+    pub fn revive_by_player(&mut self, by: &str) -> bool {
+        if self.player.state != PState::Dead {
+            return false;
+        }
+        self.save.tomb = None;
+        self.stand_up(0.3);
+        self.toast(&format!("{} revived you!", by), "");
+        true
+    }
+
+    fn stand_up(&mut self, frac: f32) {
+        let p = &mut self.player;
+        p.state = PState::Normal;
+        p.state_t = 0.0;
+        p.attack = None;
+        p.body.vel = V2::ZERO;
+        p.hp = (p.max_hp * frac).max(1.0);
+        p.mp = p.mp.max(p.max_mp * frac);
+        p.invuln = 3.0;
+        p.since_hurt = 0.0;
+        let c = p.body.center();
+        self.burst(c, FxKind::Heal, 30, 220.0);
+        self.burst(c, FxKind::LevelUp, 20, 260.0);
+        self.wants_save = true;
+    }
+
+    /// While defeated: the body settles, then lies there as a tombstone.
+    fn update_dead(&mut self, input: &InputState, dt: f32) {
+        let solids = self.solids_with_gates();
+        let lvl = Level { solids: &solids, platforms: &self.map.platforms, bounds: self.map.bounds() };
+        let p = &mut self.player;
+        let fric = if p.body.on_ground { 1400.0 } else { 160.0 };
+        p.body.vel.x = approach(p.body.vel.x, 0.0, fric * dt);
+        physics::apply_gravity(&mut p.body, dt, false, 1.0);
+        physics::move_and_collide(&mut p.body, &lvl, dt);
+        if p.body.pos.y > self.map.kill_y {
+            // Fell out of the world: the tombstone appears where you last stood.
+            let g = self.last_ground;
+            p.body.pos = V2::new(g.x - PLAYER_W * 0.5, g.y - PLAYER_H - 2.0);
+            p.body.vel = V2::ZERO;
+            p.body.on_ground = false;
+        }
+        // The hotbar still works for Revive Scrolls.
+        for (i, a) in HOTBAR_ACTIONS.iter().enumerate() {
+            if input.pressed(*a) {
+                if let Some(HotbarSlot::Item(id)) = self.save.hotbar.get(i).cloned() {
+                    if matches!(items::item(&id).map(|d| d.kind), Some(ItemKind::Special(Special::Revive))) {
+                        self.use_item(&id);
+                    }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ ground loot
+
+    /// Toss a drop into the world from `at`.
+    pub fn spawn_drop(&mut self, kind: DropKind, count: u32, at: V2, spread: f32) {
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut body = Body::new(at.x - 9.0, at.y - 9.0, 18.0, 18.0);
+        body.vel = V2::new(self.rng.range(-1.0, 1.0) * spread, self.rng.range(-430.0, -300.0));
+        self.drops.push(GroundDrop { id, kind, count, body, age: 0.0, taken: None });
+    }
+
+    fn update_drops(&mut self, dt: f32) {
+        if self.drops.is_empty() {
+            return;
+        }
+        let solids = self.solids_with_gates();
+        let lvl = Level { solids: &solids, platforms: &self.map.platforms, bounds: self.map.bounds() };
+        let pc = self.player.body.center();
+        for d in self.drops.iter_mut() {
+            d.age += dt;
+            if let Some((who, target, t)) = &mut d.taken {
+                if *who == Collector::Player {
+                    *target = pc;
+                }
+                *t += dt;
+                let k = (*t / COLLECT_FLY).min(1.0);
+                let c = d.body.center();
+                let n = c + (*target - c) * k;
+                d.body.pos = V2::new(n.x - d.body.w * 0.5, n.y - d.body.h * 0.5);
+                continue;
+            }
+            physics::apply_gravity(&mut d.body, dt, false, 1.0);
+            physics::move_and_collide(&mut d.body, &lvl, dt);
+            if d.body.on_ground {
+                d.body.vel.x = approach(d.body.vel.x, 0.0, 900.0 * dt);
+            }
+        }
+        let kill_y = self.map.kill_y;
+        self.drops.retain(|d| match d.taken {
+            Some((_, _, t)) => t < COLLECT_FLY,
+            None => d.age < DROP_LIFE && d.body.pos.y < kill_y,
+        });
+    }
+
+    /// Index of the closest drop that can be picked up from `pos`.
+    pub fn drop_near(&self, pos: V2, reach: f32) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+        for (i, d) in self.drops.iter().enumerate() {
+            if d.taken.is_some() || d.age < 0.25 {
+                continue;
+            }
+            let c = d.body.center();
+            let dx = (c.x - pos.x).abs();
+            if dx < reach && (c.y - pos.y).abs() < 72.0 && best.map(|b| dx < b.1).unwrap_or(true) {
+                best = Some((i, dx));
+            }
+        }
+        best.map(|b| b.0)
+    }
+
+    /// Pick up the nearest drop (the Pickup key). Returns true if something was taken.
+    pub fn pick_up(&mut self) -> bool {
+        if self.player.state == PState::Dead {
+            return false;
+        }
+        let c = self.player.body.center();
+        let Some(i) = self.drop_near(c, PICKUP_REACH) else { return false };
+        match self.collect(i, Collector::Player, c) {
+            Ok(()) => true,
+            Err(e) => {
+                self.info_float(&e);
+                false
+            }
+        }
+    }
+
+    /// A pet at `pos` grabs up to `max` drops within `reach`. Returns how many
+    /// it took. Loot goes into the owner's bag exactly as if they'd picked it up.
+    pub fn pet_collect(&mut self, pet: u32, pos: V2, reach: f32, max: usize) -> usize {
+        let mut n = 0;
+        while n < max {
+            let Some(i) = self.drop_near(pos, reach) else { break };
+            if self.collect(i, Collector::Pet(pet), pos).is_err() {
+                break;
+            }
+            n += 1;
+        }
+        n
+    }
+
+    /// Move a drop into the bag (or gold purse) and start its fly-in.
+    fn collect(&mut self, i: usize, who: Collector, to: V2) -> Result<(), String> {
+        let d = self.drops[i].clone();
+        let at = d.body.center();
+        match d.kind {
+            DropKind::Gold => {
+                self.save.gold += d.count;
+                self.float(V2::new(at.x, at.y - 30.0), format!("+{} gold", d.count), FloatKind::Loot);
+            }
+            DropKind::Item(id) => {
+                let left = self.save.inventory.add(id, d.count);
+                if left == d.count {
+                    return Err("Your bag is full".into());
+                }
+                let got = d.count - left;
+                let name = items::item(id).map(|x| x.name).unwrap_or(id);
+                let label = if got > 1 { format!("+{}x {}", got, name) } else { format!("+ {}", name) };
+                self.float(V2::new(at.x, at.y - 30.0), label, FloatKind::Loot);
+                if left > 0 {
+                    // Only part of the stack fitted; the rest stays on the ground.
+                    self.drops[i].count = left;
+                    self.wants_save = true;
+                    return Ok(());
+                }
+            }
+        }
+        self.drops[i].taken = Some((who, to, 0.0));
+        self.wants_save = true;
+        Ok(())
+    }
+
+    /// Drop items from a bag slot onto the ground. Bound items refuse.
+    pub fn drop_item(&mut self, idx: usize, n: u32) -> Result<(), String> {
+        if self.player.state == PState::Dead {
+            return Err("You can't do that while defeated".into());
+        }
+        let st = self.save.inventory.slots.get(idx).ok_or("No item")?;
+        let def = items::item(&st.id).ok_or("Unknown item")?;
+        if !def.can_drop() {
+            return Err(format!("{} is bound to you and can't be dropped", def.name));
+        }
+        let (_, taken) = self.save.inventory.take_slot(idx, n).ok_or("No item")?;
+        let c = self.player.body.center();
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut body = Body::new(c.x - 9.0, c.y - 9.0, 18.0, 18.0);
+        body.vel = V2::new(self.player.facing * 150.0, -320.0);
+        self.drops.push(GroundDrop { id, kind: DropKind::Item(def.id), count: taken, body, age: 0.0, taken: None });
+        self.wants_save = true;
+        Ok(())
     }
 
     fn player_died(&mut self) {
@@ -1773,8 +2163,27 @@ impl Sim {
         p.state = PState::Dead;
         p.state_t = 0.0;
         p.attack = None;
+        p.buffs.clear();
         p.body.vel = V2::new(-p.facing * 120.0, -410.0);
         self.shake = 8.0;
+        self.dialog = None;
+        self.shop_open = None;
+        self.teleport_open = false;
+        // Above level 10, a defeat costs some EXP (a Revive Scroll gives it back).
+        let lost = if self.save.level > DEATH_PENALTY_LEVEL { (self.save.exp as f32 * DEATH_EXP_LOSS).floor() as u32 } else { 0 };
+        self.save.exp -= lost;
+        self.save.tomb = Some(lost);
+        if lost > 0 {
+            let c = self.player.body.center();
+            self.float(V2::new(c.x, c.y - 60.0), format!("-{} EXP", lost), FloatKind::PlayerHurt);
+        }
+        self.recompute_stats();
+        self.wants_save = true;
+    }
+
+    /// EXP lost to the current defeat (0 if not defeated).
+    pub fn death_exp_lost(&self) -> u32 {
+        self.save.tomb.unwrap_or(0)
     }
 
     /// Damage the player from an enemy/hazard.
@@ -2200,12 +2609,82 @@ mod tests {
     }
 
     #[test]
-    fn falling_out_respawns() {
+    fn falling_out_leaves_a_tombstone_then_respawns() {
         let mut s = new_sim(ClassId::Windrunner);
+        run(&mut s, 1.0, InputState::default());
+        let stood = s.last_ground;
         s.player.body.pos.y = 2000.0;
         run(&mut s, 3.0, InputState::default());
+        assert_eq!(s.player.state, PState::Dead, "stays down until Respawn is clicked");
+        assert!(s.player.body.pos.y < s.map.kill_y, "tombstone is back on the map");
+        assert!((s.player.body.feet().x - stood.x).abs() < 40.0, "tombstone where you last stood");
+        assert!(s.save.tomb.is_some());
+        run(&mut s, 20.0, InputState::default());
+        assert_eq!(s.player.state, PState::Dead, "no automatic respawn");
+        assert!(s.respawn());
         assert_ne!(s.player.state, PState::Dead);
-        assert!(s.player.hp > 0.0);
+        assert_eq!(s.player.hp, s.player.max_hp);
+        assert!(s.save.tomb.is_none());
+    }
+
+    #[test]
+    fn death_costs_exp_above_level_10_and_scrolls_refund_it() {
+        // Level 10: no penalty.
+        let mut s = new_sim(ClassId::Vanguard);
+        s.save.exp = 1000;
+        run(&mut s, 0.5, InputState::default());
+        s.player.invuln = 0.0;
+        s.player.state = PState::Normal;
+        s.hurt_player(99999.0, 0.0, V2::ZERO, false);
+        assert_eq!(s.player.state, PState::Dead);
+        assert_eq!(s.save.exp, 1000, "no EXP loss at level 10");
+        assert!(s.respawn());
+        // Level 11: lose 3% of current EXP.
+        s.save.level = 11;
+        s.save.exp = 1000;
+        s.recompute_stats();
+        s.player.hp = s.player.max_hp;
+        s.player.invuln = 0.0;
+        s.player.state = PState::Normal;
+        s.hurt_player(99999.0, 0.0, V2::ZERO, false);
+        assert_eq!(s.save.exp, 970);
+        assert_eq!(s.death_exp_lost(), 30);
+        // Enemies and potions can't touch a tombstone.
+        assert!(s.player.is_invulnerable());
+        assert!(!s.use_item("hp_potion"));
+        assert!(!s.pick_up());
+        // No scroll: can't revive that way.
+        assert!(s.revive_with_scroll().is_err());
+        s.save.inventory.add("revive_scroll", 1);
+        // A Revive Scroll on the hotbar works while defeated and refunds the EXP.
+        s.set_hotbar(2, HotbarSlot::Item("revive_scroll".into()));
+        run(&mut s, 1.0, InputState::default());
+        run(&mut s, 0.02, press(&[Action::Hotbar3], &[]));
+        assert_ne!(s.player.state, PState::Dead, "scroll revived on the spot");
+        assert_eq!(s.save.exp, 1000, "scroll negates the EXP loss");
+        assert_eq!(s.save.inventory.count("revive_scroll"), 0);
+        assert!(s.save.tomb.is_none());
+        // Revived by another player: back up, but the loss stands.
+        s.player.invuln = 0.0;
+        s.player.state = PState::Normal;
+        s.hurt_player(99999.0, 0.0, V2::ZERO, false);
+        assert!(s.revive_by_player("Friend"));
+        assert_eq!(s.save.exp, 970);
+    }
+
+    #[test]
+    fn tombstone_survives_logging_out() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.save.level = 12;
+        s.save.exp = 500;
+        run(&mut s, 0.5, InputState::default());
+        s.player.invuln = 0.0;
+        s.hurt_player(99999.0, 0.0, V2::ZERO, false);
+        run(&mut s, 1.0, InputState::default());
+        let save = s.snapshot();
+        assert_eq!(save.tomb, Some(15));
+        let s2 = Sim::new(save, Settings::default(), 3);
+        assert_eq!(s2.player.state, PState::Dead, "still a tombstone after loading");
     }
 
     /// A simple "bot" holds right and jumps / double-jumps whenever it's
@@ -2603,18 +3082,156 @@ mod tests {
     }
 
     #[test]
-    fn monsters_drop_loot() {
+    fn monsters_drop_loot_and_gold_on_the_ground() {
         let mut s = new_sim(ClassId::Vanguard);
         s.change_map("old_quarry", 220.0);
-        let before = s.save.inventory.slots.len();
+        run(&mut s, 0.5, InputState::default());
+        s.enemies.clear();
+        let x = s.player.body.center().x;
         for _ in 0..30 {
-            let k = EnemyKind::QuarryCrab;
-            s.spawn_enemy(k, 400.0, world::GROUND, None);
+            s.spawn_enemy(EnemyKind::QuarryCrab, x + 30.0, world::GROUND, None);
             let i = s.enemies.len() - 1;
             s.kill_enemy(i);
         }
-        assert!(s.save.inventory.count("crab_shell") > 5, "crab shells should drop often");
-        assert!(s.save.inventory.slots.len() > before);
+        assert_eq!(s.save.inventory.count("crab_shell"), 0, "nothing goes straight into the bag");
+        let shells = s.drops.iter().filter(|d| d.kind == DropKind::Item("crab_shell")).count();
+        assert!(shells > 5, "crab shells should drop often ({})", shells);
+        assert!(s.drops.iter().any(|d| d.kind == DropKind::Gold), "gold drops too");
+        // Let them land, then pick everything up with F (hold).
+        for _ in 0..20 {
+            s.player.invuln = 9.0;
+            run(&mut s, 0.1, InputState::default());
+        }
+        assert!(s.drops.iter().all(|d| d.body.on_ground), "drops settle on the ground");
+        let gold0 = s.save.gold;
+        let n0 = s.drops.len();
+        run(&mut s, 0.02, press(&[Action::Pickup], &[Action::Pickup]));
+        run(&mut s, 0.3, InputState::default());
+        assert_eq!(s.drops.len(), n0 - 1, "one press picks up one drop");
+        for _ in 0..60 {
+            s.player.invuln = 9.0;
+            // keep collecting what's in reach; walk to the rest
+            if let Some(d) = s.drops.iter().find(|d| d.taken.is_none()) {
+                s.player.body.pos.x = d.body.center().x - PLAYER_W * 0.5;
+            }
+            run(&mut s, 0.15, press(&[], &[Action::Pickup]));
+        }
+        run(&mut s, 0.5, InputState::default());
+        assert!(s.drops.is_empty(), "{} drops left", s.drops.len());
+        assert!(s.save.gold > gold0);
+        assert_eq!(s.save.inventory.count("crab_shell") as usize, shells);
+    }
+
+    #[test]
+    fn pets_bag_full_and_despawn() {
+        let mut s = new_sim(ClassId::Vanguard);
+        run(&mut s, 0.5, InputState::default());
+        let c = s.player.body.center();
+        s.spawn_drop(DropKind::Item("moss_clump"), 3, c, 0.0);
+        s.spawn_drop(DropKind::Gold, 12, c, 0.0);
+        run(&mut s, 1.0, InputState::default());
+        // A pet picks things up for its owner.
+        let gold = s.save.gold;
+        assert_eq!(s.pet_collect(1, c, 120.0, 5), 2);
+        assert_eq!(s.save.inventory.count("moss_clump"), 3);
+        assert_eq!(s.save.gold, gold + 12);
+        // Bag full: the drop stays on the ground.
+        for _ in 0..30 {
+            s.save.inventory.add("copper_ring", 1);
+        }
+        s.spawn_drop(DropKind::Item("wool_tuft"), 1, c, 0.0);
+        run(&mut s, 1.0, InputState::default());
+        assert!(!s.pick_up());
+        assert_eq!(s.drops.len(), 1);
+        // Loot vanishes after a while.
+        for _ in 0..13 {
+            s.player.invuln = 99.0;
+            run(&mut s, 10.0, InputState::default());
+        }
+        assert!(s.drops.is_empty());
+    }
+
+    #[test]
+    fn dropping_items_but_not_bound_ones() {
+        let mut s = new_sim(ClassId::Novice);
+        run(&mut s, 0.5, InputState::default());
+        s.save.inventory.add("wool_tuft", 2);
+        s.save.inventory.add("trainee_hp_potion", 2);
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "wool_tuft").unwrap();
+        assert!(s.drop_item(i, 2).is_ok());
+        assert_eq!(s.drops.len(), 1);
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "trainee_hp_potion").unwrap();
+        assert!(s.drop_item(i, 1).is_err(), "bound");
+        assert_eq!(s.save.inventory.count("trainee_hp_potion"), 2);
+    }
+
+    #[test]
+    fn tutorial_vendor_discounts_bound_potions_and_buys_loot() {
+        let mut s = new_sim(ClassId::Novice);
+        s.save.gold = 1000;
+        s.change_map("dawnwind_glade", 3300.0);
+        talk_and_accept(&mut s, "quartermaster_hesper");
+        assert_eq!(s.shop_open, Some(items::GLADE_SHOP));
+        // First 10 trainee potions are 40% off (15 -> 9 gold).
+        assert_eq!(s.unit_price("trainee_hp_potion"), 9);
+        assert_eq!(s.buy("trainee_hp_potion", 6).unwrap(), 54);
+        assert_eq!(s.buy("trainee_mp_potion", 6).unwrap(), 4 * 11 + 2 * 18, "4 discounted left, then full price");
+        assert_eq!(s.trainee_discounts_left(), 0);
+        assert_eq!(s.unit_price("trainee_hp_potion"), 15);
+        // Level 8 gear is on sale.
+        assert!(s.buy("ironwood_blade", 1).is_ok());
+        assert!(s.equip_problem("ironwood_blade").is_some(), "needs level 8");
+        // Bound potions can't be sold; monster loot can.
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "trainee_hp_potion").unwrap();
+        assert!(s.sell(i, 1).is_err());
+        s.save.inventory.add("moss_clump", 5);
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "moss_clump").unwrap();
+        assert_eq!(s.sell(i, 5).unwrap(), 10);
+        // The Potion key drinks trainee potions too.
+        s.player.hp = 1.0;
+        let n = s.save.inventory.count("hp_potion") + s.save.inventory.count("trainee_hp_potion");
+        s.drink_potion();
+        assert_eq!(s.save.inventory.count("hp_potion") + s.save.inventory.count("trainee_hp_potion"), n - 1);
+    }
+
+    #[test]
+    fn class_change_awards_a_skill_reset_coupon() {
+        let mut s = new_sim(ClassId::Novice);
+        s.save.level = 10;
+        s.save.ap = 45;
+        s.recompute_stats();
+        s.change_class(ClassId::Stormfist).unwrap();
+        assert_eq!(s.save.inventory.count("skill_reset_coupon"), 1);
+        assert!(s.reset_ability_points().is_err(), "nothing spent yet");
+        s.auto_spend_ap();
+        assert_eq!(s.save.ap, 0);
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "skill_reset_coupon").unwrap();
+        s.activate_slot(i);
+        assert_eq!(s.save.ap, 45, "all points refunded");
+        assert_eq!(s.save.stats, stats::START_STATS);
+        assert_eq!(s.save.inventory.count("skill_reset_coupon"), 0, "coupon used up");
+        let i = s.save.inventory.slots.len();
+        s.save.inventory.add("skill_reset_coupon", 1);
+        assert!(s.drop_item(i, 1).is_err(), "coupon is bound");
+    }
+
+    #[test]
+    fn tutorial_quests_hand_out_novice_gear() {
+        let mut s = new_sim(ClassId::Novice);
+        quests::accept(&mut s.save, "first_breeze");
+        quests::on_event(&mut s.save, QuestEvent::Reached("lookout"));
+        s.change_map("dawnwind_glade", 2300.0);
+        talk_and_accept(&mut s, "scout_tamsin");
+        assert_eq!(s.save.inventory.count("novice_charm"), 1);
+        talk_and_accept(&mut s, "scout_tamsin"); // accept Gust Dodger
+        for _ in 0..3 {
+            s.player.dodge_cd = 0.0;
+            run(&mut s, 0.02, press(&[Action::Dodge], &[]));
+            run(&mut s, 0.7, InputState::default());
+        }
+        s.player.body.pos.x = 2300.0;
+        talk_and_accept(&mut s, "scout_tamsin");
+        assert_eq!(s.save.inventory.count("novice_boots"), 1);
     }
 
     #[test]

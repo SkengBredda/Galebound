@@ -59,6 +59,18 @@ fn skill_tex(s: &SkillDef) -> macroquad::prelude::Texture2D {
     sprites::get(&format!("icon_s_{}", s.id), || icons::skill(s))
 }
 
+/// Shorten text with "..." so it fits in `max_w`.
+fn clip(s: &str, max_w: f32, size: f32) -> String {
+    if gfx::text_w(s, size) <= max_w {
+        return s.to_string();
+    }
+    let mut out: String = s.to_string();
+    while !out.is_empty() && gfx::text_w(&format!("{}...", out), size) > max_w {
+        out.pop();
+    }
+    format!("{}...", out.trim_end())
+}
+
 fn shift() -> bool {
     is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift)
 }
@@ -305,7 +317,7 @@ impl Windows {
         }
         gfx::circle(x + 34.0, y + h - 56.0, 8.0, rgb(240, 196, 70));
         gfx::text(&format!("{} gold", sim.save.gold), x + 48.0, y + h - 64.0, 16.0, widgets::ink());
-        let help = if sim.shop_open.is_some() { "Click: use/equip. Right-click: sell" } else { "Click: use/equip. Drag to hotbar" };
+        let help = if sim.shop_open.is_some() { "Click: use/equip. Right-click: sell" } else { "Click: use/equip. Drag to hotbar, or out to drop" };
         gfx::text(help, x + 24.0, y + h - 38.0, 12.0, widgets::ink_soft());
     }
 
@@ -435,7 +447,7 @@ impl Windows {
         let pages = shop.stock.len().div_ceil(PER_PAGE).max(1);
         self.shop_page = self.shop_page.min(pages - 1);
         let rows = PER_PAGE.min(shop.stock.len());
-        let (x, y, w) = (420.0, 70.0, 440.0);
+        let (x, y, w) = (360.0, 70.0, 500.0);
         let h = 120.0 + rows as f32 * row_h + if pages > 1 { 40.0 } else { 0.0 };
         widgets::panel(x, y, w, h);
         self.hit((x, y, w, h), Target::Window);
@@ -457,16 +469,29 @@ impl Windows {
             }
             slot_bg(x + 22.0, ry, 40.0, hv, Some(px_color(icons::tier_color(def.tier))));
             gfx::tex(&item_tex(def), x + 24.0, ry + 2.0, 1.0, false, WHITE);
-            gfx::text(def.name, x + 74.0, ry + 2.0, 15.0, widgets::ink());
+            let text_w = w - 74.0 - 200.0;
+            gfx::text(&clip(def.name, text_w + 40.0, 15.0), x + 74.0, ry + 2.0, 15.0, widgets::ink());
+            let each = sim.unit_price(def.id);
+            let discounted = each < def.price;
             let problem = sim.equip_problem(def.id);
-            let sub = match &problem {
-                Some(p) => p.clone(),
-                None => def.stat_lines().first().cloned().unwrap_or_else(|| def.desc.to_string()),
+            let (sub, sub_col) = match &problem {
+                Some(p) => (p.clone(), widgets::danger()),
+                None if discounted => (format!("40% off - {} left", sim.trainee_discounts_left()), rgb(40, 140, 80)),
+                None if def.bound => ("Bound to you".to_string(), rgb(150, 90, 170)),
+                None => (def.stat_lines().first().cloned().unwrap_or_else(|| def.desc.to_string()), widgets::ink_soft()),
             };
-            gfx::text(&sub, x + 74.0, ry + 22.0, 12.0, if problem.is_some() { widgets::danger() } else { widgets::ink_soft() });
-            let price = format!("{}g", def.price);
-            let afford = sim.save.gold >= def.price;
-            gfx::text(&price, x + w - 140.0 - gfx::text_w(&price, 15.0), ry + 10.0, 15.0, if afford { rgb(170, 120, 20) } else { widgets::danger() });
+            gfx::text(&clip(&sub, text_w, 12.0), x + 74.0, ry + 22.0, 12.0, sub_col);
+            let price = format!("{}g", each);
+            let afford = sim.save.gold >= each;
+            let px = x + w - 136.0;
+            gfx::text(&price, px - gfx::text_w(&price, 15.0), if discounted { ry + 2.0 } else { ry + 10.0 }, 15.0, if afford { rgb(170, 120, 20) } else { widgets::danger() });
+            if discounted {
+                // the full price, struck through
+                let old = format!("{}g", def.price);
+                let ow = gfx::text_w(&old, 12.0);
+                gfx::text(&old, px - ow, ry + 22.0, 12.0, rgb(150, 140, 130));
+                gfx::rect(px - ow - 1.0, ry + 28.0, ow + 2.0, 2.0, rgb(170, 70, 60));
+            }
             let label = if def.stackable() && shift() { "Buy 10" } else { "Buy" };
             if widgets::button(ui, x + w - 124.0, ry + 4.0, 98.0, 34.0, label, ButtonStyle::Primary, afford) {
                 let n = if def.stackable() && shift() { 10 } else { 1 };
@@ -487,7 +512,7 @@ impl Windows {
         gfx::text_centered("Shift: buy x10. Right-click to sell.", x + w * 0.5, y + h - 34.0, 12.0, widgets::ink_soft());
         if let Some((id, n)) = buy {
             match sim.buy(id, n) {
-                Ok(()) => self.say(format!("Bought {}x {}", n, items::item(id).map(|d| d.name).unwrap_or(id)), false),
+                Ok(g) => self.say(format!("Bought {}x {} for {} gold", n, items::item(id).map(|d| d.name).unwrap_or(id), g), false),
                 Err(e) => self.say(e, true),
             }
         }
@@ -805,7 +830,7 @@ impl Windows {
             (Target::Inv(i), Some(Target::Bar(j))) => {
                 let Some(id) = sim.save.inventory.slots.get(i).map(|s| s.id.clone()) else { return };
                 match items::item(&id).map(|d| d.kind) {
-                    Some(ItemKind::Consumable(_)) => sim.set_hotbar(j, HotbarSlot::Item(id)),
+                    Some(ItemKind::Consumable(_)) | Some(ItemKind::Special(_)) => sim.set_hotbar(j, HotbarSlot::Item(id)),
                     _ => self.say("Only consumables go on the hotbar", true),
                 }
             }
@@ -815,6 +840,15 @@ impl Windows {
                 }
             }
             (Target::Inv(i), Some(Target::Inv(j))) => sim.swap_inventory(i, j),
+            // Dragged out of every window: drop it on the ground.
+            (Target::Inv(i), None) => {
+                let name = sim.save.inventory.slots.get(i).and_then(|st| items::item(&st.id)).map(|d| d.name).unwrap_or("item");
+                let n = if shift() { 1 } else { u32::MAX };
+                match sim.drop_item(i, n) {
+                    Ok(()) => self.say(format!("Dropped {}", name), false),
+                    Err(e) => self.say(e, true),
+                }
+            }
             (Target::Skill(id), Some(Target::Bar(j))) => sim.set_hotbar(j, HotbarSlot::Skill(id.to_string())),
             (Target::Bar(i), Some(Target::Bar(j))) => sim.swap_hotbar(i, j),
             (Target::Bar(i), None) => sim.set_hotbar(i, HotbarSlot::Empty),
@@ -839,6 +873,8 @@ impl Windows {
             let kind = match def.kind {
                 ItemKind::Consumable(_) => "Consumable".to_string(),
                 ItemKind::Material => "Monster loot - sells to any shop".to_string(),
+                ItemKind::Special(items::Special::Revive) => "Special - use when defeated".to_string(),
+                ItemKind::Special(items::Special::SkillReset) => "Special - click to use".to_string(),
                 ItemKind::Equip(s) => match def.class {
                     Some(c) => format!("{} - {}", s.name(), c.info().name),
                     None => s.name().to_string(),
@@ -858,7 +894,10 @@ impl Windows {
                 }
             }
             lines.push((def.desc.to_string(), rgb(230, 230, 240), 13.0));
-            if selling && def.price > 0 {
+            if def.bound {
+                lines.push(("Bound: can't be sold, traded or dropped".to_string(), rgb(210, 150, 255), 13.0));
+            }
+            if selling && def.can_sell() {
                 lines.push((format!("Sells for {}g", def.sell_price()), rgb(240, 200, 90), 13.0));
             }
         };

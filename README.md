@@ -5,6 +5,8 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
+**Version 0.6.0.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+
 ## Running it
 
 1. Install Rust: https://rustup.rs
@@ -43,7 +45,9 @@ off in the inventory to show the outfit you designed - you no longer pick a clas
 creator. At level 10, take the North Road from Breezehollow to **Wayfarer's
 Crossroads**, walk to a class town and talk to its instructor. Changing class
 refunds every ability point so you can rebuild around the new main stats,
-gives you the class weapon and unlocks its abilities.
+gives you the class weapon, unlocks its abilities and hands you a **Skill
+Reset Coupon** (bound to you) - use it from your bag any time to refund every
+spent ability point again.
 
 | Class | Role | Weapon | Main stats | Town |
 |---|---|---|---|---|
@@ -104,8 +108,29 @@ They have 15 new monsters and are built in layers. **Ladders, ropes and vines**
 monsters, and a high shelf holds the strongest ones. The Fields, Woods and
 Cliffs have new climbable shelves too.
 
-**Loot.** Monsters drop materials (sell them at any shop), potions and,
-rarely, gear. Drops go straight into your bag.
+**Loot on the ground.** Monsters spill gold and loot (materials, potions and,
+rarely, gear) onto the ground. Walk over and press `F` to pick up the nearest
+drop; hold `F` to keep scooping. Loot stays for 2 minutes and blinks before it
+vanishes. Sell materials at any shop. Drag an item out of the bag to drop it
+(Shift-drag drops one). The pick-up code also works for pets
+(`Sim::pet_collect`), ready for when pets arrive.
+
+**Defeat.** When your HP hits 0 you fall and become a **tombstone** where you
+lay. It stays until you click **Respawn** (back to the last checkpoint with
+full HP; Enter also works), read a **Revive Scroll** (get up on the spot), or
+another player revives you (multiplayer hook: `Sim::revive_by_player`).
+Above level 10, a defeat costs **3% of your current EXP**; a Revive Scroll
+gives it all back. You stay a tombstone even if you log out.
+
+**Minimap** (top-right). Terrain, platforms and ladders, portals, NPCs (gold =
+new quest, blue = turn-in), waystones, other players and you. The header
+buttons make it smaller / bigger, switch between the area around you and the
+whole map, or hide it; `N` cycles sizes.
+
+**Graphics** (`Esc` → Graphics). Windowed, Windowed Fullscreen or Fullscreen.
+The choice is remembered on this computer. The graphics library only offers a
+borderless fullscreen window, so Fullscreen and Windowed Fullscreen currently
+behave the same.
 
 **World map (`M`).** Shows every area, where you are, recommended levels,
 monsters and possible loot, and which waystones you've attuned.
@@ -119,8 +144,9 @@ game is never paused - it's an MMO - so your character just stands still while
 the menu is open.
 
 Inventory (`I`): 24 slots plus Weapon / Armor / Boots / Accessory. Click to
-use or equip, right-click to sell while a shop is open. Mira and Garrick in
-Breezehollow also run small shops.
+use or equip, right-click to sell while a shop is open, drag out to drop.
+**Bound** items (trainee potions, Skill Reset Coupons) can't be sold, traded
+or dropped. Mira and Garrick in Breezehollow also run small shops.
 
 Every class has 11 moves: light neutral/side/down, air neutral/side/down, heavy
 neutral/side/down, air-heavy (recovery) and air-heavy-down (dive / slam).
@@ -132,13 +158,24 @@ the five classes) - body type (masculine / feminine), 10 hairstyles
 including high-top sneakers, 8 skin tones, live animated preview, 3 slots.
 
 **Tutorial: Dawnwind Glade → Breezehollow**
-1. *Elder Wynn* – climb Windstep Rise (teaches double jump).
-2. *Tamsin* – dodge 3 times.
-3. *Sergeant Brask* – light attacks, then heavy/signature attacks on dummies.
-4. *Ranger Pell* – clear Mosslings, then Burrowbeaks (telegraphed lunges).
-5. *Warden Ilsa* – defeat the **Bramblehorn** mini-boss (charges, stomps,
-   thorn volleys, enrages at 50%) to open the Old Gate.
-6. *Mayor Odessa* in Breezehollow, then meet the townsfolk (Mira sells potions
+1. *Elder Wynn* – climb Windstep Rise (teaches double jump). Reward: Novice's
+   Wind Charm (handed over by Tamsin).
+2. *Tamsin* – dodge 3 times. Reward: Novice's Boots.
+3. *Sergeant Brask* – light attacks (reward: Novice's Practice Sword), then
+   heavy/signature attacks on dummies.
+4. *Quartermaster Hesper* – her supply wagon stands next to the dummies.
+   Trainee HP & Mana potions (40% off for your first 10, bound to you), Revive
+   Scrolls, and Lv 8 weapons and armour (Ironwood Blade, Ironbound Cudgel,
+   Padded Gambeson, Trailblazer Boots). She buys monster loot too.
+5. *Ranger Pell* – clear Mosslings (reward: Novice's Tunic), then Burrowbeaks
+   (telegraphed lunges).
+6. *Warden Ilsa* – defeat the **Bramblehorn** mini-boss (charges, stomps,
+   thorn volleys, enrages at 50%) to open the Old Gate. Reward includes a
+   Revive Scroll.
+
+Every quest offer shows its rewards (EXP, gold, potions and items with icons)
+in the dialog window before you accept.
+7. *Mayor Odessa* in Breezehollow, then meet the townsfolk (Mira sells potions
    and heals you, Garrick the blacksmith, Aurel the class mentor).
 
 **Zones beyond the town** (23 quests in total, Lv 1 to ~15)
@@ -169,6 +206,8 @@ Signs along the way teach the controls and always show *your* current keys.
 | Quest log | Tab | Tab | Tab |
 | Inventory / Character / Abilities | I / P / B | I / P / B | I / P / B |
 | World map | M | M | M |
+| Pick up loot (hold to keep picking) | F | F | F |
+| Minimap size | N | N | N |
 | Climb ladders / ropes / vines | W / S | Up / Down | Up / Down |
 | Hotbar | 1-8 | 1-8 | 1-8 |
 
@@ -191,7 +230,8 @@ core/        galebound-core: zero-dependency game logic (unit tested)
   stats.rs     main stats, derived combat stats, ability points
   items.rs     items, inventory/equipment, shop catalogues
   skills.rs    class abilities, hotbar
-  sim.rs       120 Hz simulation: player controller, combat, FX events
+  sim.rs       120 Hz simulation: player controller, combat, ground loot,
+               death / revive, FX events
   enemies.rs   monster definitions and behaviours (hopper, lunger, floater, boss)
   world.rs     maps (incl. class towns + shop interiors), NPCs, spawns, portals
   quests.rs    quest chain, dialogue, progress tracking
@@ -210,6 +250,9 @@ src/         the client (macroquad): rendering, UI, input
   windows.rs   hotbar, inventory, character, abilities, shop windows
   townart.rs   storefronts, inns, class halls, shop interiors
   icons.rs     item and ability icons
+  lootart.rs   gold piles and the tombstone
+  minimap.rs   the adjustable minimap
+  display.rs   windowed / fullscreen switching
   screens/     login, character select, creation, game
 ```
 

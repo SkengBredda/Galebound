@@ -44,6 +44,8 @@ pub struct QuestDef {
     pub exp: u32,
     pub gold: u32,
     pub potions: u32,
+    /// Item rewards (id, count) handed over on completion.
+    pub items: &'static [(&'static str, u32)],
     /// Story flag set when the quest is accepted / completed.
     pub flag_on_accept: Option<&'static str>,
     pub flag_on_complete: Option<&'static str>,
@@ -67,10 +69,11 @@ pub const QUESTS: &[QuestDef] = &[
             "Press {Jump} to jump, and press it again in mid-air to double jump. Scout Tamsin waits past the Rise.",
         ],
         reminder: "The Lookout is atop Windstep Rise, to the east. Double jump with {Jump} in mid-air!",
-        complete: &["You made it up the Rise? The Elder sent word you'd come. Not bad for a newcomer!"],
+        complete: &["You made it up the Rise? The Elder sent word you'd come. Not bad for a newcomer!", "She asked me to give you this - her wind charm. It's brought luck to every traveller who's worn it."],
         exp: 20,
         gold: 5,
         potions: 0,
+        items: &[("novice_charm", 1)],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -89,10 +92,11 @@ pub const QUESTS: &[QuestDef] = &[
             "You can dodge on the ground or in the air, and hold a direction to dodge that way. Show me three!",
         ],
         reminder: "Press {Dodge} to dodge. Three times!",
-        complete: &["Light on your feet! Take these potions - press {Potion} to drink one in a pinch."],
+        complete: &["Light on your feet! Take these potions - press {Potion} to drink one in a pinch.", "And have my old scouting boots. They'll keep you quick."],
         exp: 20,
         gold: 5,
         potions: 2,
+        items: &[("novice_boots", 1)],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -112,10 +116,11 @@ pub const QUESTS: &[QuestDef] = &[
             "Six clean light hits on my dummies. Move it!",
         ],
         reminder: "Six light hits ({Light}) on the dummies, recruit!",
-        complete: &["Acceptable. Mix directions - a sweep into an air slash is a classic combo."],
+        complete: &["Acceptable. Mix directions - a sweep into an air slash is a classic combo.", "Take my spare practice sword. It hits harder than that stick of yours. Equip it from your bag ({Inventory})."],
         exp: 25,
         gold: 5,
         potions: 0,
+        items: &[("novice_sword", 1)],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -140,6 +145,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 30,
         gold: 10,
         potions: 1,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -158,10 +164,11 @@ pub const QUESTS: &[QuestDef] = &[
             "Thin them out for me? Eight should do.",
         ],
         reminder: "The Hollow's just down the slope. Eight Mosslings!",
-        complete: &["The Hollow's breathing again. Thank you!"],
+        complete: &["The Hollow's breathing again. Thank you!", "Here - my old tunic. Patched, but it's turned a few claws in its time."],
         exp: 60,
         gold: 20,
         potions: 1,
+        items: &[("novice_tunic", 1)],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -184,6 +191,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 70,
         gold: 20,
         potions: 1,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -203,10 +211,11 @@ pub const QUESTS: &[QuestDef] = &[
             "Bring it down and I'll open the Gate to Breezehollow.",
         ],
         reminder: "The Bramblehorn waits by the Gate. Jump or dodge its charge!",
-        complete: &["Incredible! The Old Gate is open. Breezehollow lies beyond - Mayor Odessa will want to meet you."],
+        complete: &["Incredible! The Old Gate is open. Breezehollow lies beyond - Mayor Odessa will want to meet you.", "Keep this Revive Scroll. If you ever fall, read it and you'll be back on your feet without losing a thing."],
         exp: 150,
         gold: 50,
         potions: 2,
+        items: &[("revive_scroll", 1)],
         flag_on_accept: Some("boss_awake"),
         flag_on_complete: Some("gate_open"),
         chain_to: Some("report_to_mayor"),
@@ -229,6 +238,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 50,
         gold: 30,
         potions: 0,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: Some("welcomed"),
         chain_to: Some("meet_the_town"),
@@ -248,6 +258,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 40,
         gold: 25,
         potions: 2,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -271,6 +282,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 60,
         gold: 20,
         potions: 1,
+        items: &[],
         flag_on_accept: Some("fields_open"),
         flag_on_complete: None,
         chain_to: None,
@@ -293,6 +305,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 220,
         gold: 40,
         potions: 2,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -315,6 +328,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 260,
         gold: 45,
         potions: 1,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: Some("meet_oren"),
@@ -334,6 +348,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 80,
         gold: 10,
         potions: 0,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -356,6 +371,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 100,
         gold: 15,
         potions: 1,
+        items: &[],
         flag_on_accept: Some("woods_open"),
         flag_on_complete: None,
         chain_to: None,
@@ -379,6 +395,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 420,
         gold: 60,
         potions: 2,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -401,6 +418,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 480,
         gold: 70,
         potions: 1,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: Some("find_sable"),
@@ -420,6 +438,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 120,
         gold: 15,
         potions: 0,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -442,6 +461,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 600,
         gold: 90,
         potions: 2,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -464,6 +484,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 150,
         gold: 20,
         potions: 1,
+        items: &[],
         flag_on_accept: Some("cliffs_open"),
         flag_on_complete: None,
         chain_to: None,
@@ -487,6 +508,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 800,
         gold: 110,
         potions: 2,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -509,6 +531,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 900,
         gold: 120,
         potions: 3,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: Some("summit_call"),
@@ -528,6 +551,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 200,
         gold: 25,
         potions: 1,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -554,6 +578,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 2500,
         gold: 400,
         potions: 4,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: Some("summit_cleared"),
         chain_to: None,
@@ -578,6 +603,7 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 150,
         gold: 120,
         potions: 3,
+        items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
         chain_to: None,
@@ -653,6 +679,16 @@ fn idle_lines(npc: &str, save: &CharacterSave) -> Vec<String> {
         "elder_wynn" => &["The wind always knows where it's going. Follow it east, young one."],
         "scout_tamsin" => &["Keep moving and nothing can touch you. That's the scout's way."],
         "sergeant_brask" => &["The dummies are always here if you want to practise. Try air attacks!"],
+        "quartermaster_hesper" => {
+            if save.trainee_buys < crate::items::TRAINEE_DISCOUNT_BUYS {
+                &[
+                    "Supplies for the road! Trainee potions are 40% off for your first ten - my treat for new recruits.",
+                    "They're bound to you, mind: no selling, trading or dropping them. I'll buy any monster loot you've picked up, though.",
+                ]
+            } else {
+                &["Back again? I've got potions, sturdy Lv 8 gear, and I'll buy whatever the Hollow coughed up."]
+            }
+        }
         "ranger_pell" => &["The Hollow's quieter thanks to you. Mostly."],
         "warden_ilsa" => {
             if save.has_flag("gate_open") {
@@ -833,8 +869,31 @@ pub struct Reward {
     pub exp: u32,
     pub gold: u32,
     pub potions: u32,
+    /// Item rewards (id, count); anything that didn't fit in the bag is in `overflow`.
+    pub items: &'static [(&'static str, u32)],
+    pub overflow: Vec<(&'static str, u32)>,
     pub quest_name: &'static str,
     pub chained: Option<&'static str>,
+}
+
+/// Everything a quest gives, for showing before it's accepted:
+/// (item id or "" for plain text, label, count).
+pub fn reward_list(def: &QuestDef) -> Vec<(&'static str, String)> {
+    let mut v: Vec<(&'static str, String)> = Vec::new();
+    if def.exp > 0 {
+        v.push(("", format!("{} EXP", def.exp)));
+    }
+    if def.gold > 0 {
+        v.push(("", format!("{} gold", def.gold)));
+    }
+    if def.potions > 0 {
+        v.push(("hp_potion", format!("{}x Red Potion", def.potions)));
+    }
+    for &(id, n) in def.items {
+        let name = crate::items::item(id).map(|d| d.name).unwrap_or(id);
+        v.push((id, if n > 1 { format!("{}x {}", n, name) } else { name.to_string() }));
+    }
+    v
 }
 
 /// Mark a quest done, set flags, auto-accept any chained quest. EXP is
@@ -847,7 +906,17 @@ pub fn complete(save: &mut CharacterSave, id: &str) -> Option<Reward> {
     }
     q.state = QuestState::Done;
     save.gold += def.gold;
-    save.inventory.add("hp_potion", def.potions);
+    let mut overflow = Vec::new();
+    let left = save.inventory.add("hp_potion", def.potions);
+    if left > 0 {
+        overflow.push(("hp_potion", left));
+    }
+    for &(item, n) in def.items {
+        let left = save.inventory.add(item, n);
+        if left > 0 {
+            overflow.push((item, left));
+        }
+    }
     if let Some(f) = def.flag_on_complete {
         save.set_flag(f);
     }
@@ -856,7 +925,7 @@ pub fn complete(save: &mut CharacterSave, id: &str) -> Option<Reward> {
         accept(save, next);
         chained = quest_def(next).map(|d| d.name);
     }
-    Some(Reward { exp: def.exp, gold: def.gold, potions: def.potions, quest_name: def.name, chained })
+    Some(Reward { exp: def.exp, gold: def.gold, potions: def.potions, items: def.items, overflow, quest_name: def.name, chained })
 }
 
 /// Quest that the tracker HUD should show, with progress text.
@@ -887,6 +956,7 @@ pub fn npc_display_name(id: &str) -> &'static str {
         "elder_wynn" => "Elder Wynn",
         "scout_tamsin" => "Tamsin",
         "sergeant_brask" => "Sergeant Brask",
+        "quartermaster_hesper" => "Hesper",
         "ranger_pell" => "Pell",
         "warden_ilsa" => "Warden Ilsa",
         "mayor_odessa" => "Mayor Odessa",
@@ -949,6 +1019,7 @@ pub fn instructor_class(npc_id: &str) -> Option<ClassId> {
 pub fn npc_shop(npc_id: &str) -> Option<&'static str> {
     match npc_id {
         "mira" => Some("breezehollow_general"),
+        "quartermaster_hesper" => Some(crate::items::GLADE_SHOP),
         "garrick" => Some("breezehollow_smith"),
         other => crate::items::shop(other).map(|s| s.id),
     }
@@ -1060,8 +1131,31 @@ mod tests {
         assert_eq!(on_event(&mut s, QuestEvent::Reached("lookout")), vec!["First Breeze"]);
         let d = talk("scout_tamsin", "Tamsin", &mut s);
         assert_eq!(d.action, DialogAction::CompleteQuest("first_breeze"));
-        complete(&mut s, "first_breeze").unwrap();
+        let r = complete(&mut s, "first_breeze").unwrap();
+        assert!(r.overflow.is_empty());
+        assert_eq!(s.inventory.count("novice_charm"), 1, "item reward handed over");
         let d = talk("scout_tamsin", "Tamsin", &mut s);
         assert_eq!(d.action, DialogAction::OfferQuest("gust_dodger"));
+    }
+
+    #[test]
+    fn tutorial_npcs_each_hand_out_novice_gear() {
+        let mut givers = vec![];
+        for q in QUESTS {
+            for (id, _) in q.items {
+                let d = crate::items::item(id).unwrap_or_else(|| panic!("{} rewards unknown item {}", q.id, id));
+                if d.slot().is_some() {
+                    assert_eq!(d.level, 1, "{}: novice gear is level 1", id);
+                    givers.push(q.turn_in);
+                }
+            }
+        }
+        for npc in ["scout_tamsin", "sergeant_brask", "ranger_pell"] {
+            assert!(givers.contains(&npc), "{} gives no novice gear", npc);
+        }
+        // Rewards are listed before accepting.
+        let r = reward_list(quest_def("sparring_basics").unwrap());
+        assert!(r.iter().any(|(id, _)| *id == "novice_sword"));
+        assert!(r.iter().any(|(_, t)| t.contains("EXP")));
     }
 }

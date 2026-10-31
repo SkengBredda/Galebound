@@ -301,7 +301,8 @@ fn footer(save_error: &Option<String>) {
         15.0,
         rgb(240, 244, 255),
     );
-    gfx::text_outlined(crate::VERSION, gfx::VW - 16.0 - gfx::text_w(crate::VERSION, 13.0), 12.0, 13.0, rgb(220, 230, 255));
+    let ver = format!("v{}", crate::VERSION);
+    gfx::text_outlined(&ver, gfx::VW - 16.0 - gfx::text_w(&ver, 13.0), 12.0, 13.0, rgb(220, 230, 255));
     if let Some(e) = save_error {
         gfx::text_centered_outlined(e, gfx::VW * 0.5, gfx::VH - 60.0, 15.0, widgets::danger());
     }

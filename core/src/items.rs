@@ -8,6 +8,10 @@ pub const INVENTORY_SLOTS: usize = 24;
 pub const STACK_MAX: u32 = 99;
 /// Shops buy items back for this fraction of their price.
 pub const SELL_RATE: f32 = 0.4;
+/// The tutorial outfitter's potions: this many purchases are discounted...
+pub const TRAINEE_DISCOUNT_BUYS: u32 = 10;
+/// ...by this fraction (40% off).
+pub const TRAINEE_DISCOUNT: f32 = 0.4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EquipSlot {
@@ -57,12 +61,22 @@ pub enum Effect {
     Buff { mods: StatMods, secs: f32 },
 }
 
+/// Items with a one-off use that isn't a potion or a buff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Special {
+    /// Refunds every spent ability point.
+    SkillReset,
+    /// Get back up where you fell, with no EXP loss.
+    Revive,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ItemKind {
     Consumable(Effect),
     Equip(EquipSlot),
     /// Monster loot: stacks, sells to any shop.
     Material,
+    Special(Special),
 }
 
 /// What a piece of gear looks like on the character (art hint, used by the client).
@@ -89,11 +103,23 @@ pub struct ItemDef {
     pub look: Look,
     /// Icon tier / colour accent 0-3 for the client.
     pub tier: u8,
+    /// Bound to the character: can't be sold, traded or dropped.
+    pub bound: bool,
 }
 
 impl ItemDef {
     pub fn stackable(&self) -> bool {
-        matches!(self.kind, ItemKind::Consumable(_) | ItemKind::Material)
+        matches!(self.kind, ItemKind::Consumable(_) | ItemKind::Material | ItemKind::Special(_))
+    }
+    pub fn can_sell(&self) -> bool {
+        self.price > 0 && !self.bound
+    }
+    /// Trading between players will check this.
+    pub fn can_trade(&self) -> bool {
+        !self.bound
+    }
+    pub fn can_drop(&self) -> bool {
+        !self.bound
     }
     pub fn slot(&self) -> Option<EquipSlot> {
         match self.kind {
@@ -156,21 +182,31 @@ const Z: StatMods = StatMods {
 };
 
 const fn material(id: &'static str, name: &'static str, desc: &'static str, price: u32, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Material, price, level: 1, class: None, mods: Z, look: Look::None, tier }
+    ItemDef { id, name, desc, kind: ItemKind::Material, price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 const fn consumable(id: &'static str, name: &'static str, desc: &'static str, price: u32, level: u32, effect: Effect, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Consumable(effect), price, level, class: None, mods: Z, look: Look::None, tier }
+    ItemDef { id, name, desc, kind: ItemKind::Consumable(effect), price, level, class: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 #[allow(clippy::too_many_arguments)]
 const fn weapon(id: &'static str, name: &'static str, desc: &'static str, class: ClassId, price: u32, level: u32, mods: StatMods, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Equip(EquipSlot::Weapon), price, level, class: Some(class), mods, look: Look::None, tier }
+    ItemDef { id, name, desc, kind: ItemKind::Equip(EquipSlot::Weapon), price, level, class: Some(class), mods, look: Look::None, tier, bound: false }
 }
 
 #[allow(clippy::too_many_arguments)]
 const fn gear(id: &'static str, name: &'static str, desc: &'static str, slot: EquipSlot, price: u32, level: u32, mods: StatMods, look: Look, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Equip(slot), price, level, class: None, mods, look, tier }
+    ItemDef { id, name, desc, kind: ItemKind::Equip(slot), price, level, class: None, mods, look, tier, bound: false }
+}
+
+const fn special(id: &'static str, name: &'static str, desc: &'static str, price: u32, kind: Special, tier: u8) -> ItemDef {
+    ItemDef { id, name, desc, kind: ItemKind::Special(kind), price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+}
+
+/// Mark an item as bound (no selling, trading or dropping).
+const fn bound(mut d: ItemDef) -> ItemDef {
+    d.bound = true;
+    d
 }
 
 const fn patk(v: f32, crit: f32) -> StatMods {
@@ -195,7 +231,12 @@ pub const ITEMS: &[ItemDef] = &[
     consumable("elixir", "Gale Elixir", "Restores 60% of HP and Mana.", 140, 12, Effect::Restore { hp: 0.60, mp: 0.60 }, 2),
     consumable("might_tonic", "Might Tonic", "+15% attack for 60 seconds.", 70, 5, Effect::Buff { mods: StatMods { atk_pct: 0.15, ..Z }, secs: 60.0 }, 1),
     consumable("iron_tonic", "Ironbark Tonic", "+30% P.DEF and M.DEF for 60 seconds.", 70, 5, Effect::Buff { mods: StatMods { pdef_pct: 0.3, mdef_pct: 0.3, ..Z }, secs: 60.0 }, 1),
+    bound(consumable("trainee_hp_potion", "Trainee's Red Potion", "Restores 40% of your HP. A gift for new adventurers.", 15, 1, Effect::Restore { hp: 0.40, mp: 0.0 }, 0)),
+    bound(consumable("trainee_mp_potion", "Trainee's Blue Potion", "Restores 40% of your Mana. A gift for new adventurers.", 18, 1, Effect::Restore { hp: 0.0, mp: 0.40 }, 0)),
     consumable("lucky_clover", "Lucky Clover Tea", "+10% Crit Chance for 60 seconds.", 90, 8, Effect::Buff { mods: StatMods { crit: 10.0, ..Z }, secs: 60.0 }, 2),
+    // ---------------------------------------------------------------- special
+    special("revive_scroll", "Revive Scroll", "Use while defeated to get back up where you fell, with no EXP lost.", 60, Special::Revive, 2),
+    bound(special("skill_reset_coupon", "Skill Reset Coupon", "Refunds every ability point you've spent so you can rebuild your stats.", 0, Special::SkillReset, 3)),
     // ---------------------------------------------------------------- monster loot (sell it)
     material("moss_clump", "Moss Clump", "Soft and damp. Herbalists buy these.", 6, 0),
     material("beak_shard", "Beak Shard", "A chipped piece of a Burrowbeak's beak.", 9, 0),
@@ -216,6 +257,9 @@ pub const ITEMS: &[ItemDef] = &[
     weapon("gnarled_stick", "Gnarled Stick", "Every hero's first weapon. It's... a stick.", Novice, 0, 1, patk(3.0, 0.0), 0),
     weapon("wood_sword", "Wooden Sword", "A carved practice sword. Light and quick.", Novice, 30, 1, patk(5.0, 1.0), 0),
     weapon("wood_club", "Wooden Club", "A sturdy branch with a grip wrapped in cloth.", Novice, 25, 1, patk(6.0, 0.0), 0),
+    weapon("novice_sword", "Novice's Practice Sword", "Sergeant Brask's spare. Balanced for beginners.", Novice, 12, 1, patk(5.0, 2.0), 0),
+    weapon("ironwood_blade", "Ironwood Blade", "Carved from ironwood, hard as steel and half the weight.", Novice, 180, 8, patk(12.0, 3.0), 1),
+    weapon("ironbound_cudgel", "Ironbound Cudgel", "An oak cudgel wrapped in iron bands.", Novice, 170, 8, patk(14.0, 0.0), 1),
     weapon("oak_club", "Studded Oak Club", "Iron studs make every bonk count.", Novice, 60, 5, patk(9.0, 0.0), 1),
     weapon("iron_sword", "Ironhold Arming Sword", "Standard issue of the Ironhold guard, with a kite shield.", Vanguard, 0, 10, StatMods { patk: 14.0, pdef: 4.0, ..Z }, 1),
     weapon("steel_sword", "Steel Longsword", "Balanced steel and a riveted heater shield.", Vanguard, 260, 14, StatMods { patk: 22.0, pdef: 7.0, ..Z }, 2),
@@ -234,6 +278,8 @@ pub const ITEMS: &[ItemDef] = &[
     weapon("starfall_staff", "Starfall Staff", "Topped with a shard that fell from the sky.", Aethermancer, 620, 18, StatMods { matk: 34.0, mp: 40.0, main: ms(0, 0, 4, 0), ..Z }, 3),
     // ---------------------------------------------------------------- armour
     gear("novice_garb", "Adventurer's Garb", "Linen shirt, rope belt and a satchel for the road ahead.", Armor, 0, 1, def(2.0, 2.0, 0.0), Look::Top(8, 5), 0),
+    gear("novice_tunic", "Novice's Tunic", "Ranger Pell's old tunic, patched at the elbows.", Armor, 12, 1, def(3.0, 3.0, 10.0), Look::Top(1, 7), 0),
+    gear("trail_gambeson", "Padded Gambeson", "Quilted layers that soak up blows.", Armor, 200, 8, def(12.0, 6.0, 22.0), Look::Top(2, 3), 1),
     gear("cloth_tunic", "Traveller's Tunic", "Simple and comfortable.", Armor, 25, 1, def(3.0, 2.0, 0.0), Look::Top(1, 1), 0),
     gear("leather_vest", "Leather Jerkin", "Boiled leather over linen.", Armor, 90, 5, def(8.0, 4.0, 15.0), Look::Top(2, 0), 1),
     gear("mage_robe", "Apprentice Robe", "Threaded with silver to ward off spells.", Armor, 110, 5, def(4.0, 10.0, 0.0), Look::Top(4, 4), 1),
@@ -243,11 +289,14 @@ pub const ITEMS: &[ItemDef] = &[
     gear("plate_armor", "Galeplate Cuirass", "Heavy plate with a wind-sigil on the chest.", Armor, 560, 15, def(26.0, 12.0, 60.0), Look::Top(5, 3), 3),
     gear("monk_gi", "Tempest Gi", "Training robes of the monastery.", Armor, 520, 15, StatMods { pdef: 18.0, mdef: 14.0, speed_pct: 0.04, ..Z }, Look::Top(3, 2), 3),
     // ---------------------------------------------------------------- boots
+    gear("novice_boots", "Novice's Boots", "Tamsin's scouting boots. Light and quiet.", Boots, 12, 1, StatMods { pdef: 2.0, mdef: 1.0, speed_pct: 0.02, ..Z }, Look::Shoes(0), 0),
+    gear("trail_boots", "Trailblazer Boots", "Sturdy boots for long roads.", Boots, 150, 8, StatMods { pdef: 6.0, mdef: 3.0, speed_pct: 0.03, ..Z }, Look::Shoes(3), 1),
     gear("sandals", "Woven Sandals", "Better than bare feet.", Boots, 15, 1, def(1.0, 1.0, 0.0), Look::Shoes(2), 0),
     gear("leather_boots", "Leather Boots", "Laced, worn-in and dependable.", Boots, 70, 5, StatMods { pdef: 4.0, mdef: 2.0, speed_pct: 0.02, ..Z }, Look::Shoes(0), 1),
     gear("windstep_boots", "Windstep Boots", "Feathers stitched at the heel.", Boots, 220, 10, StatMods { pdef: 6.0, mdef: 4.0, speed_pct: 0.06, ..Z }, Look::Shoes(5), 2),
     gear("iron_greaves", "Iron Greaves", "Heavy, but nothing gets through.", Boots, 260, 12, def(12.0, 5.0, 25.0), Look::Shoes(3), 2),
     // ---------------------------------------------------------------- accessories
+    gear("novice_charm", "Novice's Wind Charm", "Elder Wynn's blessing, carved into a pebble.", Accessory, 10, 1, StatMods { main: ms(0, 1, 0, 1), ..Z }, Look::None, 0),
     gear("copper_ring", "Copper Ring", "A plain band. Feels lucky.", Accessory, 40, 1, StatMods { main: ms(0, 0, 0, 2), ..Z }, Look::None, 0),
     gear("power_band", "Band of Might", "+3 STR.", Accessory, 120, 6, StatMods { main: ms(3, 0, 0, 0), hp: 15.0, ..Z }, Look::None, 1),
     gear("hunter_charm", "Hunter's Charm", "+3 DEX, +2% Crit.", Accessory, 120, 6, StatMods { main: ms(0, 3, 0, 0), crit: 2.0, ..Z }, Look::None, 1),
@@ -261,8 +310,8 @@ pub fn weapon_art(id: &str) -> Option<crate::classes::Weapon> {
     use crate::classes::Weapon;
     Some(match id {
         "gnarled_stick" => Weapon::Stick,
-        "wood_sword" => Weapon::WoodSword,
-        "wood_club" | "oak_club" => Weapon::Club,
+        "wood_sword" | "novice_sword" | "ironwood_blade" => Weapon::WoodSword,
+        "wood_club" | "oak_club" | "ironbound_cudgel" => Weapon::Club,
         other => item(other)?.class?.info().weapon,
     })
 }
@@ -404,7 +453,11 @@ pub struct ShopDef {
     pub stock: &'static [&'static str],
 }
 
-const GENERAL_STOCK: &[&str] = &["hp_potion", "hp_potion_big", "mp_potion", "mp_potion_big", "elixir", "might_tonic", "iron_tonic", "lucky_clover"];
+const GENERAL_STOCK: &[&str] = &["hp_potion", "hp_potion_big", "mp_potion", "mp_potion_big", "elixir", "might_tonic", "iron_tonic", "lucky_clover", "revive_scroll"];
+/// The tutorial outfitter by the training dummies.
+pub const GLADE_SHOP: &str = "glade_outfitter";
+/// Bound potions that are 40% off for a character's first purchases.
+pub const TRAINEE_POTIONS: &[&str] = &["trainee_hp_potion", "trainee_mp_potion"];
 const ARMOR_STOCK: &[&str] = &[
     "cloth_tunic", "leather_vest", "mage_robe", "chain_shirt", "shadow_garb", "sage_robe", "plate_armor", "monk_gi",
     "sandals", "leather_boots", "windstep_boots", "iron_greaves",
@@ -412,7 +465,13 @@ const ARMOR_STOCK: &[&str] = &[
 ];
 
 pub const SHOPS: &[ShopDef] = &[
-    ShopDef { id: "breezehollow_general", name: "Mira's Remedies", kind: ShopKind::General, stock: &["hp_potion", "mp_potion", "might_tonic", "iron_tonic"] },
+    ShopDef {
+        id: GLADE_SHOP,
+        name: "Quartermaster Hesper's Wagon",
+        kind: ShopKind::General,
+        stock: &["trainee_hp_potion", "trainee_mp_potion", "revive_scroll", "ironwood_blade", "ironbound_cudgel", "trail_gambeson", "trail_boots"],
+    },
+    ShopDef { id: "breezehollow_general", name: "Mira's Remedies", kind: ShopKind::General, stock: &["hp_potion", "mp_potion", "might_tonic", "iron_tonic", "revive_scroll"] },
     ShopDef { id: "breezehollow_smith", name: "Garrick's Forge", kind: ShopKind::Weapons, stock: &["wood_sword", "wood_club", "oak_club", "cloth_tunic", "leather_vest", "sandals", "leather_boots", "copper_ring"] },
     ShopDef { id: "ironhold_general", name: "The Iron Kettle", kind: ShopKind::General, stock: GENERAL_STOCK },
     ShopDef { id: "ironhold_weapons", name: "Ironhold Armoury", kind: ShopKind::Weapons, stock: &["steel_sword", "gale_sword", "oak_club"] },
@@ -430,6 +489,23 @@ pub const SHOPS: &[ShopDef] = &[
     ShopDef { id: "starfall_weapons", name: "The Staff Gallery", kind: ShopKind::Weapons, stock: &["runed_staff", "starfall_staff", "oak_club"] },
     ShopDef { id: "starfall_armor", name: "Glyphwoven Garments", kind: ShopKind::Armor, stock: ARMOR_STOCK },
 ];
+
+/// Price of buying `n` of an item, given how many discounted trainee
+/// purchases the character has left. Returns (gold, discounted units used).
+pub fn purchase_cost(id: &str, n: u32, discounts_left: u32) -> Option<(u32, u32)> {
+    let def = item(id)?;
+    if TRAINEE_POTIONS.contains(&id) {
+        let k = n.min(discounts_left);
+        Some((k * discounted_price(def) + (n - k) * def.price, k))
+    } else {
+        Some((n * def.price, 0))
+    }
+}
+
+/// A trainee potion's price while the 40% discount lasts.
+pub fn discounted_price(def: &ItemDef) -> u32 {
+    ((def.price as f32) * (1.0 - TRAINEE_DISCOUNT)).round() as u32
+}
 
 pub fn shop(id: &str) -> Option<&'static ShopDef> {
     SHOPS.iter().find(|s| s.id == id)
@@ -455,6 +531,29 @@ mod tests {
         for &c in crate::classes::EVERY_CLASS {
             assert_eq!(item(starter_weapon(c)).unwrap().class, Some(c));
         }
+        // The tutorial outfitter sells bound potions and Lv 8 Novice gear.
+        let glade = shop(GLADE_SHOP).unwrap();
+        for id in TRAINEE_POTIONS {
+            assert!(glade.stock.contains(id));
+            let d = item(id).unwrap();
+            assert!(d.bound && !d.can_sell() && !d.can_trade() && !d.can_drop());
+        }
+        let gear: Vec<_> = glade.stock.iter().filter_map(|id| item(id)).filter(|d| d.slot().is_some()).collect();
+        assert!(gear.iter().any(|d| d.slot() == Some(EquipSlot::Weapon)) && gear.iter().any(|d| d.slot() == Some(EquipSlot::Armor)));
+        for d in gear {
+            assert_eq!(d.level, 8, "{}", d.id);
+            assert!(d.class.is_none() || d.class == Some(ClassId::Novice), "{} must be usable by Novices", d.id);
+        }
+    }
+
+    #[test]
+    fn trainee_discount() {
+        let red = item("trainee_hp_potion").unwrap();
+        assert_eq!(discounted_price(red), 9);
+        assert_eq!(purchase_cost("trainee_hp_potion", 3, 10), Some((27, 3)));
+        // 2 discounted + 3 full price
+        assert_eq!(purchase_cost("trainee_hp_potion", 5, 2), Some((2 * 9 + 3 * 15, 2)));
+        assert_eq!(purchase_cost("hp_potion", 5, 10), Some((75, 0)));
     }
 
     #[test]

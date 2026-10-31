@@ -288,6 +288,7 @@ fn dawnwind_glade() -> Map {
         NpcDef { id: "elder_wynn", name: "Elder Wynn", title: "Glade Keeper", x: 470.0, y: g, look: look(1, 3, 4, 0, 3, 5, 4, 4, 4, 2), faces_left: true },
         NpcDef { id: "scout_tamsin", name: "Tamsin", title: "Wind Scout", x: 2420.0, y: g, look: look(1, 2, 3, 2, 5, 3, 1, 0, 1, 4), faces_left: true },
         NpcDef { id: "sergeant_brask", name: "Sergeant Brask", title: "Drill Master", x: 2780.0, y: g, look: look(0, 4, 0, 4, 4, 4, 3, 4, 3, 6), faces_left: false },
+        NpcDef { id: "quartermaster_hesper", name: "Hesper", title: "Quartermaster", x: 3345.0, y: g, look: look(1, 5, 2, 3, 2, 6, 3, 2, 3, 5), faces_left: true },
         NpcDef { id: "ranger_pell", name: "Pell", title: "Glade Ranger", x: 3480.0, y: g, look: look(0, 0, 6, 1, 1, 0, 0, 0, 5, 3), faces_left: false },
         NpcDef { id: "warden_ilsa", name: "Warden Ilsa", title: "Keeper of the Old Gate", x: 5050.0, y: g, look: look(1, 7, 7, 1, 4, 1, 5, 1, 3, 1), faces_left: false },
     ];
@@ -316,7 +317,7 @@ fn dawnwind_glade() -> Map {
         Sign { x: 2290.0, y: g, text: "Hold {Down} and press {Jump} on a wooden platform to drop through." },
         Sign { x: 2600.0, y: g, text: "{Dodge} dodges. Dodge through attacks - you're invulnerable for a moment." },
         Sign { x: 2860.0, y: g, text: "{Light} light attack, {Heavy} heavy. Hold a direction ({Left}/{Right} or {Down}) to change the move - they differ in the air too!" },
-        Sign { x: 3560.0, y: g, text: "Mossy Hollow - beware of Mosslings. Drink a potion with {Potion}." },
+        Sign { x: 3560.0, y: g, text: "Mossy Hollow - beware of Mosslings. Drink a potion with {Potion}. Monsters drop loot and gold: press {Pickup} to pick it up." },
         Sign { x: 5250.0, y: g, text: "The Old Gate. Beyond lies Breezehollow." },
     ];
     let regions = vec![Region { id: "lookout", area: Aabb::new(1950.0, g - 490.0, 290.0, 125.0) }];
@@ -335,7 +336,13 @@ fn dawnwind_glade() -> Map {
         deco(Fence, 2700.0, g, 1.0, 1),
         deco(Crate, 2560.0, g, 1.0, 1),
         deco(Crate, 2590.0, g - 34.0, 0.8, 1),
-        deco(Fence, 3300.0, g, 1.0, 1),
+        deco(Fence, 3270.0, g, 1.0, 1),
+        // Quartermaster Hesper's supply wagon, next to the dummies.
+        deco(Tent, 3380.0, g, 0.9, 0),
+        deco(Crate, 3300.0, g, 0.9, 1),
+        deco(Barrel, 3400.0, g, 0.9, 1),
+        deco(Crate, 3420.0, g, 0.7, 1),
+        deco(Banner, 3318.0, g, 1.0, 1),
         deco(TreeTall, 3700.0, g + 60.0, 1.4, 0),
         deco(Bush, 3900.0, g + 60.0, 1.2, 2),
         deco(TreeRound, 4200.0, g + 60.0, 1.3, 0),
