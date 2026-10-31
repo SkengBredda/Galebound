@@ -1,0 +1,21 @@
+[workspace]
+members = [".", "core"]
+
+[package]
+name = "galebound"
+version = "0.1.0"
+edition = "2021"
+description = "Galebound Online - a side-scrolling action MMO prototype"
+
+[dependencies]
+galebound-core = { path = "core" }
+macroquad = "0.4"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"

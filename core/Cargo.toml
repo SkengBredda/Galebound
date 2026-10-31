@@ -1,0 +1,7 @@
+[package]
+name = "galebound-core"
+version = "0.1.0"
+edition = "2021"
+description = "Engine-agnostic game simulation for Galebound: physics, combat, quests, accounts. No external dependencies."
+
+[dependencies]
