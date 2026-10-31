@@ -68,6 +68,10 @@ pub enum Special {
     SkillReset,
     /// Get back up where you fell, with no EXP loss.
     Revive,
+    /// Adopt this pet.
+    Pet(crate::pets::PetSpecies),
+    /// Feeds your active pet (hunger and pet EXP).
+    PetFood,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -236,6 +240,10 @@ pub const ITEMS: &[ItemDef] = &[
     consumable("lucky_clover", "Lucky Clover Tea", "+10% Crit Chance for 60 seconds.", 90, 8, Effect::Buff { mods: StatMods { crit: 10.0, ..Z }, secs: 60.0 }, 2),
     // ---------------------------------------------------------------- special
     special("revive_scroll", "Revive Scroll", "Use while defeated to get back up where you fell, with no EXP lost.", 60, Special::Revive, 2),
+    special("pet_breeze_fox", "Breeze Fox", "A quick, curious fox kit. Use it to adopt your pet. It loots for you and grows on Pet Food: finds more loot and gold.", crate::pets::PET_PRICE, Special::Pet(crate::pets::PetSpecies::BreezeFox), 3),
+    special("pet_puffling", "Puffling", "A lamb made of cloud. Use it to adopt your pet. It loots for you and grows on Pet Food: defence and healing.", crate::pets::PET_PRICE, Special::Pet(crate::pets::PetSpecies::Puffling), 3),
+    special("pet_sparkwing", "Sparkwing", "A tiny bird that crackles with static. Use it to adopt your pet. It loots for you and grows on Pet Food: attack and Mana.", crate::pets::PET_PRICE, Special::Pet(crate::pets::PetSpecies::Sparkwing), 3),
+    special("pet_food", "Pet Food", "Feeds your pet: +30 hunger and pet EXP. Use it from the bag, the hotbar or the Pets window.", crate::pets::FOOD_PRICE, Special::PetFood, 1),
     bound(special("skill_reset_coupon", "Skill Reset Coupon", "Refunds every ability point you've spent so you can rebuild your stats.", 0, Special::SkillReset, 3)),
     // ---------------------------------------------------------------- monster loot (sell it)
     material("moss_clump", "Moss Clump", "Soft and damp. Herbalists buy these.", 6, 0),
@@ -433,6 +441,7 @@ pub enum ShopKind {
     General,
     Weapons,
     Armor,
+    Pets,
 }
 
 impl ShopKind {
@@ -441,6 +450,7 @@ impl ShopKind {
             ShopKind::General => "General Goods",
             ShopKind::Weapons => "Weapons",
             ShopKind::Armor => "Armor",
+            ShopKind::Pets => "Pets & pet food",
         }
     }
 }
@@ -454,6 +464,8 @@ pub struct ShopDef {
 }
 
 const GENERAL_STOCK: &[&str] = &["hp_potion", "hp_potion_big", "mp_potion", "mp_potion_big", "elixir", "might_tonic", "iron_tonic", "lucky_clover", "revive_scroll"];
+/// Every main town's pet shop.
+pub const PET_SHOP: &str = "pet_shop";
 /// The tutorial outfitter by the training dummies.
 pub const GLADE_SHOP: &str = "glade_outfitter";
 /// Bound potions that are 40% off for a character's first purchases.
@@ -471,6 +483,7 @@ pub const SHOPS: &[ShopDef] = &[
         kind: ShopKind::General,
         stock: &["trainee_hp_potion", "trainee_mp_potion", "revive_scroll", "ironwood_blade", "ironbound_cudgel", "trail_gambeson", "trail_boots"],
     },
+    ShopDef { id: PET_SHOP, name: "Whisker & Wing Pet Shop", kind: ShopKind::Pets, stock: &["pet_breeze_fox", "pet_puffling", "pet_sparkwing", "pet_food"] },
     ShopDef { id: "breezehollow_general", name: "Mira's Remedies", kind: ShopKind::General, stock: &["hp_potion", "mp_potion", "might_tonic", "iron_tonic", "revive_scroll"] },
     ShopDef { id: "breezehollow_smith", name: "Garrick's Forge", kind: ShopKind::Weapons, stock: &["wood_sword", "wood_club", "oak_club", "cloth_tunic", "leather_vest", "sandals", "leather_boots", "copper_ring"] },
     ShopDef { id: "ironhold_general", name: "The Iron Kettle", kind: ShopKind::General, stock: GENERAL_STOCK },

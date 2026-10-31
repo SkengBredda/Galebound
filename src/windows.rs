@@ -48,6 +48,8 @@ pub struct Windows {
     shop_was_open: bool,
     shop_page: usize,
     pub world_map: bool,
+    pub pets: bool,
+    pet_sel: usize,
     map_sel: Option<&'static str>,
     map_cache: Option<WorldCache>,
 }
@@ -57,6 +59,19 @@ fn item_tex(def: &ItemDef) -> macroquad::prelude::Texture2D {
 }
 fn skill_tex(s: &SkillDef) -> macroquad::prelude::Texture2D {
     sprites::get(&format!("icon_s_{}", s.id), || icons::skill(s))
+}
+
+/// 10000 -> "10,000".
+fn thousands(n: u32) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Shorten text with "..." so it fits in `max_w`.
@@ -89,7 +104,7 @@ fn px_color(p: crate::pixel::Px) -> Color {
 
 impl Windows {
     pub fn any_open(&self, sim: &Sim) -> bool {
-        self.inventory || self.character || self.abilities || self.world_map || sim.shop_open.is_some() || sim.teleport_open
+        self.inventory || self.character || self.abilities || self.world_map || self.pets || sim.shop_open.is_some() || sim.teleport_open
     }
 
     /// Esc: close the top-most window. Returns true if something closed.
@@ -100,6 +115,10 @@ impl Windows {
         }
         if self.world_map {
             self.world_map = false;
+            return true;
+        }
+        if self.pets {
+            self.pets = false;
             return true;
         }
         if sim.shop_open.is_some() {
@@ -124,6 +143,13 @@ impl Windows {
 
     pub fn toggle_map(&mut self) {
         self.world_map = !self.world_map;
+    }
+
+    pub fn toggle_pets(&mut self, sim: &Sim) {
+        self.pets = !self.pets;
+        if self.pets {
+            self.pet_sel = sim.save.active_pet.unwrap_or(0);
+        }
     }
 
     pub fn toggle_keys(&mut self, inv: bool, chr: bool, abil: bool) {
@@ -188,6 +214,9 @@ impl Windows {
         }
         if self.abilities && sim.shop_open.is_none() {
             self.abilities_window(sim);
+        }
+        if self.pets {
+            self.pets_window(sim, &ui);
         }
         if let Some(shop) = sim.shop_open {
             self.shop_window(sim, &ui, shop);
@@ -438,6 +467,150 @@ impl Windows {
         }
     }
 
+    // ------------------------------------------------------------------ pets
+
+    fn pets_window(&mut self, sim: &mut Sim, ui: &Ui) {
+        use galebound_core::pets::{self, PetSave};
+        let (w, h) = (640.0, 590.0);
+        let (x, y) = ((gfx::VW - w) * 0.5, 44.0);
+        widgets::panel(x, y, w, h);
+        self.hit((x, y, w, h), Target::Window);
+        widgets::title("Pets", x + w * 0.5, y + 14.0, 22.0);
+        if widgets::button(ui, x + w - 52.0, y + 12.0, 34.0, 30.0, "X", ButtonStyle::Secondary, true) {
+            self.pets = false;
+            return;
+        }
+        let food = sim.save.inventory.count("pet_food");
+        if sim.save.pets.is_empty() {
+            gfx::text_wrapped(
+                &format!(
+                    "You don't have a pet yet. The Pet Shop in Breezehollow and in every class town sells pets for {} gold, and Pet Food for {} gold.",
+                    pets::PET_PRICE, pets::FOOD_PRICE
+                ),
+                x + 40.0,
+                y + 80.0,
+                w - 80.0,
+                16.0,
+                widgets::ink(),
+            );
+            gfx::text_wrapped(
+                "A pet follows you and picks up loot near you. Feed it Pet Food to level it up and unlock passive skills. Its hunger drops while it's out - a starving pet won't help.",
+                x + 40.0,
+                y + 170.0,
+                w - 80.0,
+                14.0,
+                widgets::ink_soft(),
+            );
+            return;
+        }
+        self.pet_sel = self.pet_sel.min(sim.save.pets.len() - 1);
+
+        // ---- list of pets
+        for (i, p) in sim.save.pets.iter().enumerate() {
+            let (rx, ry, rw, rh) = (x + 24.0, y + 56.0 + i as f32 * 62.0, 170.0, 56.0);
+            let sel = self.pet_sel == i;
+            let hover = gfx::mouse_in(rx, ry, rw, rh);
+            gfx::rrect(rx, ry, rw, rh, 8.0, if sel { rgb(196, 226, 200) } else if hover { rgb(240, 228, 200) } else { rgb(232, 216, 182) });
+            let tex = sprites::get(&format!("pet_{}_0", p.species.key()), || crate::petart::pet(p.species, 0));
+            gfx::tex(&tex, rx + 6.0, ry + 8.0, 1.0, false, WHITE);
+            gfx::text(&p.name, rx + 56.0, ry + 8.0, 15.0, widgets::ink());
+            let out = sim.save.active_pet == Some(i);
+            gfx::text(&format!("Lv.{}", p.level), rx + 56.0, ry + 30.0, 13.0, widgets::ink_soft());
+            if out {
+                gfx::text("Out", rx + rw - 40.0, ry + 30.0, 13.0, widgets::accent());
+            }
+            if hover && ui.clicked {
+                self.pet_sel = i;
+            }
+        }
+
+        // ---- details of the selected pet
+        let i = self.pet_sel;
+        let p: PetSave = sim.save.pets[i].clone();
+        let out = sim.save.active_pet == Some(i);
+        let dx = x + 216.0;
+        let dw = w - 240.0;
+        gfx::rrect(dx, y + 56.0, 120.0, 100.0, 10.0, rgb(214, 232, 240));
+        let frame = if out && !p.starving() { ((sim.time * 4.0) as u8) % 2 } else { 0 };
+        let tex = sprites::get(&format!("pet_{}_{}", p.species.key(), frame), || crate::petart::pet(p.species, frame));
+        // k = 2 canvas pixels per sprite pixel = 4 UI units
+        gfx::tex(&tex, dx + 60.0 - tex.width() * 2.0, y + 106.0 - tex.height() * 2.0, 2.0, false, if p.starving() { Color::new(0.75, 0.75, 0.8, 1.0) } else { WHITE });
+        gfx::text(&p.name, dx + 136.0, y + 58.0, 20.0, widgets::ink());
+        gfx::text(&format!("{}  -  Lv.{} / {}", p.species.name(), p.level, pets::MAX_LEVEL), dx + 136.0, y + 84.0, 13.0, widgets::ink_soft());
+        let (status, col) = if p.starving() {
+            ("Starving! It won't loot or help until fed.", widgets::danger())
+        } else if out {
+            ("Out with you, picking up loot.", widgets::accent())
+        } else {
+            ("Resting at home.", widgets::ink_soft())
+        };
+        gfx::text(status, dx + 136.0, y + 104.0, 13.0, col);
+        gfx::text(&format!("Loot range: {}", p.loot_radius().round() as i32), dx + 136.0, y + 124.0, 12.0, widgets::ink_soft());
+
+        // bars
+        let bar = |by: f32, label: &str, frac: f32, c: Color| {
+            gfx::text(label, dx, by, 13.0, widgets::ink());
+            gfx::rrect(dx, by + 18.0, dw, 12.0, 5.0, rgb(196, 180, 150));
+            gfx::rrect(dx + 2.0, by + 20.0, (dw - 4.0) * frac.clamp(0.0, 1.0), 8.0, 4.0, c);
+        };
+        if p.level >= pets::MAX_LEVEL {
+            bar(y + 168.0, "EXP  (max level)", 1.0, rgb(150, 110, 220));
+        } else {
+            let need = pets::exp_to_next(p.level);
+            bar(y + 168.0, &format!("EXP  {} / {}", p.exp, need), p.exp as f32 / need as f32, rgb(150, 110, 220));
+        }
+        let hf = p.hunger / pets::HUNGER_MAX;
+        let hc = if hf > 0.5 { rgb(90, 180, 90) } else if hf > 0.2 { rgb(220, 170, 50) } else { rgb(210, 70, 60) };
+        bar(y + 204.0, &format!("Hunger  {} / {}", p.hunger.ceil() as i32, pets::HUNGER_MAX as i32), hf, hc);
+
+        // buttons
+        let by = y + 248.0;
+        if out {
+            if widgets::button(ui, dx, by, 140.0, 36.0, "Send home", ButtonStyle::Secondary, true) {
+                sim.dismiss_pet();
+                self.say(format!("{} went home to rest", p.name), false);
+            }
+        } else if widgets::button(ui, dx, by, 140.0, 36.0, "Summon", ButtonStyle::Primary, true) {
+            match sim.summon_pet(i) {
+                Ok(()) => self.say(format!("{} is out with you", p.name), false),
+                Err(e) => self.say(e, true),
+            }
+        }
+        let feed_label = format!("Feed ({})", food);
+        if widgets::button(ui, dx + 152.0, by, 140.0, 36.0, &feed_label, ButtonStyle::Primary, out && food > 0) {
+            match sim.feed_pet() {
+                Ok(n) if n > 0 => self.say(format!("{} reached Lv.{}!", p.name, p.level + n), false),
+                Ok(_) => self.say(format!("{} enjoyed that", p.name), false),
+                Err(e) => self.say(e, true),
+            }
+        }
+        let hint = if !out {
+            "Summon it to feed it.".to_string()
+        } else if food == 0 {
+            "Buy Pet Food at any Pet Shop.".to_string()
+        } else {
+            format!("Each Pet Food: +{} hunger, +{} pet EXP.", pets::FOOD_HUNGER as i32, pets::FOOD_EXP)
+        };
+        gfx::text(&hint, dx, by + 46.0, 12.0, widgets::ink_soft());
+
+        // passives
+        let mut py = y + 318.0;
+        gfx::text("Passive skills", dx, py, 15.0, widgets::ink());
+        py += 24.0;
+        for ps in p.species.passives() {
+            let unlocked = p.level >= ps.level;
+            let working = unlocked && !p.starving() && out;
+            let dot = if working { widgets::accent() } else if unlocked { rgb(200, 160, 60) } else { rgb(170, 160, 150) };
+            gfx::circle(dx + 6.0, py + 8.0, 5.0, dot);
+            gfx::text(ps.name, dx + 18.0, py, 14.0, if unlocked { widgets::ink() } else { rgb(150, 140, 130) });
+            let tag = format!("Lv.{}", ps.level);
+            gfx::text(&tag, dx + dw - gfx::text_w(&tag, 12.0), py + 2.0, 12.0, if unlocked { widgets::accent() } else { rgb(150, 140, 130) });
+            gfx::text(&clip(ps.desc, dw - 18.0, 12.0), dx + 18.0, py + 17.0, 12.0, widgets::ink_soft());
+            py += 38.0;
+        }
+        gfx::text("Green: active.  Gold: unlocked (pet must be out and fed).", x + 24.0, y + h - 36.0, 12.0, widgets::ink_soft());
+    }
+
     // ------------------------------------------------------------------ shop
 
     fn shop_window(&mut self, sim: &mut Sim, ui: &Ui, shop_id: &'static str) {
@@ -452,7 +625,7 @@ impl Windows {
         widgets::panel(x, y, w, h);
         self.hit((x, y, w, h), Target::Window);
         widgets::title(shop.name, x + w * 0.5, y + 14.0, 22.0);
-        gfx::text_centered(&format!("{}  -  you have {} gold", shop.kind.name(), sim.save.gold), x + w * 0.5, y + 44.0, 13.0, widgets::ink_soft());
+        gfx::text_centered(&format!("{}  -  you have {} gold", shop.kind.name(), thousands(sim.save.gold)), x + w * 0.5, y + 44.0, 13.0, widgets::ink_soft());
         if widgets::button(ui, x + w - 52.0, y + 12.0, 34.0, 30.0, "X", ButtonStyle::Secondary, true) {
             sim.shop_open = None;
             self.inventory = false;
@@ -480,10 +653,11 @@ impl Windows {
                 None if def.bound => ("Bound to you".to_string(), rgb(150, 90, 170)),
                 None => (def.stat_lines().first().cloned().unwrap_or_else(|| def.desc.to_string()), widgets::ink_soft()),
             };
-            gfx::text(&clip(&sub, text_w, 12.0), x + 74.0, ry + 22.0, 12.0, sub_col);
-            let price = format!("{}g", each);
+            let price = format!("{}g", thousands(each));
             let afford = sim.save.gold >= each;
             let px = x + w - 136.0;
+            let sub_w = text_w.min(px - gfx::text_w(&price, 15.0) - 14.0 - (x + 74.0));
+            gfx::text(&clip(&sub, sub_w, 12.0), x + 74.0, ry + 22.0, 12.0, sub_col);
             gfx::text(&price, px - gfx::text_w(&price, 15.0), if discounted { ry + 2.0 } else { ry + 10.0 }, 15.0, if afford { rgb(170, 120, 20) } else { widgets::danger() });
             if discounted {
                 // the full price, struck through
@@ -701,7 +875,7 @@ impl Windows {
             }
             let _ = iw;
         } else if node.is_some() {
-            let services = if world::WAYSTONES.contains(&key) { "Shops, inn and waystone" } else { "A place to rest" };
+            let services = if world::WAYSTONES.contains(&key) { "Shops, pet shop, inn and waystone" } else { "A place to rest" };
             gfx::text(services, ix, yy, 13.0, widgets::ink_soft());
         }
         let layout = sim.settings.layout;
@@ -875,6 +1049,8 @@ impl Windows {
                 ItemKind::Material => "Monster loot - sells to any shop".to_string(),
                 ItemKind::Special(items::Special::Revive) => "Special - use when defeated".to_string(),
                 ItemKind::Special(items::Special::SkillReset) => "Special - click to use".to_string(),
+                ItemKind::Special(items::Special::Pet(_)) => "Pet - click to adopt".to_string(),
+                ItemKind::Special(items::Special::PetFood) => "Pet Food - click to feed your pet".to_string(),
                 ItemKind::Equip(s) => match def.class {
                     Some(c) => format!("{} - {}", s.name(), c.info().name),
                     None => s.name().to_string(),
@@ -1028,5 +1204,16 @@ impl WorldCache {
     }
     fn monsters(&self, key: &str) -> &[EnemyKind] {
         self.monsters.iter().find(|n| n.0 == key).map(|n| n.1.as_slice()).unwrap_or(&[])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn thousands_separators() {
+        assert_eq!(super::thousands(0), "0");
+        assert_eq!(super::thousands(999), "999");
+        assert_eq!(super::thousands(10_000), "10,000");
+        assert_eq!(super::thousands(1_234_567), "1,234,567");
     }
 }

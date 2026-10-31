@@ -10,6 +10,7 @@ use crate::items::{self, EquipSlot, Inventory};
 use crate::skills::{HotbarSlot, HOTBAR_SLOTS};
 use crate::stats::{self, MainStats};
 use crate::input::Layout;
+use crate::pets::{PetSave, PetSpecies};
 use std::path::PathBuf;
 
 pub const MAX_CHARACTERS: usize = 3;
@@ -118,6 +119,9 @@ pub struct CharacterSave {
     /// Set while the character lies as a tombstone: the EXP lost on death
     /// (a Revive Scroll gives it back).
     pub tomb: Option<u32>,
+    /// Pets you own, and which one is out with you.
+    pub pets: Vec<PetSave>,
+    pub active_pet: Option<usize>,
 }
 
 impl CharacterSave {
@@ -152,6 +156,8 @@ impl CharacterSave {
             play_seconds: 0,
             trainee_buys: 0,
             tomb: None,
+            pets: Vec::new(),
+            active_pet: None,
         }
     }
     pub fn has_flag(&self, f: &str) -> bool {
@@ -279,6 +285,13 @@ pub fn encode_account(a: &Account) -> String {
         if let Some(lost) = c.tomb {
             kv("tomb", lost.to_string());
         }
+        for p in &c.pets {
+            // name last: it may contain commas
+            kv("pet", format!("{},{},{},{:.2},{}", p.species.key(), p.level, p.exp, p.hunger, p.name));
+        }
+        if let Some(i) = c.active_pet {
+            kv("active_pet", i.to_string());
+        }
         for q in &c.quests {
             kv("quest", format!("{},{},{}", q.id, qstate_str(q.state), q.progress));
         }
@@ -400,6 +413,21 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                 "play_seconds" => c.play_seconds = v.parse().unwrap_or(0),
                 "trainee_buys" => c.trainee_buys = pu(&v),
                 "tomb" => c.tomb = Some(pu(&v)),
+                "pet" => {
+                    let p: Vec<&str> = v.splitn(5, ',').collect();
+                    if p.len() == 5 {
+                        if let Some(species) = PetSpecies::from_key(p[0]) {
+                            c.pets.push(PetSave {
+                                species,
+                                level: pu(p[1]).clamp(1, crate::pets::MAX_LEVEL),
+                                exp: pu(p[2]),
+                                hunger: pf(p[3]).clamp(0.0, crate::pets::HUNGER_MAX),
+                                name: p[4].to_string(),
+                            });
+                        }
+                    }
+                }
+                "active_pet" => c.active_pet = Some(pu(&v) as usize),
                 "quest" => {
                     let p: Vec<&str> = v.split(',').collect();
                     if p.len() == 3 {
@@ -419,6 +447,11 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
     if let Some(mut c) = cur.take() {
         finish(&mut c, saw_stats);
         a.characters.push(c);
+    }
+    for c in &mut a.characters {
+        if c.active_pet.map(|i| i >= c.pets.len()).unwrap_or(false) {
+            c.active_pet = None;
+        }
     }
     if a.email.is_empty() || a.hash_hex.is_empty() {
         return Err("save file is missing account fields".into());
@@ -484,6 +517,14 @@ mod tests {
         c.x = 123.5;
         c.trainee_buys = 4;
         c.tomb = Some(17);
+        let mut pet = PetSave::new(PetSpecies::Sparkwing);
+        pet.name = "Zap, the Bolt".into();
+        pet.level = 7;
+        pet.exp = 33;
+        pet.hunger = 41.5;
+        c.pets.push(PetSave::new(PetSpecies::BreezeFox));
+        c.pets.push(pet);
+        c.active_pet = Some(1);
         let a = Account {
             email: "a@b.co".into(),
             salt_hex: "00ff".into(),

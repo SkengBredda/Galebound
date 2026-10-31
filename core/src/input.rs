@@ -23,6 +23,8 @@ pub enum Action {
     Pickup,
     /// Cycle the minimap size (small / medium / large / hidden).
     Minimap,
+    /// Open the Pets window.
+    Pets,
     Hotbar1,
     Hotbar2,
     Hotbar3,
@@ -63,6 +65,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::WorldMap,
     Action::Pickup,
     Action::Minimap,
+    Action::Pets,
     Action::Hotbar1,
     Action::Hotbar2,
     Action::Hotbar3,
@@ -94,6 +97,7 @@ impl Action {
             Action::WorldMap => "World Map",
             Action::Pickup => "Pick Up Loot",
             Action::Minimap => "Minimap Size",
+            Action::Pets => "Pets",
             Action::Hotbar1 => "Hotbar 1",
             Action::Hotbar2 => "Hotbar 2",
             Action::Hotbar3 => "Hotbar 3",
@@ -150,6 +154,7 @@ impl Layout {
             WorldMap => return &["M"],
             Pickup => return &["F"],
             Minimap => return &["N"],
+            Pets => return &["O"],
             Hotbar1 => return &["Key1"],
             Hotbar2 => return &["Key2"],
             Hotbar3 => return &["Key3"],

@@ -9,6 +9,7 @@ use crate::skills::{self, HotbarSlot, SkillDef, SkillEffect, HOTBAR_SLOTS};
 use crate::stats::{self, Derived, StatMods};
 use crate::math::{approach, Aabb, Rng, V2};
 use crate::physics::{self, Body, Level};
+use crate::pets::{self, PetSave, PetSpecies};
 use crate::quests::{self, Dialog, DialogAction, QuestEvent};
 use crate::save::{CharacterSave, QuestState, Settings};
 use crate::enemies::{self, EnemyKind};
@@ -219,6 +220,22 @@ impl GroundDrop {
     }
 }
 
+/// Your pet out in the world (its level, hunger etc. live in the save).
+#[derive(Clone, Debug)]
+pub struct PetActor {
+    /// Feet position.
+    pub pos: V2,
+    pub facing: f32,
+    pub moving: bool,
+    pub anim_t: f32,
+    /// Drop it's fetching.
+    pub target: Option<u32>,
+    /// Drops it couldn't take (bag full); retried every few seconds.
+    skip: Vec<u32>,
+    skip_t: f32,
+    warned_low: bool,
+}
+
 /// Another player in the same map (filled in by the network layer once
 /// multiplayer exists; shown on the minimap).
 #[derive(Clone, Debug)]
@@ -385,10 +402,16 @@ pub struct Sim {
     pub last_ground: V2,
     /// Other players on this map (empty until multiplayer).
     pub others: Vec<OtherPlayer>,
+    /// The active pet's body in the world.
+    pub pet: Option<PetActor>,
 }
 
 fn derive_stats(save: &CharacterSave, buffs: &[Buff]) -> Derived {
     let mut mods = save.inventory.gear_mods();
+    // A fed pet's passives count like gear.
+    if let Some(p) = save.active_pet.and_then(|i| save.pets.get(i)) {
+        mods = mods + p.stat_mods();
+    }
     for b in buffs {
         mods = mods + b.mods;
     }
@@ -495,6 +518,7 @@ impl Sim {
             pickup_cd: 0.0,
             last_ground: V2::new(sx, sy),
             others: Vec::new(),
+            pet: None,
         };
         // Logged out as a tombstone? Still one.
         if sim.save.tomb.is_some() {
@@ -613,6 +637,7 @@ impl Sim {
 
         self.update_player(input, dt);
         self.update_drops(dt);
+        self.update_pet(dt);
         self.update_enemies(dt);
         self.update_projectiles(dt);
         self.update_spawns(dt);
@@ -1654,6 +1679,8 @@ impl Sim {
         let r = match sp {
             Special::Revive => self.revive_with_scroll(),
             Special::SkillReset => self.reset_ability_points().map(|_| ()),
+            Special::Pet(species) => self.adopt_pet(species),
+            Special::PetFood => self.feed_pet().map(|_| ()),
         };
         match r {
             Ok(()) => true,
@@ -1905,6 +1932,7 @@ impl Sim {
         self.floats.clear();
         self.drops.clear();
         self.others.clear();
+        self.pet = None; // reappears next to you
         self.last_ground = self.player.body.feet();
         self.populate_map();
         self.map_changed = true;
@@ -2013,6 +2041,199 @@ impl Sim {
         }
     }
 
+    // ------------------------------------------------------------------ pets
+
+    /// The pet that's out with you.
+    pub fn active_pet(&self) -> Option<&PetSave> {
+        self.save.active_pet.and_then(|i| self.save.pets.get(i))
+    }
+
+    /// Use a pet from the Pet Shop: it becomes yours and comes out.
+    pub fn adopt_pet(&mut self, species: PetSpecies) -> Result<(), String> {
+        if self.save.pets.len() >= pets::MAX_PETS {
+            return Err(format!("You can only keep {} pets", pets::MAX_PETS));
+        }
+        if self.save.inventory.remove(species.item_id(), 1) == 0 {
+            return Err(format!("You don't have a {}", species.name()));
+        }
+        self.save.pets.push(PetSave::new(species));
+        let i = self.save.pets.len() - 1;
+        if self.save.active_pet.is_none() {
+            self.summon_pet(i)?;
+        }
+        let first = species.passives()[0];
+        self.toast(&format!("You adopted a {}!", species.name()), &format!("It picks up loot near you. Passive: {} - {}", first.name, first.desc));
+        self.wants_save = true;
+        Ok(())
+    }
+
+    /// Bring a pet out (sending any other pet home).
+    pub fn summon_pet(&mut self, i: usize) -> Result<(), String> {
+        if i >= self.save.pets.len() {
+            return Err("No such pet".into());
+        }
+        if self.save.active_pet == Some(i) {
+            return Ok(());
+        }
+        self.save.active_pet = Some(i);
+        self.pet = None;
+        self.recompute_stats();
+        let c = self.player.body.center();
+        self.burst(c, FxKind::Spark, 16, 200.0);
+        self.wants_save = true;
+        Ok(())
+    }
+
+    /// Send the active pet home (its hunger stops dropping).
+    pub fn dismiss_pet(&mut self) {
+        if self.save.active_pet.take().is_some() {
+            self.pet = None;
+            self.recompute_stats();
+            self.wants_save = true;
+        }
+    }
+
+    /// Feed the active pet one Pet Food from the bag. Returns levels gained.
+    pub fn feed_pet(&mut self) -> Result<u32, String> {
+        let Some(i) = self.save.active_pet else { return Err("Summon a pet first (Pets window)".into()) };
+        if self.save.inventory.count("pet_food") == 0 {
+            return Err("No Pet Food - buy some at a Pet Shop".into());
+        }
+        self.save.inventory.remove("pet_food", 1);
+        let was_starving = self.save.pets[i].starving();
+        let before = self.save.pets[i].level;
+        let gained = self.save.pets[i].feed();
+        let pet = self.save.pets[i].clone();
+        let at = self.pet.as_ref().map(|a| a.pos).unwrap_or(self.player.body.feet());
+        self.burst(V2::new(at.x, at.y - 14.0), FxKind::Heal, 10, 120.0);
+        self.float(V2::new(at.x, at.y - 40.0), if gained > 0 { format!("{} Lv.{}!", pet.name, pet.level) } else { format!("+{} pet EXP", pets::FOOD_EXP) }, FloatKind::Exp);
+        for lv in before + 1..=pet.level {
+            if let Some(p) = pet.passive_at(lv) {
+                self.toast(&format!("{} learned {}!", pet.name, p.name), p.desc);
+            }
+        }
+        if gained > 0 || was_starving {
+            self.recompute_stats();
+        }
+        self.wants_save = true;
+        Ok(gained)
+    }
+
+    fn update_pet(&mut self, dt: f32) {
+        let Some(i) = self.save.active_pet else {
+            self.pet = None;
+            return;
+        };
+        if i >= self.save.pets.len() {
+            self.save.active_pet = None;
+            self.pet = None;
+            return;
+        }
+        let feet = self.player.body.feet();
+        let mut a = self.pet.take().unwrap_or(PetActor {
+            pos: V2::new(feet.x - self.player.facing * 40.0, feet.y),
+            facing: self.player.facing,
+            moving: false,
+            anim_t: 0.0,
+            target: None,
+            skip: Vec::new(),
+            skip_t: 4.0,
+            warned_low: false,
+        });
+        a.anim_t += dt;
+
+        // Hunger drains while the pet is out.
+        let was_starving = self.save.pets[i].starving();
+        let pet = &mut self.save.pets[i];
+        pet.hunger = (pet.hunger - pets::HUNGER_PER_SEC * dt).max(0.0);
+        let pet = pet.clone();
+        if pet.starving() && !was_starving {
+            self.toast(&format!("{} is starving!", pet.name), "Feed it Pet Food - it won't loot or help you until it eats.");
+            self.recompute_stats();
+            self.wants_save = true;
+        } else if pet.hunger < pets::HUNGER_LOW && !a.warned_low && !pet.starving() {
+            a.warned_low = true;
+            self.toast(&format!("{} is getting hungry", pet.name), "Feed it Pet Food soon.");
+        } else if pet.hunger >= pets::HUNGER_LOW {
+            a.warned_low = false;
+        }
+
+        let alive = self.player.state != PState::Dead;
+        // Healing passives.
+        let (hr, mr) = pet.regen();
+        if alive && (hr > 0.0 || mr > 0.0) {
+            let p = &mut self.player;
+            p.hp = (p.hp + p.max_hp * hr * dt).min(p.max_hp);
+            p.mp = (p.mp + p.max_mp * mr * dt).min(p.max_mp);
+        }
+
+        // Pick something to fetch: the nearest loot within range of its owner.
+        a.skip_t -= dt;
+        if a.skip_t <= 0.0 {
+            a.skip.clear();
+            a.skip_t = 4.0;
+        }
+        let pc = self.player.body.center();
+        let radius = pet.loot_radius();
+        let still_there = |id: u32, drops: &[GroundDrop]| drops.iter().any(|d| d.id == id && d.taken.is_none());
+        if a.target.map(|t| !still_there(t, &self.drops)).unwrap_or(false) {
+            a.target = None;
+        }
+        if pet.starving() || !alive {
+            a.target = None;
+        } else if a.target.is_none() {
+            a.target = self
+                .drops
+                .iter()
+                .filter(|d| d.taken.is_none() && d.age > 0.5 && d.body.on_ground && !a.skip.contains(&d.id))
+                .map(|d| (d.id, (d.body.center().x - pc.x).abs() + (d.body.center().y - pc.y).abs() * 0.5))
+                .filter(|(_, dist)| *dist <= radius)
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .map(|(id, _)| id);
+        }
+
+        // Move: to the target, or trot along behind you.
+        let goal = match a.target.and_then(|t| self.drops.iter().find(|d| d.id == t)) {
+            Some(d) => d.body.feet(),
+            None => V2::new(feet.x - self.player.facing * 46.0, feet.y),
+        };
+        let delta = goal - a.pos;
+        let dist = delta.len();
+        if dist > 1200.0 {
+            a.pos = goal; // fell far behind (map edge, climbing): catch up
+        }
+        let speed = if a.target.is_some() { 480.0 } else { (dist * 4.0).clamp(0.0, 520.0) };
+        let step = (speed * dt).min(dist);
+        a.moving = step > 0.4 && !pet.starving();
+        if dist > 0.01 && !pet.starving() {
+            a.pos = a.pos + delta * (step / dist);
+            if delta.x.abs() > 2.0 {
+                a.facing = delta.x.signum();
+            }
+        } else if pet.starving() {
+            // too hungry to keep up: it plods slowly
+            a.pos = a.pos + delta * ((60.0 * dt).min(dist) / dist.max(0.01));
+        } else if a.target.is_none() {
+            a.facing = self.player.facing;
+        }
+
+        // Reached the loot: pick it up for its owner.
+        if let Some(t) = a.target {
+            if let Some(di) = self.drops.iter().position(|d| d.id == t) {
+                let c = self.drops[di].body.feet();
+                if (c - a.pos).len() < 26.0 {
+                    let at = V2::new(a.pos.x, a.pos.y - 14.0);
+                    if self.collect(di, Collector::Pet(i as u32), at).is_err() {
+                        a.skip.push(t);
+                        self.float(V2::new(a.pos.x, a.pos.y - 40.0), "Bag full!".into(), FloatKind::Info);
+                    }
+                    a.target = None;
+                }
+            }
+        }
+        self.pet = Some(a);
+    }
+
     // ------------------------------------------------------------------ ground loot
 
     /// Toss a drop into the world from `at`.
@@ -2109,8 +2330,11 @@ impl Sim {
         let at = d.body.center();
         match d.kind {
             DropKind::Gold => {
-                self.save.gold += d.count;
-                self.float(V2::new(at.x, at.y - 30.0), format!("+{} gold", d.count), FloatKind::Loot);
+                // A pet's Gold Sense adds a little extra.
+                let bonus = self.active_pet().map(|p| p.gold_find()).unwrap_or(0.0);
+                let amount = (d.count as f32 * (1.0 + bonus)).round() as u32;
+                self.save.gold += amount;
+                self.float(V2::new(at.x, at.y - 30.0), format!("+{} gold", amount), FloatKind::Loot);
             }
             DropKind::Item(id) => {
                 let left = self.save.inventory.add(id, d.count);
@@ -3232,6 +3456,120 @@ mod tests {
         s.player.body.pos.x = 2300.0;
         talk_and_accept(&mut s, "scout_tamsin");
         assert_eq!(s.save.inventory.count("novice_boots"), 1);
+    }
+
+    #[test]
+    fn every_main_town_has_a_pet_shop() {
+        for town in ["breezehollow", "ironhold", "shadowmere", "tempest_monastery", "leafwhisper", "starfall_spire"] {
+            let m = world::load_map(town).unwrap();
+            let id = world::pet_keeper_id(town);
+            assert!(m.npcs.iter().any(|n| n.id == id), "{} has no pet keeper", town);
+            assert_eq!(quests::npc_shop(id), Some(items::PET_SHOP));
+        }
+        let shop = items::shop(items::PET_SHOP).unwrap();
+        for &sp in pets::ALL_SPECIES {
+            assert_eq!(items::item(sp.item_id()).unwrap().price, 10_000);
+            assert!(shop.stock.contains(&sp.item_id()));
+        }
+        assert_eq!(items::item("pet_food").unwrap().price, 100);
+    }
+
+    #[test]
+    fn buying_and_adopting_a_pet_that_loots_for_you() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.save.gold = 9_999;
+        s.change_map("breezehollow", 2500.0);
+        talk_and_accept(&mut s, "pet_keeper_breezehollow");
+        assert_eq!(s.shop_open, Some(items::PET_SHOP));
+        assert!(s.buy("pet_breeze_fox", 1).is_err(), "10,000 gold");
+        s.save.gold = 10_300;
+        assert_eq!(s.buy("pet_breeze_fox", 1).unwrap(), 10_000);
+        assert_eq!(s.buy("pet_food", 3).unwrap(), 300);
+        assert_eq!(s.save.gold, 0);
+        // Use it from the bag to adopt: it comes out straight away.
+        let i = s.save.inventory.slots.iter().position(|x| x.id == "pet_breeze_fox").unwrap();
+        s.activate_slot(i);
+        assert_eq!(s.save.pets.len(), 1);
+        assert_eq!(s.save.active_pet, Some(0));
+        assert_eq!(s.save.inventory.count("pet_breeze_fox"), 0);
+        run(&mut s, 0.5, InputState::default());
+        assert!(s.pet.is_some(), "the pet appears in the world");
+        // Loot near you is fetched automatically; loot far away isn't.
+        let c = s.player.body.center();
+        s.spawn_drop(DropKind::Gold, 100, V2::new(c.x + 200.0, c.y), 0.0);
+        s.spawn_drop(DropKind::Item("moss_clump"), 1, V2::new(c.x - 150.0, c.y), 0.0);
+        s.spawn_drop(DropKind::Item("wool_tuft"), 1, V2::new(c.x + 1500.0, c.y), 0.0);
+        run(&mut s, 4.0, InputState::default());
+        assert_eq!(s.save.gold, 100, "picked up by the pet (Gold Sense is level 5)");
+        assert_eq!(s.save.inventory.count("moss_clump"), 1);
+        assert_eq!(s.save.inventory.count("wool_tuft"), 0, "out of range");
+        assert_eq!(s.drops.len(), 1);
+        // The pet stays close behind you.
+        let pet = s.pet.as_ref().unwrap();
+        assert!((pet.pos.x - s.player.body.feet().x).abs() < 80.0);
+    }
+
+    #[test]
+    fn pet_hunger_feeding_levels_and_passives() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.change_map("breezehollow", 1500.0);
+        s.save.inventory.add("pet_puffling", 1);
+        assert!(s.use_item("pet_puffling"));
+        let pdef_with = s.player.stats.pdef;
+        // Hunger drains while out: about 30 minutes from full.
+        s.save.pets[0].hunger = 1.0;
+        run(&mut s, 20.0, InputState::default());
+        assert!(s.save.pets[0].starving());
+        assert!(s.player.stats.pdef < pdef_with, "passives switch off when starving");
+        // A starving pet doesn't loot.
+        let c = s.player.body.center();
+        s.spawn_drop(DropKind::Item("moss_clump"), 1, V2::new(c.x + 120.0, c.y), 0.0);
+        run(&mut s, 3.0, InputState::default());
+        assert_eq!(s.save.inventory.count("moss_clump"), 0);
+        // Feed it: hunger back, EXP up, passives back.
+        assert!(s.feed_pet().is_err(), "no food");
+        s.save.inventory.add("pet_food", 30);
+        s.set_hotbar(3, HotbarSlot::Item("pet_food".into()));
+        run(&mut s, 0.02, press(&[Action::Hotbar4], &[]));
+        assert!(s.save.pets[0].hunger > 25.0);
+        assert_eq!(s.save.pets[0].exp, pets::FOOD_EXP);
+        assert!((s.player.stats.pdef - pdef_with).abs() < 0.01, "passive back on");
+        run(&mut s, 3.0, InputState::default());
+        assert_eq!(s.save.inventory.count("moss_clump"), 1, "fed pets loot again");
+        // Level 5 unlocks Cosy Fleece (HP regen).
+        while s.save.pets[0].level < 5 {
+            s.feed_pet().unwrap();
+        }
+        s.player.hp = 10.0;
+        s.player.since_hurt = 0.0;
+        run(&mut s, 2.0, InputState::default());
+        assert!(s.player.hp > 10.0 + s.player.max_hp * 0.005 * 1.5, "pet heals you");
+        // Sending it home stops the passives; hunger stays where it was.
+        let hunger = s.save.pets[0].hunger;
+        s.dismiss_pet();
+        assert!(s.pet.is_none());
+        assert!(s.player.stats.pdef < pdef_with);
+        run(&mut s, 10.0, InputState::default());
+        assert_eq!(s.save.pets[0].hunger, hunger, "no hunger loss at home");
+        // A second pet: summoning swaps.
+        s.save.inventory.add("pet_sparkwing", 1);
+        assert!(s.use_item("pet_sparkwing"));
+        assert_eq!(s.save.active_pet, Some(1), "no pet was out, so the new one comes out");
+        assert_eq!(s.active_pet().unwrap().species, PetSpecies::Sparkwing);
+        s.summon_pet(0).unwrap();
+        assert_eq!(s.active_pet().unwrap().species, PetSpecies::Puffling, "summoning swaps pets");
+    }
+
+    #[test]
+    fn fox_gold_sense_adds_gold() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.save.pets.push(PetSave { level: 5, ..PetSave::new(PetSpecies::BreezeFox) });
+        s.summon_pet(0).unwrap();
+        run(&mut s, 0.5, InputState::default());
+        let c = s.player.body.center();
+        s.spawn_drop(DropKind::Gold, 100, c, 0.0);
+        run(&mut s, 3.0, InputState::default());
+        assert_eq!(s.save.gold, 110);
     }
 
     #[test]

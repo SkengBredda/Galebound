@@ -425,6 +425,7 @@ fn breezehollow() -> Map {
     portals.push(portal(3700.0, g, "wayfarers_crossroads", 220.0, "North Road: Wayfarer's Crossroads", None, ""));
     let mut npcs = npcs;
     npcs.push(npc(waystone_id("breezehollow"), "Waystone", "Fast travel", 1520.0, g, Appearance::default(), false));
+    npcs.push(npc(pet_keeper_id("breezehollow"), "Pip", "Pet Shop", 2580.0, g, look(0, 2, 5, 2, 2, 8, 1, 6, 1, 1), false));
     let signs = vec![
         Sign { x: 3620.0, y: g, text: "North Road: Wayfarer's Crossroads and the five class towns. Press {Up} at the road to travel." },
         Sign { x: 360.0, y: g, text: "Welcome to Breezehollow! Speak with Mayor Odessa in the town square." },
@@ -443,6 +444,9 @@ fn breezehollow() -> Map {
         deco(TreeRound, 3600.0, g, 1.2, 0),
         deco(Fence, 3800.0, g, 1.0, 1),
         deco(Crate, 3000.0, g, 1.0, 1),
+        // Pip's pet pen
+        deco(Fence, 2520.0, g, 0.9, 1),
+        deco(Haystack, 2640.0, g, 0.8, 1),
         deco(TreeTall, 500.0, g, 1.2, 0),
     ];
     for i in 0..9 {
@@ -885,6 +889,20 @@ const TOWN_W: f32 = 3800.0;
 const SHOP_X: [f32; 3] = [760.0, 1420.0, 2080.0];
 const INN_X: f32 = 2720.0;
 const HALL_X: f32 = 3360.0;
+/// Where each class town's pet keeper stands (between the armourer and the inn).
+const PET_X: f32 = 2400.0;
+
+/// The pet keeper NPC in a main town.
+pub fn pet_keeper_id(town: &str) -> &'static str {
+    match town {
+        "breezehollow" => "pet_keeper_breezehollow",
+        "ironhold" => "pet_keeper_ironhold",
+        "shadowmere" => "pet_keeper_shadowmere",
+        "tempest_monastery" => "pet_keeper_tempest_monastery",
+        "leafwhisper" => "pet_keeper_leafwhisper",
+        _ => "pet_keeper_starfall_spire",
+    }
+}
 const INTERIOR_W: f32 = 1100.0;
 
 fn class_town(t: &'static TownSpec) -> Map {
@@ -899,6 +917,7 @@ fn class_town(t: &'static TownSpec) -> Map {
     ];
     let mut npcs = npcs;
     npcs.push(npc(waystone_id(t.key), "Waystone", "Fast travel", 480.0, g, Appearance::default(), false));
+    npcs.push(npc(pet_keeper_id(t.key), crate::quests::npc_display_name(pet_keeper_id(t.key)), "Pet Shop", PET_X, g, t.inn_look, true));
     let road = wild(town_road(t.key)).expect("road");
     let hunt = wild(town_hunt(t.key)).expect("hunting ground");
     let mut portals = vec![
@@ -917,6 +936,9 @@ fn class_town(t: &'static TownSpec) -> Map {
         signs.push(Sign { x: x + 150.0, y: g, text: store_sign(sp.front) });
     }
     decos.push(deco(Inn, INN_X, g, 1.0, 0));
+    // the pet keeper's little pen
+    decos.push(deco(Fence, PET_X - 70.0, g, 0.9, 1));
+    decos.push(deco(Haystack, PET_X + 70.0, g, 0.8, 1));
     decos.push(deco(ClassHall, HALL_X, g, 1.0, 0));
     signs.push(Sign { x: HALL_X + 200.0, y: g, text: "The class hall. Novices of level 10 and above may change class here - talk to the instructor." });
     // Flavour props between buildings.

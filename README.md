@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.6.0.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.7.0.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
@@ -115,6 +115,25 @@ vanishes. Sell materials at any shop. Drag an item out of the bag to drop it
 (Shift-drag drops one). The pick-up code also works for pets
 (`Sim::pet_collect`), ready for when pets arrive.
 
+**Pets** (`O` for the Pets window). Every main town (Breezehollow and the
+five class towns) has a **Pet Shop** keeper next to a little pen. Pets cost
+**10,000 gold**; use the pet from your bag to adopt it and it comes out with
+you. A pet trots (or flutters) beside you and **automatically picks up loot**
+on the ground within its range of you (260, more for a Breeze Fox), straight
+into your bag.
+
+| Pet | Lv 1 | Lv 5 | Lv 10 | Lv 15 | Lv 20 |
+|---|---|---|---|---|---|
+| Breeze Fox | +120 loot range | +10% gold | +5% move speed | +5% crit | +15% gold |
+| Puffling | +8% P/M DEF | heal 0.5% HP/s | +60 HP | +12% P/M DEF | +120 HP |
+| Sparkwing | +3% crit | +5% attack | 1% Mana/s | +20% crit damage | +8% attack |
+
+Pets level up (to 20) only by eating **Pet Food** (100 gold at any Pet Shop):
+each one gives +50 pet EXP and +30 hunger. **Hunger** drains while the pet is
+out (full to empty in 30 minutes) and pauses while it's at home. A starving pet
+stops looting and its passives switch off until it's fed. Feed from the Pets
+window, the bag or the hotbar. You can own up to 6 pets; one is out at a time.
+
 **Defeat.** When your HP hits 0 you fall and become a **tombstone** where you
 lay. It stays until you click **Respawn** (back to the last checkpoint with
 full HP; Enter also works), read a **Revive Scroll** (get up on the spot), or
@@ -208,6 +227,7 @@ Signs along the way teach the controls and always show *your* current keys.
 | World map | M | M | M |
 | Pick up loot (hold to keep picking) | F | F | F |
 | Minimap size | N | N | N |
+| Pets window | O | O | O |
 | Climb ladders / ropes / vines | W / S | Up / Down | Up / Down |
 | Hotbar | 1-8 | 1-8 | 1-8 |
 
@@ -235,6 +255,7 @@ core/        galebound-core: zero-dependency game logic (unit tested)
   enemies.rs   monster definitions and behaviours (hopper, lunger, floater, boss)
   world.rs     maps (incl. class towns + shop interiors), NPCs, spawns, portals
   quests.rs    quest chain, dialogue, progress tracking
+  pets.rs      pet species, levels, hunger and passive skills
   auth.rs      accounts, login, lockout, remember-me tokens
   crypto.rs    SHA-256 / HMAC / PBKDF2
   save.rs      save format (plain text, atomic writes)
@@ -251,6 +272,7 @@ src/         the client (macroquad): rendering, UI, input
   townart.rs   storefronts, inns, class halls, shop interiors
   icons.rs     item and ability icons
   lootart.rs   gold piles and the tombstone
+  petart.rs    pet sprites
   minimap.rs   the adjustable minimap
   display.rs   windowed / fullscreen switching
   screens/     login, character select, creation, game

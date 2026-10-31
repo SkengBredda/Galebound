@@ -13,6 +13,7 @@ mod hud;
 mod keys;
 mod lootart;
 mod minimap;
+mod petart;
 mod pixel;
 mod render;
 mod screens;
@@ -29,7 +30,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.6.0";
+pub const VERSION: &str = "0.7.0";
 
 /// Shared state that outlives individual screens.
 pub struct App {

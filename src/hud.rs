@@ -30,6 +30,7 @@ pub fn fill_keys(text: &str, layout: Layout) -> String {
         ("{WorldMap}", Action::WorldMap),
         ("{Pickup}", Action::Pickup),
         ("{Minimap}", Action::Minimap),
+        ("{Pets}", Action::Pets),
     ] {
         if out.contains(tag) {
             out = out.replace(tag, &format!("[{}]", layout.key_label(a)));
@@ -87,6 +88,21 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
         gfx::text_centered_outlined(&b.name[..1], bx + 15.0, 152.0, 16.0, rgb(255, 255, 255));
         gfx::text_centered_outlined(&format!("{}", b.left.ceil() as i32), bx + 15.0, 178.0, 12.0, rgb(230, 230, 240));
         bx += 36.0;
+    }
+
+    // ---------------------------------------------- pet (under the status panel)
+    if let (Some(pet), Some(_)) = (sim.active_pet(), &sim.pet) {
+        let (px, py) = (14.0, 184.0);
+        widgets::hud_panel(px, py, 250.0, 46.0);
+        let tex = crate::sprites::get(&format!("pet_{}_0", pet.species.key()), || crate::petart::pet(pet.species, 0));
+        gfx::tex(&tex, px + 6.0, py + 2.0, 1.0, false, Color::new(1.0, 1.0, 1.0, 1.0));
+        gfx::text_outlined(&format!("{} Lv.{}", pet.name, pet.level), px + 56.0, py + 5.0, 14.0, rgb(190, 230, 255));
+        let f = pet.hunger / galebound_core::pets::HUNGER_MAX;
+        let c = if f > 0.5 { rgb(110, 200, 110) } else if f > 0.2 { rgb(230, 180, 60) } else { rgb(230, 80, 70) };
+        gfx::rrect(px + 56.0, py + 28.0, 150.0, 10.0, 4.0, rgba(10, 12, 24, 220));
+        gfx::rrect(px + 57.0, py + 29.0, 148.0 * f.clamp(0.0, 1.0), 8.0, 3.0, c);
+        let k = format!("[{}]", layout.key_label(Action::Pets));
+        gfx::text_outlined(&k, px + 214.0, py + 25.0, 13.0, rgb(200, 210, 230));
     }
 
     // ---------------------------------------------- EXP bar (bottom, full width)

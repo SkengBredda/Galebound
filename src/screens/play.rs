@@ -26,6 +26,7 @@ enum MenuItem {
     Inventory,
     Character,
     Abilities,
+    Pets,
     Settings,
     Graphics,
     Select,
@@ -143,6 +144,9 @@ impl PlayScreen {
             if self.input.pressed(Action::WorldMap) {
                 self.windows.toggle_map();
             }
+            if self.input.pressed(Action::Pets) {
+                self.windows.toggle_pets(&self.sim);
+            }
             if self.input.pressed(Action::Minimap) {
                 crate::minimap::cycle(&mut self.sim.settings);
                 self.sim.wants_save = true;
@@ -217,6 +221,7 @@ impl PlayScreen {
         render::signs_and_portals(&self.sim, &cam, time);
         render::npcs(&self.sim, &cam, time);
         render::drops(&self.sim, &cam, time);
+        render::pet(&self.sim, &cam, time);
         render::enemies(&self.sim, &cam);
         render::player(&self.sim, &cam, &self.look);
         render::tufts(&self.sim, &cam);
@@ -225,6 +230,7 @@ impl PlayScreen {
         render::decos(&self.sim, &cam, 2, time);
         render::lighting(&self.sim, &cam, time);
         render::drop_labels(&self.sim, &cam);
+        render::pet_label(&self.sim, &cam, time);
         hud::draw(&self.sim, self.show_controls && !self.windows.any_open(&self.sim), time);
         {
             let ui = Ui { enabled: self.menu == Menu::Closed, ..Ui::begin() };
@@ -285,12 +291,13 @@ impl PlayScreen {
         gfx::text_outlined("GALEBOUND", x + 34.0, 40.0, 26.0, rgb(255, 236, 170));
         gfx::text(&format!("{}  -  Lv.{} {}", self.sim.save.name, self.sim.save.level, self.sim.player.info.name), x + 36.0, 80.0, 14.0, rgb(190, 200, 225));
         gfx::rect(x + 34.0, 106.0, w - 68.0, 1.0, rgba(255, 255, 255, 50));
-        let items: [(&str, MenuItem); 10] = [
+        let items: [(&str, MenuItem); 11] = [
             ("Resume", MenuItem::Resume),
             ("World Map", MenuItem::Map),
             ("Inventory", MenuItem::Inventory),
             ("Character", MenuItem::Character),
             ("Abilities", MenuItem::Abilities),
+            ("Pets", MenuItem::Pets),
             ("Controls & Settings", MenuItem::Settings),
             ("Graphics", MenuItem::Graphics),
             ("Character Select", MenuItem::Select),
@@ -310,11 +317,11 @@ impl PlayScreen {
         }
         let mut y = 130.0;
         for (i, (label, item)) in items.iter().enumerate() {
-            if i == 7 {
+            if i == 8 {
                 y += 18.0;
                 gfx::rect(x + 34.0, y - 10.0, w - 68.0, 1.0, rgba(255, 255, 255, 40));
             }
-            let h = 40.0;
+            let h = 38.0;
             let hover = gfx::mouse_in(x, y, w, h);
             if hover {
                 self.menu_sel = i;
@@ -329,7 +336,7 @@ impl PlayScreen {
                 _ if sel => rgb(255, 255, 255),
                 _ => rgb(196, 204, 226),
             };
-            gfx::text(label, x + 40.0 + if sel { 6.0 } else { 0.0 }, y + 10.0, 18.0, col);
+            gfx::text(label, x + 40.0 + if sel { 6.0 } else { 0.0 }, y + 9.0, 18.0, col);
             if hover && ui.clicked {
                 chosen = Some(*item);
             }
@@ -358,6 +365,11 @@ impl PlayScreen {
             Some(MenuItem::Abilities) => {
                 self.menu = Menu::Closed;
                 self.windows.abilities = true;
+            }
+            Some(MenuItem::Pets) => {
+                self.menu = Menu::Closed;
+                self.windows.toggle_pets(&self.sim);
+                self.windows.pets = true;
             }
             Some(MenuItem::Settings) => self.menu = Menu::Settings,
             Some(MenuItem::Graphics) => self.menu = Menu::Graphics,

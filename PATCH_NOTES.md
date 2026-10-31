@@ -7,6 +7,86 @@ so the whole history is in one place.
 
 ---
 
+## 0.7.0 – Pets
+*31 October 2026*
+
+### Pet Shops
+- Every main town now has a **Pet Shop**: Pip in Breezehollow (beside the
+  windmill), and a pet keeper between the armourer and the inn in Ironhold,
+  Shadowmere, Tempest Monastery, Leafwhisper and Starfall Spire. Each keeper
+  has a small pen with a fence and a haystack.
+- **Pets cost 10,000 gold**. **Pet Food costs 100 gold**.
+- Prices of 1,000 gold or more now show thousands separators in shops
+  (10,000g).
+
+### Adopting and summoning
+- Buy a pet, then **use it from your bag** to adopt it. If no pet is out, it
+  comes out with you straight away.
+- **Pets window (`O`, or `Esc` → Pets)** lists your pets and shows the chosen
+  pet's level, EXP, hunger, status and passive skills. It has Summon / Send
+  home and Feed buttons.
+- You can own up to **6 pets**, with one out at a time. Summoning a pet sends
+  the other one home.
+
+### Three pets to choose from
+| Pet | Style | Lv 1 | Lv 5 | Lv 10 | Lv 15 | Lv 20 |
+|---|---|---|---|---|---|---|
+| **Breeze Fox** | loot and gold | Keen Nose: +120 loot range | Gold Sense: +10% gold | Fleet Paws: +5% move speed | Lucky Tail: +5% crit chance | Treasure Hunter: +15% gold |
+| **Puffling** (cloud lamb) | defence and healing | Woolly Guard: +8% P/M DEF | Cosy Fleece: heals 0.5% max HP per second | Fluffy Bulk: +60 HP | Cloud Cushion: +12% P/M DEF | Silver Lining: +120 HP |
+| **Sparkwing** (storm bird, flies) | attack and Mana | Static Charge: +3% crit chance | Battle Song: +5% attack | Mana Spark: 1% max Mana per second | Storm Call: +20% crit damage | Thunderheart: +8% attack |
+
+- Passive skills apply while the pet is out and fed. They work like gear
+  bonuses and show up in your Character window.
+- A toast tells you when your pet learns a new passive.
+
+### Automatic looting
+- Your pet **picks up loot on the ground for you**: anything within its range
+  of you (260 units, plus the Breeze Fox's Keen Nose). It runs to each drop and
+  the loot goes into your bag.
+- Gold the pet picks up also gets the Gold Sense bonus. So does gold you pick
+  up yourself with `F`.
+- If your bag is full, the pet says "Bag full!" and tries again a few seconds
+  later. Anything outside its range is left for you.
+
+### Levels, Pet Food and hunger
+- Pets go from **level 1 to 20**, and the only way to level them is to feed
+  them **Pet Food**: +50 pet EXP and +30 hunger each. Levelling 1→20 takes
+  about 130 Pet Food.
+- Feed your pet from the Pets window, by clicking Pet Food in your bag, or
+  from the hotbar.
+- **Hunger** drains while the pet is out (full to empty in 30 minutes) and
+  stops while it's at home.
+  - Below 20, you're warned the pet is getting hungry.
+  - At 0 the pet is **starving**: it greys out, stops looting, plods slowly
+    behind you with a "Hungry!" bubble, and its passives switch off until you
+    feed it.
+
+### HUD and world
+- A **pet panel** under your status bars shows the pet out with you, its
+  level and its hunger bar.
+- Pets have pixel-art sprites with walking and wing-beat animation, a name
+  tag and a shadow. The Breeze Fox and Puffling trot along the ground; the
+  Sparkwing flies at your shoulder.
+- The Pets window and Pet Shop items have their own icons. The world map lists
+  pet shops in each town's services.
+
+### Other changes
+- New key in every layout: **`O` Pets**. The `Esc` menu has a Pets entry.
+- Saves store your pets (species, name, level, EXP and hunger) and which one
+  is out. Older saves load as before.
+- 79 automated tests (up from 70). The new tests cover:
+  - a pet shop in every main town and the shop prices
+  - buying, adopting and summoning pets
+  - the pet looting within range and ignoring loot outside it
+  - hunger draining and starving switching passives and looting off
+  - feeding, levelling and passive unlocks (including healing)
+  - sending pets home and swapping between them
+  - Gold Sense
+  - pets in the save file
+  - pet sprites
+
+---
+
 ## 0.6.0 – Loot, Vendors & Second Chances
 *31 October 2026*
 

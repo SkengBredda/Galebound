@@ -76,6 +76,34 @@ pub fn item(def: &ItemDef) -> Canvas {
             c.rect(10, 13, 1, 3, rgb(210, 60, 70));
             c.set(9, 8, rgb(255, 240, 150));
         }),
+        ItemKind::Special(items::Special::Pet(species)) => {
+            // the pet itself, shrunk to icon size on a soft badge
+            let src = crate::petart::pet(species, 0);
+            let mut c = Canvas::new(ICON, ICON);
+            c.disc(9.0, 9.5, 8.5, rgb(255, 236, 190));
+            for y in 0..ICON {
+                for x in 0..ICON {
+                    let px = src.get(x * src.w / ICON, y * src.h / ICON);
+                    if px[3] > 0 {
+                        c.set(x, y + 1, px);
+                    }
+                }
+            }
+            c
+        }
+        ItemKind::Special(items::Special::PetFood) => outlined(|c| {
+            // a bowl of kibble
+            let bowl = rgb(200, 80, 70);
+            c.ellipse(9.0, 9.0, 7.0, 2.5, rgb(170, 110, 60));
+            for (x, y) in [(5, 8), (7, 7), (9, 8), (11, 7), (13, 8), (8, 9), (10, 9), (6, 9), (12, 9)] {
+                c.set(x, y, rgb(232, 170, 100));
+            }
+            c.rect(3, 10, 13, 4, bowl);
+            c.rect(4, 14, 11, 2, shadow(bowl, 0.25));
+            c.rect(4, 11, 11, 1, light(bowl, 0.35));
+            c.disc(9.0, 4.0, 1.4, rgb(250, 140, 160));
+            c.set(8, 5, rgb(250, 140, 160));
+        }),
         ItemKind::Special(items::Special::SkillReset) => outlined(|c| {
             // a golden ticket with a circular arrow
             let t = rgb(240, 200, 90);

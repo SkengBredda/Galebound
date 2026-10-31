@@ -10,6 +10,7 @@ pub mod enemies;
 pub mod input;
 pub mod items;
 pub mod math;
+pub mod pets;
 pub mod physics;
 pub mod quests;
 pub mod save;

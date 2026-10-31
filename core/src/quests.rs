@@ -699,6 +699,10 @@ fn idle_lines(npc: &str, save: &CharacterSave) -> Vec<String> {
         }
         "mayor_odessa" => &["Breezehollow welcomes all travellers. Mostly the polite ones."],
         "mira" => &["Potions! Fresh potions! I'll patch you up for free, too - just ask."],
+        id if id.starts_with("pet_keeper_") => &[
+            "Looking for a companion? Every pet here will follow you, pick up loot for you and learn new tricks as it grows.",
+            "Pets are 10,000 gold, Pet Food is 100. Keep your pet fed - a hungry pet won't lift a paw to help.",
+        ],
         "garrick" => &["Need something sturdier than a stick? Take a look at what's on the rack."],
         "mentor_aurel" => {
             if save.class == ClassId::Novice {
@@ -976,6 +980,12 @@ pub fn npc_display_name(id: &str) -> &'static str {
 
 /// Display names for the class-town NPCs.
 pub const TOWN_NPCS: &[(&str, &str)] = &[
+    ("pet_keeper_breezehollow", "Pip"),
+    ("pet_keeper_ironhold", "Brin"),
+    ("pet_keeper_shadowmere", "Corvina"),
+    ("pet_keeper_tempest_monastery", "Brother Mochi"),
+    ("pet_keeper_leafwhisper", "Fern"),
+    ("pet_keeper_starfall_spire", "Stella"),
     ("instructor_ironhold", "Commander Hale"),
     ("instructor_shadowmere", "Mistress Vey"),
     ("instructor_tempest", "Master Kaito"),
@@ -1020,6 +1030,7 @@ pub fn npc_shop(npc_id: &str) -> Option<&'static str> {
     match npc_id {
         "mira" => Some("breezehollow_general"),
         "quartermaster_hesper" => Some(crate::items::GLADE_SHOP),
+        id if id.starts_with("pet_keeper_") => Some(crate::items::PET_SHOP),
         "garrick" => Some("breezehollow_smith"),
         other => crate::items::shop(other).map(|s| s.id),
     }

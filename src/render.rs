@@ -937,3 +937,44 @@ pub fn drop_labels(sim: &Sim, cam: &Camera) {
     gfx::rrect(f.x - w * 0.5, y - u(2.0), w, u(11.0), u(2.0), rgba(24, 22, 40, 200));
     gfx::text_centered(&label, f.x, y, 16.0, rgb(255, 255, 255));
 }
+
+/// Your pet: trots (or flutters) along beside you and fetches loot.
+pub fn pet(sim: &Sim, cam: &Camera, time: f32) {
+    let (Some(a), Some(p)) = (&sim.pet, sim.active_pet()) else { return };
+    gfx::set_cam(cam.x, cam.y);
+    let flies = p.species.flies();
+    let starving = p.starving();
+    let frame: u8 = if starving {
+        0
+    } else if flies {
+        ((time * 9.0) as u8) % 2
+    } else if a.moving {
+        ((a.anim_t * 10.0) as u8) % 2
+    } else {
+        0
+    };
+    let tex = sprites::get(&format!("pet_{}_{}", p.species.key(), frame), || crate::petart::pet(p.species, frame));
+    let lift = if flies && !starving {
+        u(16.0) + ((time * 3.0).sin() * 2.0).round() * u(1.0)
+    } else if a.moving {
+        ((a.anim_t * 12.0).sin().abs() * 2.0).round() * u(1.0)
+    } else {
+        0.0
+    };
+    gfx::ellipse(a.pos.x, a.pos.y - u(1.0), u(7.0), u(2.0), 0.0, rgba(0, 0, 0, if flies { 40 } else { 70 }));
+    let tint = if starving { Color::new(0.75, 0.75, 0.8, 1.0) } else { WHITE };
+    sprite_at(&tex, a.pos.x, a.pos.y - lift, a.facing < 0.0, tint);
+}
+
+/// The pet's name (and a "Hungry!" bubble), drawn on top of the world.
+pub fn pet_label(sim: &Sim, cam: &Camera, time: f32) {
+    let (Some(a), Some(p)) = (&sim.pet, sim.active_pet()) else { return };
+    gfx::set_cam(cam.x, cam.y);
+    let lift = if p.species.flies() && !p.starving() { u(16.0) } else { 0.0 };
+    let top = a.pos.y - lift - u(crate::petart::H as f32) - u(10.0);
+    gfx::text_centered_outlined(&format!("{} Lv.{}", p.name, p.level), a.pos.x, top, 16.0, rgb(190, 230, 255));
+    if p.starving() {
+        let pulse = 0.6 + 0.4 * (time * 4.0).sin();
+        gfx::text_centered_outlined("Hungry!", a.pos.x, top - u(11.0), 16.0, alpha(rgb(255, 170, 120), pulse));
+    }
+}
