@@ -677,7 +677,7 @@ impl SocialUi {
             let on = level >= b.level;
             let c = if on { rgb(40, 130, 60) } else { rgba(90, 80, 70, 150) };
             gfx::text(&format!("Lv.{} {}", b.level, b.name), x + 30.0, yy, 12.0, c);
-            gfx::text(b.desc, x + 260.0, yy, 12.0, c);
+            gfx::text(b.desc, x + 274.0, yy, 12.0, c);
             yy += 17.0;
         }
         yy += 8.0;
