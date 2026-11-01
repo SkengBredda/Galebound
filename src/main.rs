@@ -1,3 +1,5 @@
+// Release builds on Windows open just the game window, without a console.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Galebound Online - a side-scrolling action MMO prototype.
 //!
 //! Screens: Login -> Character Select -> (Character Creation) -> Game.
@@ -32,7 +34,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.8.0";
+pub const VERSION: &str = "0.8.1";
 
 /// How long to wait for the server to answer a menu action.
 pub const REPLY_WAIT: Duration = Duration::from_secs(8);

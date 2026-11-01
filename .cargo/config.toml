@@ -1,0 +1,4 @@
+# Windows: build the C runtime into the .exe, so friends can run
+# Galebound.exe without installing anything else.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

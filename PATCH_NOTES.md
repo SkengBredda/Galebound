@@ -7,6 +7,24 @@ so the whole history is in one place.
 
 ---
 
+## 0.8.1 – Windows .exe
+*1 November 2026*
+
+- New **`build-windows.bat`**: double-click it to build the game and the
+  server into a ready-to-share **`GaleBound_Windows`** folder containing:
+  - `Galebound.exe` (the game)
+  - `GaleboundServer.exe` (the server)
+  - `Start Server.bat`
+  - the README and these patch notes
+- `Galebound.exe` runs on its own. It needs no Rust and no extra runtimes
+  (the C runtime is built in), so friends only need the .exe and Tailscale.
+- The game now opens **without a black console window** behind it. The
+  server keeps its window, since that's where you type commands.
+- Gameplay and the network protocol are unchanged, so 0.8.0 and 0.8.1
+  players can play together.
+
+---
+
 ## 0.8.0 – Multiplayer
 *31 October 2026*
 

@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.8.0 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.8.1 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
@@ -22,6 +22,17 @@ cargo run --release
 On the login screen, put the server's address in the **Server address** box
 (bottom-left): `localhost` if the server runs on your PC, or the host's
 Tailscale address. Then create an account *on that server* and play.
+
+## Windows .exe
+
+Double-click **`build-windows.bat`**. It builds everything (the first time
+takes a few minutes) and opens a **`GaleBound_Windows`** folder containing
+`Galebound.exe`, `GaleboundServer.exe` and `Start Server.bat`. Give friends
+`Galebound.exe`; it runs on its own with nothing else to install.
+
+If the build says `link.exe` was not found, install the free *Build Tools for
+Visual Studio* (https://visualstudio.microsoft.com/visual-cpp-build-tools/),
+tick **Desktop development with C++**, and run the script again.
 
 ## Hosting for friends (up to 16 players)
 
