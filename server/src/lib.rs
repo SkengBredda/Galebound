@@ -126,7 +126,8 @@ struct Zone {
 
 pub struct Server {
     cfg: Config,
-    listener: TcpListener,
+    /// IPv4, plus IPv6 where the system allows it.
+    listeners: Vec<TcpListener>,
     clients: Vec<Client>,
     zones: HashMap<String, Zone>,
     next_id: u32,
@@ -143,15 +144,24 @@ impl Server {
     pub fn bind(cfg: Config) -> std::io::Result<Server> {
         let listener = TcpListener::bind(("0.0.0.0", cfg.port))?;
         listener.set_nonblocking(true)?;
+        let port = listener.local_addr()?.port();
+        let mut listeners = vec![listener];
+        // Also listen on IPv6 (Windows tries "localhost" as ::1 first). On
+        // systems where IPv6 shares the IPv4 socket this fails, which is fine.
+        if let Ok(l6) = TcpListener::bind(("::", port)) {
+            if l6.set_nonblocking(true).is_ok() {
+                listeners.push(l6);
+            }
+        }
         std::fs::create_dir_all(&cfg.data_dir)?;
         let store = AccountStore::new(cfg.data_dir.clone());
         let names = store.all_accounts().iter().flat_map(|a| a.characters.iter().map(|c| c.name.to_lowercase())).collect();
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7);
-        Ok(Server { cfg, listener, clients: Vec::new(), zones: HashMap::new(), next_id: 1, rng: Rng::new(seed), names, store, tick: 0, log: Vec::new() })
+        Ok(Server { cfg, listeners, clients: Vec::new(), zones: HashMap::new(), next_id: 1, rng: Rng::new(seed), names, store, tick: 0, log: Vec::new() })
     }
 
     pub fn port(&self) -> u16 {
-        self.listener.local_addr().map(|a| a.port()).unwrap_or(0)
+        self.listeners[0].local_addr().map(|a| a.port()).unwrap_or(0)
     }
 
     pub fn players_online(&self) -> usize {
@@ -247,32 +257,33 @@ impl Server {
     }
 
     fn accept(&mut self) {
-        loop {
-            match self.listener.accept() {
-                Ok((stream, addr)) => {
-                    if self.clients.len() >= MAX_CONNECTIONS {
-                        continue;
-                    }
-                    let _ = stream.set_nonblocking(false);
-                    let Ok((tx, rx, _s)) = net::spawn_io(stream) else { continue };
-                    let id = self.new_id();
-                    self.say(format!("connection #{} from {}", id, addr));
-                    self.clients.push(Client {
-                        id,
-                        tx,
-                        rx,
-                        auth: AccountStore::new(self.cfg.data_dir.clone()),
-                        account: None,
-                        slot: None,
-                        info: PlayerInfo::default(),
-                        pos: PlayerPos::default(),
-                        map: String::new(),
-                        last_heard: Instant::now(),
-                        gone: false,
-                    });
-                }
-                Err(_) => break,
+        let mut incoming = Vec::new();
+        for l in &self.listeners {
+            while let Ok(c) = l.accept() {
+                incoming.push(c);
             }
+        }
+        for (stream, addr) in incoming {
+            if self.clients.len() >= MAX_CONNECTIONS {
+                continue;
+            }
+            let _ = stream.set_nonblocking(false);
+            let Ok((tx, rx, _s)) = net::spawn_io(stream) else { continue };
+            let id = self.new_id();
+            self.say(format!("connection #{} from {}", id, addr));
+            self.clients.push(Client {
+                id,
+                tx,
+                rx,
+                auth: AccountStore::new(self.cfg.data_dir.clone()),
+                account: None,
+                slot: None,
+                info: PlayerInfo::default(),
+                pos: PlayerPos::default(),
+                map: String::new(),
+                last_heard: Instant::now(),
+                gone: false,
+            });
         }
     }
 

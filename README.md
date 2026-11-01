@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.8.1 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.8.2 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 

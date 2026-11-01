@@ -255,6 +255,9 @@ fn version_mismatch_is_explained() {
     let mut c = connect(&r);
     let w = c.request(&ClientMsg::Hello { protocol: 999 }, T, |m| matches!(m, ServerMsg::Welcome { .. })).unwrap();
     assert!(matches!(w, ServerMsg::Welcome { protocol, .. } if protocol == galebound_core::net::PROTOCOL));
+    // "localhost" works whichever address it resolves to first (IPv6 ::1 on Windows).
+    assert!(NetClient::connect(&format!("localhost:{}", r.port), T).is_ok(), "localhost");
+    assert!(NetClient::connect(&format!("[::1]:{}", r.port), T).is_ok() || std::net::TcpListener::bind("[::1]:0").is_err(), "IPv6 loopback");
     // And nothing listening is a clear error.
     let err = NetClient::connect("127.0.0.1:1", Duration::from_millis(500)).err().unwrap();
     assert!(err.contains("No server answered"), "{}", err);

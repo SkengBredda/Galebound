@@ -7,6 +7,22 @@ so the whole history is in one place.
 
 ---
 
+## 0.8.2 – "localhost" fix
+*1 November 2026*
+
+- **Fixed: "No server answered at localhost:7777" on Windows while the server
+  was running.**
+  - Windows tries "localhost" as the IPv6 address `::1` first, but the
+    server only listened on IPv4, and the game only tried the first address.
+  - Now the game tries every address a name points to (IPv4 first), and the
+    server listens on IPv6 as well as IPv4.
+- Before this fix, typing `127.0.0.1` instead of `localhost` was the
+  workaround.
+- Gameplay and the network protocol are unchanged.
+- New test: connecting with `localhost` and with the IPv6 loopback address.
+
+---
+
 ## 0.8.1 – Windows .exe
 *1 November 2026*
 

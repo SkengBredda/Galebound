@@ -580,12 +580,18 @@ impl NetClient {
     /// Connect and check that client and server speak the same protocol.
     pub fn connect(addr: &str, timeout: Duration) -> Result<NetClient, String> {
         let full = with_port(addr);
-        let sa = full
-            .to_socket_addrs()
-            .map_err(|_| format!("Can't find the server '{}'", addr.trim()))?
-            .next()
-            .ok_or_else(|| format!("Can't find the server '{}'", addr.trim()))?;
-        let stream = TcpStream::connect_timeout(&sa, timeout).map_err(|_| format!("No server answered at {}. Is it running?", full))?;
+        // A name like "localhost" can mean several addresses (Windows lists
+        // the IPv6 one first). Try each, IPv4 first, until one answers.
+        let mut addrs: Vec<std::net::SocketAddr> = full.to_socket_addrs().map_err(|_| format!("Can't find the server '{}'", addr.trim()))?.collect();
+        if addrs.is_empty() {
+            return Err(format!("Can't find the server '{}'", addr.trim()));
+        }
+        addrs.sort_by_key(|a| a.is_ipv6());
+        let each = (timeout / addrs.len() as u32).max(Duration::from_millis(800));
+        let stream = addrs
+            .iter()
+            .find_map(|a| TcpStream::connect_timeout(a, each).ok())
+            .ok_or_else(|| format!("No server answered at {}. Is it running?", full))?;
         let (tx, rx, stream) = spawn_io(stream).map_err(|e| e.to_string())?;
         let mut c = NetClient { tx, rx, stream, addr: full, held: Default::default(), closed: false, motd: String::new() };
         let reply = c.request(&ClientMsg::Hello { protocol: PROTOCOL }, timeout, |m| matches!(m, ServerMsg::Welcome { .. }))?;
