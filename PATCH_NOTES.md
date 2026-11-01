@@ -26,6 +26,12 @@ so the whole history is in one place.
     Tailscale as a *public* network.
   - `build-windows.bat` now copies it into the `GaleBound_Windows` folder.
   - The README has a new *If a friend can't connect* checklist.
+- **`allow-firewall.bat` updated:**
+  - It now also removes the **block** rules Windows creates for the server
+    when only "Private networks" was allowed. Block rules beat allow rules,
+    so they kept the port closed on networks Windows treats as public.
+  - It ends with a short report: network type, Galebound firewall rules,
+    the PC's addresses, and whether the server is listening.
 
 ---
 
