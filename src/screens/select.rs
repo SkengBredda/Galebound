@@ -144,7 +144,7 @@ impl SelectScreen {
                 None => Err("Not connected".into()),
             };
             match reply {
-                Ok(ServerMsg::Entered { id }) => return Go::To(Screen::Play(Box::new(PlayScreen::new(app, idx, id)))),
+                Ok(ServerMsg::Entered { id, day }) => return Go::To(Screen::Play(Box::new(PlayScreen::new(app, idx, id, day)))),
                 Ok(_) => {}
                 Err(e) => self.error = Some(e),
             }

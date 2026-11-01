@@ -2560,7 +2560,7 @@ impl Sim {
 
     /// A line for the System tab (EXP, loot, achievements...).
     pub fn sys_line(&mut self, text: String) {
-        self.push_line(net::CH_SYSTEM, "", "", &text);
+        self.push_line(net::CH_LOG, "", "", &text);
     }
 
     // ------------------------------------------------------------------ social
@@ -4042,6 +4042,105 @@ mod tests {
             run(&mut s, 0.01, InputState::default());
             t += 0.01;
         }
+    }
+
+    #[test]
+    fn daily_attendance_rewards_once_a_day() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.today = 0;
+        assert!(!s.can_claim_attendance(), "no date from a server yet");
+        s.today = 20_000;
+        let gold = s.save.gold;
+        s.claim_attendance().unwrap();
+        assert_eq!(s.save.gold, gold + crate::achievements::ATTENDANCE[0].gold);
+        assert!(s.claim_attendance().is_err(), "once a day");
+        s.today += 1;
+        s.claim_attendance().unwrap();
+        assert_eq!(s.save.attendance.count, 2);
+        assert!(s.save.inventory.count("hp_potion_big") >= 3);
+        // the cycle comes round to day 7's Gale Marks
+        for _ in 0..5 {
+            s.today += 1;
+            s.claim_attendance().unwrap();
+        }
+        assert_eq!(s.save.marks, 2 + 10);
+        run(&mut s, 1.1, InputState::default());
+        assert!(s.save.achievements.iter().any(|a| a == "regular"), "7 days earns an achievement");
+    }
+
+    #[test]
+    fn achievements_pay_marks_that_buy_cosmetics() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.save.tally.kills = 120;
+        run(&mut s, 1.1, InputState::default());
+        assert!(s.save.achievements.iter().any(|a| a == "first_blood"));
+        assert!(s.save.achievements.iter().any(|a| a == "hunter_100"));
+        assert!(s.save.marks >= 15);
+        assert!(s.buy_cosmetic("cos_halo").is_err(), "80 marks needed");
+        s.save.marks = s.save.marks.max(30);
+        s.buy_cosmetic("cos_flower_crown").unwrap();
+        assert_eq!(s.save.worn_look().hat, 9, "worn over the gear");
+        s.save.inventory.equip[EquipSlot::Helmet.index()] = Some("iron_helm".into());
+        assert_eq!(s.save.worn_look().hat, 9);
+        s.wear_cosmetic("cos_flower_crown", false).unwrap();
+        assert_eq!(s.save.worn_look().hat, 4, "the helmet shows again");
+        let back = crate::save::decode_character(&crate::save::encode_character(&s.save)).unwrap();
+        assert_eq!(back.cosmetics, vec!["cos_flower_crown".to_string()]);
+        assert_eq!(back.achievements, s.save.achievements);
+    }
+
+    #[test]
+    fn trades_and_guild_rewards_change_the_bag() {
+        let mut s = online_sim();
+        s.save.gold = 100;
+        s.save.inventory.add("elixir", 3);
+        let offer = vec![("elixir".to_string(), 2)];
+        assert!(s.trade_offer_problem(&offer, 50).is_none());
+        assert!(s.trade_offer_problem(&offer, 500).is_some(), "not that much gold");
+        assert!(s.trade_offer_problem(&[("trainee_hp_potion".to_string(), 1)], 0).is_some(), "bound items stay");
+        s.net_apply(ServerMsg::TradeDone { with: "Kaito".into(), give: offer, give_gold: 50, get: vec![("copper_ring".into(), 1)], get_gold: 7 });
+        assert_eq!(s.save.inventory.count("elixir"), 1);
+        assert_eq!(s.save.inventory.count("copper_ring"), 1);
+        assert_eq!(s.save.gold, 57);
+        assert_eq!(s.save.tally.trades, 1);
+        s.net_apply(ServerMsg::Grant { gold: 400, cost: 0, items: vec![("revive_scroll".into(), 1)], reason: "Guild chest".into() });
+        assert_eq!(s.save.gold, 457);
+        s.net_apply(ServerMsg::Grant { gold: 0, cost: 400, items: vec![], reason: "Founded".into() });
+        assert_eq!(s.save.gold, 57);
+        assert!(s.chat.iter().any(|l| l.channel == net::CH_LOG && l.text.contains("Trade with Kaito")));
+    }
+
+    #[test]
+    fn guild_level_gives_a_buff_and_more_exp() {
+        let mut s = online_sim();
+        let atk = s.player.stats.attack_mult(false);
+        let g = crate::social::GuildNet { name: "Testers".into(), exp: 8000, ..Default::default() };
+        s.net_apply(ServerMsg::Guild(Some(g)));
+        assert!(s.player.stats.attack_mult(false) > atk, "guild level 5 adds attack");
+        assert!(s.player.buffs.iter().any(|b| b.id == "guild"));
+        run(&mut s, 5.0, InputState::default());
+        assert!(s.player.buffs.iter().any(|b| b.id == "guild"), "never wears off");
+        let exp = s.save.exp;
+        s.net_apply(ServerMsg::Kill { enemy: 1, kind: EnemyKind::Mossling.index(), exp: 100 });
+        assert_eq!(s.save.exp - exp, 108, "+8% EXP at guild level 5");
+        s.net_apply(ServerMsg::Guild(None));
+        assert!(!s.player.buffs.iter().any(|b| b.id == "guild"));
+        assert!(s.save.tally.guild);
+    }
+
+    #[test]
+    fn blocked_players_are_silenced() {
+        let mut s = online_sim();
+        s.net_apply(ServerMsg::Friends(crate::social::SocialNet { blocked: vec!["Troll".into()], ..Default::default() }));
+        let n = s.chat.len();
+        s.net_apply(ServerMsg::Chat { from: "troll".into(), text: "spam".into() });
+        s.net_apply(ServerMsg::Invite { kind: net::INV_PARTY, from: "Troll".into(), extra: String::new() });
+        assert_eq!(s.chat.len(), n);
+        assert!(s.invites.is_empty());
+        s.net_apply(ServerMsg::Invite { kind: net::INV_PARTY, from: "Kaito".into(), extra: String::new() });
+        assert_eq!(s.invites.len(), 1);
+        run(&mut s, 61.0, InputState::default());
+        assert!(s.invites.is_empty(), "invitations expire");
     }
 
     /// Stand in a portal and press Up.

@@ -195,11 +195,16 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
             (layout.key_label(Action::Dodge), "Dodge"),
             (layout.key_label(Action::Interact), "Talk"),
             (layout.key_label(Action::Pickup), "Pick up loot (hold)"),
-            (layout.key_label(Action::Chat), "Chat"),
+            (layout.key_label(Action::Chat), "Chat  (/w /p /g)"),
+            (
+                format!("{} {} {}", layout.key_label(Action::Social), layout.key_label(Action::Guild), layout.key_label(Action::Achievements)),
+                "Friends / Guild / Achievements",
+            ),
+            ("Right-click".to_string(), "A player: profile, trade..."),
         ];
         let h = 22.0 + rows.len() as f32 * 20.0 + 24.0;
         let y0 = gfx::VH - 40.0 - h;
-        widgets::hud_panel(14.0, y0, 344.0, h);
+        widgets::hud_panel(14.0, y0, 384.0, h);
         for (i, (k, d)) in rows.iter().enumerate() {
             let yy = y0 + 12.0 + i as f32 * 20.0;
             gfx::text(k, 26.0, yy, 14.0, rgb(255, 220, 120));

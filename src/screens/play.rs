@@ -7,6 +7,7 @@ use crate::keys::InputCollector;
 use crate::render::{self, Camera};
 use crate::screens::{login::LoginScreen, select::SelectScreen};
 use crate::settings_panel::SettingsPanel;
+use crate::social_ui::SocialUi;
 use crate::widgets::{self, Ui};
 use crate::windows::{self, Windows};
 use crate::{App, Go, Screen, REPLY_WAIT};
@@ -73,17 +74,46 @@ pub struct PlayScreen {
     ping_t: f32,
     since_save: f32,
     last_info: Option<PlayerInfo>,
+    social: SocialUi,
+    /// Which chat tab is showing (`net::CH_*`).
+    chat_tab: u32,
+    /// Who last whispered us (for /r).
+    last_whisper: String,
+}
+
+const CHAT_TABS: [(&str, u32); 5] = [("All", net::CH_ALL), ("Party", net::CH_PARTY), ("Guild", net::CH_GUILD), ("Whisper", net::CH_WHISPER), ("System", net::CH_SYSTEM)];
+
+fn channel_color(ch: u32) -> macroquad::prelude::Color {
+    match ch {
+        net::CH_PARTY => rgb(120, 220, 255),
+        net::CH_GUILD => rgb(140, 240, 150),
+        net::CH_WHISPER => rgb(255, 150, 230),
+        net::CH_SYSTEM => rgb(255, 220, 130),
+        net::CH_LOG => rgb(200, 206, 230),
+        _ => rgb(240, 244, 255),
+    }
+}
+
+/// Does a chat line belong on this tab? "All" shows everything except your
+/// own EXP / loot log; "System" shows server notices and that log.
+fn on_tab(tab: u32, ch: u32) -> bool {
+    match tab {
+        net::CH_ALL => ch != net::CH_LOG,
+        net::CH_SYSTEM => ch == net::CH_SYSTEM || ch == net::CH_LOG,
+        t => t == ch,
+    }
 }
 
 impl PlayScreen {
     /// Enter the world as `slot`, playing on the server as player `my_id`.
-    pub fn new(app: &App, slot: usize, my_id: u32) -> Self {
+    pub fn new(app: &App, slot: usize, my_id: u32, day: u32) -> Self {
         let acc = app.account.as_ref().expect("logged in");
         let save = acc.characters[slot].clone();
         let look = save.look;
         let seed = (app.time * 1_000_003.0) as u64 ^ 0xA5A5;
         let mut sim = Sim::new(save, acc.settings.clone(), seed);
         sim.go_online(my_id);
+        sim.today = day;
         if let Some(n) = &app.net {
             if !n.motd.is_empty() {
                 sim.push_chat("", &n.motd);
@@ -114,6 +144,9 @@ impl PlayScreen {
             ping_t: 0.0,
             since_save: 0.0,
             last_info: None,
+            social: SocialUi::default(),
+            chat_tab: net::CH_ALL,
+            last_whisper: String::new(),
         }
     }
 
@@ -231,13 +264,14 @@ impl PlayScreen {
     /// Typing in the chat box: Enter sends, Esc cancels. Returns true when
     /// it used this frame's keys (so they don't also open menus).
     fn chat_input(&mut self, app: &App) -> bool {
+        if !self.chat_open {
+            // leave typed characters for the windows' text boxes
+            return false;
+        }
         while let Some(c) = macroquad::prelude::get_char_pressed() {
-            if self.chat_open && !c.is_control() && self.chat_text.chars().count() < net::CHAT_MAX {
+            if !c.is_control() && self.chat_text.chars().count() < net::CHAT_MAX {
                 self.chat_text.push(c);
             }
-        }
-        if !self.chat_open {
-            return false;
         }
         if is_key_pressed(KeyCode::Backspace) {
             self.chat_text.pop();
@@ -249,8 +283,10 @@ impl PlayScreen {
         } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
             let t = self.chat_text.trim().to_string();
             if !t.is_empty() {
-                if let Some(n) = &app.net {
-                    n.send(&ClientMsg::Chat { text: t });
+                if let Some(m) = self.chat_message(&t) {
+                    if let Some(n) = &app.net {
+                        n.send(&m);
+                    }
                 }
             }
             self.chat_open = false;
@@ -260,19 +296,109 @@ impl PlayScreen {
         true
     }
 
-    /// Recent chat (bottom-left), and the text box while typing.
-    fn draw_chat(&self) {
+    /// Turn what was typed into a message: "/w Name text" whispers, "/r"
+    /// replies, "/p" and "/g" talk to your party / guild, "/a" (or plain
+    /// text on the All tab) talks to everyone. Plain text follows the tab.
+    fn chat_message(&mut self, t: &str) -> Option<ClientMsg> {
+        use net::SocialCmd as S;
+        let lower = t.to_lowercase();
+        let rest = |n: usize| t[n..].trim().to_string();
+        if lower.starts_with("/w ") || lower.starts_with("/whisper ") {
+            let body = rest(t.find(' ').unwrap_or(0));
+            // names may contain spaces: match the longest name we know of
+            let mut known: Vec<String> = self.sim.others.iter().map(|o| o.name.clone()).collect();
+            known.extend(self.sim.social.friends.iter().map(|f| f.name.clone()));
+            if let Some(p) = &self.sim.party {
+                known.extend(p.members.iter().map(|m| m.name.clone()));
+            }
+            if let Some(g) = &self.sim.guild {
+                known.extend(g.members.iter().map(|m| m.name.clone()));
+            }
+            known.sort_by_key(|n| std::cmp::Reverse(n.len()));
+            let bl = body.to_lowercase();
+            let (to, text) = match known.iter().find(|n| bl.starts_with(&format!("{} ", n.to_lowercase()))) {
+                Some(n) => (n.clone(), body[n.len()..].trim().to_string()),
+                None => match body.split_once(' ') {
+                    Some((a, b)) => (a.to_string(), b.trim().to_string()),
+                    None => (body.clone(), String::new()),
+                },
+            };
+            self.last_whisper = to.clone();
+            return (!text.is_empty()).then_some(ClientMsg::Social(S::Whisper { to, text }));
+        }
+        if lower.starts_with("/r ") {
+            if self.last_whisper.is_empty() {
+                self.sim.sys_line("Nobody to reply to yet.".into());
+                return None;
+            }
+            return Some(ClientMsg::Social(S::Whisper { to: self.last_whisper.clone(), text: rest(3) }));
+        }
+        if lower.starts_with("/p ") {
+            return Some(ClientMsg::Social(S::PartyChat { text: rest(3) }));
+        }
+        if lower.starts_with("/g ") {
+            return Some(ClientMsg::Social(S::GuildChat { text: rest(3) }));
+        }
+        if lower.starts_with("/a ") {
+            return Some(ClientMsg::Chat { text: rest(3) });
+        }
+        if t.starts_with('/') {
+            self.sim.sys_line("Chat commands: /w Name message, /r message, /p party, /g guild, /a everyone".into());
+            return None;
+        }
+        Some(match self.chat_tab {
+            net::CH_PARTY => ClientMsg::Social(S::PartyChat { text: t.to_string() }),
+            net::CH_GUILD => ClientMsg::Social(S::GuildChat { text: t.to_string() }),
+            net::CH_WHISPER if !self.last_whisper.is_empty() => ClientMsg::Social(S::Whisper { to: self.last_whisper.clone(), text: t.to_string() }),
+            _ => ClientMsg::Chat { text: t.to_string() },
+        })
+    }
+
+    /// Recent chat (bottom-left) with channel tabs, and the text box while typing.
+    fn draw_chat(&mut self) {
         let (x, w) = (14.0, 520.0);
         let bottom = if self.chat_open { gfx::VH - 120.0 } else { gfx::VH - 262.0 };
-        let lines: Vec<&(String, String, f32)> = self.sim.chat.iter().rev().filter(|c| self.chat_open || c.2 < CHAT_FADE).take(if self.chat_open { 12 } else { 6 }).collect();
-        if self.chat_open {
-            gfx::rrect(x, bottom - lines.len() as f32 * 22.0 - 10.0, w, lines.len() as f32 * 22.0 + 10.0, 6.0, rgba(14, 16, 30, 170));
+        // remember who whispered us last, for /r
+        if let Some(l) = self.sim.chat.iter().rev().find(|l| l.channel == net::CH_WHISPER && !l.from.eq_ignore_ascii_case(&self.sim.save.name)) {
+            if l.age < 0.05 {
+                self.last_whisper = l.from.clone();
+            }
         }
-        for (i, (from, text, age)) in lines.iter().enumerate() {
-            let a = if self.chat_open { 1.0 } else { ((CHAT_FADE - age) / 2.0).clamp(0.0, 1.0) };
+        let tab = self.chat_tab;
+        let lines: Vec<&galebound_core::sim::ChatLine> =
+            self.sim.chat.iter().rev().filter(|c| on_tab(tab, c.channel) && (self.chat_open || c.age < CHAT_FADE)).take(if self.chat_open { 12 } else { 6 }).collect();
+        if self.chat_open {
+            gfx::rrect(x, bottom - lines.len().max(1) as f32 * 22.0 - 10.0, w, lines.len().max(1) as f32 * 22.0 + 10.0, 6.0, rgba(14, 16, 30, 170));
+        }
+        // tabs (clickable while the chat box is open; always shown small)
+        let ty = bottom - lines.len().max(1) as f32 * 22.0 - (if self.chat_open { 36.0 } else { 30.0 });
+        if self.chat_open || !lines.is_empty() {
+            let mut tx = x;
+            for (label, ch) in CHAT_TABS {
+                let tw = gfx::text_w(label, 13.0) + 16.0;
+                let on = self.chat_tab == ch;
+                let unread = !on && self.sim.chat.iter().any(|c| on_tab(ch, c.channel) && c.age < 4.0 && ch != net::CH_ALL);
+                gfx::rrect(tx, ty, tw, 22.0, 5.0, if on { rgba(70, 120, 200, 220) } else { rgba(14, 16, 30, if self.chat_open { 190 } else { 120 }) });
+                gfx::text(label, tx + 8.0, ty + 4.0, 13.0, if on { rgb(255, 255, 255) } else if unread { channel_color(ch) } else { rgb(170, 178, 200) });
+                if self.chat_open && macroquad::prelude::is_mouse_button_pressed(macroquad::prelude::MouseButton::Left) && gfx::mouse_in(tx, ty, tw, 22.0) {
+                    self.chat_tab = ch;
+                }
+                tx += tw + 4.0;
+            }
+        }
+        let me = self.sim.save.name.clone();
+        for (i, l) in lines.iter().enumerate() {
+            let a = if self.chat_open { 1.0 } else { ((CHAT_FADE - l.age) / 2.0).clamp(0.0, 1.0) };
             let y = bottom - (i + 1) as f32 * 22.0;
-            let col = if from.is_empty() { rgb(255, 220, 130) } else { rgb(240, 244, 255) };
-            let line = if from.is_empty() { text.clone() } else { format!("{}: {}", from, text) };
+            let col = channel_color(l.channel);
+            let line = match l.channel {
+                _ if l.from.is_empty() => l.text.clone(),
+                net::CH_WHISPER if l.from.eq_ignore_ascii_case(&me) => format!("To {}: {}", l.to, l.text),
+                net::CH_WHISPER => format!("From {}: {}", l.from, l.text),
+                net::CH_PARTY => format!("[Party] {}: {}", l.from, l.text),
+                net::CH_GUILD => format!("[Guild] {}: {}", l.from, l.text),
+                _ => format!("{}: {}", l.from, l.text),
+            };
             let line = gfx::wrap(&line, w - 16.0, 14.0).into_iter().next().unwrap_or_default();
             gfx::text_outlined(&line, x + 8.0, y, 14.0, gfx::alpha(col, a));
         }
@@ -282,7 +408,13 @@ impl PlayScreen {
             gfx::rect_lines(x + 1.0, y + 1.0, w - 2.0, 28.0, 1.0, rgba(120, 220, 255, 160));
             let caret = if (self.sim.time * 2.0) as i32 % 2 == 0 { "_" } else { "" };
             gfx::text(&format!("> {}{}", self.chat_text, caret), x + 10.0, y + 7.0, 14.0, rgb(255, 255, 255));
-            gfx::text_outlined("Enter: send   Esc: cancel", x + w - 200.0, y - 20.0, 12.0, rgb(190, 200, 220));
+            let hint = match self.chat_tab {
+                net::CH_PARTY => "To party.  /w Name, /g, /a",
+                net::CH_GUILD => "To guild.  /w Name, /p, /a",
+                net::CH_WHISPER => "Reply.  /w Name to pick someone",
+                _ => "Enter: send  Esc: cancel  /w /p /g",
+            };
+            gfx::text_outlined(hint, x + w - gfx::text_w(hint, 12.0) - 8.0, y + 36.0, 12.0, rgb(190, 200, 220));
         }
     }
 
@@ -294,7 +426,17 @@ impl PlayScreen {
         }
         let typed = self.chat_input(app);
         self.input.poll(layout);
-        if typed && !self.chat_open {
+        if let Some(t) = self.social.start_chat.take() {
+            self.chat_open = true;
+            self.chat_text = t;
+            self.input.consumed();
+            while macroquad::prelude::get_char_pressed().is_some() {}
+        }
+        if self.social.typing() && !self.chat_open {
+            // typing in a text box: keys spell words
+            self.input.consumed();
+            self.input = InputCollector::default();
+        } else if typed && !self.chat_open {
             // the Enter / Esc that closed the chat box does nothing else
             self.input.consumed();
         } else if self.chat_open {
@@ -322,6 +464,15 @@ impl PlayScreen {
             if self.input.pressed(Action::Pets) {
                 self.windows.toggle_pets(&self.sim);
             }
+            if self.input.pressed(Action::Social) {
+                self.social.toggle_social(&mut self.sim);
+            }
+            if self.input.pressed(Action::Guild) {
+                self.social.toggle_guild(&mut self.sim);
+            }
+            if self.input.pressed(Action::Achievements) {
+                self.social.toggle_achievements();
+            }
             if self.input.pressed(Action::Minimap) {
                 crate::minimap::cycle(&mut self.sim.settings);
                 self.sim.wants_save = true;
@@ -331,7 +482,7 @@ impl PlayScreen {
         if self.menu == Menu::Closed && self.input.pressed(Action::Menu) && self.sim.dialog.is_none() {
             if self.sim.quest_log_open {
                 self.sim.quest_log_open = false;
-            } else if self.windows.close_one(&mut self.sim) {
+            } else if self.social.close_one(&mut self.sim) || self.windows.close_one(&mut self.sim) {
             } else {
                 self.menu = Menu::Pause;
                 self.menu_just_opened = true;
@@ -411,17 +562,20 @@ impl PlayScreen {
         render::drop_labels(&self.sim, &cam);
         render::pet_label(&self.sim, &cam, time);
         render::other_labels(&self.sim, &cam);
-        hud::draw(&self.sim, self.show_controls && !self.chat_open && !self.windows.any_open(&self.sim), time);
+        hud::draw(&self.sim, self.show_controls && !self.chat_open && !self.windows.any_open(&self.sim) && !self.social.any_open(&self.sim), time);
         self.draw_chat();
+        // one input snapshot (typed characters, clicks) for every window this frame
+        let ui = Ui { enabled: self.menu == Menu::Closed, ..Ui::begin() };
         {
-            let ui = Ui { enabled: self.menu == Menu::Closed, ..Ui::begin() };
             let act = crate::minimap::frame(&self.sim, &ui);
             if ui.enabled && crate::minimap::apply(&mut self.sim.settings, act) {
                 self.sim.wants_save = true;
             }
         }
         if self.menu == Menu::Closed && self.sim.dialog.is_none() {
-            self.windows.frame(&mut self.sim, dt);
+            self.windows.frame(&mut self.sim, dt, &ui);
+            self.social.right_click(&self.sim, self.cam.x, self.cam.y);
+            self.social.frame(&mut self.sim, &ui, dt);
         }
         if self.sim.player.state == PState::Dead && self.sim.player.state_t > TOMB_DELAY && self.menu == Menu::Closed {
             self.death_panel();

@@ -254,6 +254,8 @@ pub const CH_PARTY: u32 = 1;
 pub const CH_GUILD: u32 = 2;
 pub const CH_WHISPER: u32 = 3;
 pub const CH_SYSTEM: u32 = 4;
+/// Your own game's log (EXP, loot, achievements): only on the System tab.
+pub const CH_LOG: u32 = 5;
 
 /// Everything social a player can ask the server to do.
 #[derive(Clone, Debug, PartialEq)]

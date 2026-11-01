@@ -407,6 +407,12 @@ pub fn mouse() -> (f32, f32) {
     (((mx - bx) / k) / UI_S, ((my - by) / k) / UI_S)
 }
 
+/// The mouse position in world units, for a camera at (cx, cy).
+pub fn mouse_world(cx: f32, cy: f32) -> (f32, f32) {
+    let (mx, my) = mouse();
+    (mx / WORLD_ZOOM + cx, my / WORLD_ZOOM + cy)
+}
+
 pub fn mouse_in(x: f32, y: f32, w: f32, h: f32) -> bool {
     let (mx, my) = mouse();
     mx >= x && mx <= x + w && my >= y && my <= y + h

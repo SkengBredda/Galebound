@@ -513,7 +513,18 @@ fn name_tag(x: f32, y: f32, name: &str, title: Option<&str>, col: Color) {
     gfx::rrect(x - w * 0.5, y + u(2.0), w, u(11.0), u(2.0), rgba(24, 22, 40, 200));
     gfx::text_centered(name, x, y + u(4.0), 16.0, col);
     if let Some(t) = title {
-        gfx::text_centered_outlined(t, x, y + u(15.0), 16.0, rgb(224, 228, 240));
+        if let Some(g) = t.strip_prefix('<').and_then(|t| t.strip_suffix('>')) {
+            // guild tag: a little emblem and the guild's name, like the classics
+            let gw = gfx::text_w(g, 14.0) + u(12.0);
+            let gy = y + u(14.5);
+            gfx::rrect(x - gw * 0.5, gy, gw, u(9.5), u(2.0), rgba(30, 26, 20, 200));
+            let ex = x - gw * 0.5 + u(4.0);
+            gfx::circle(ex, gy + u(4.75), u(2.6), rgb(196, 60, 64));
+            gfx::circle(ex, gy + u(4.75), u(1.3), rgb(255, 230, 140));
+            gfx::text_centered(g, x + u(3.0), gy + u(1.6), 14.0, rgb(255, 226, 110));
+        } else {
+            gfx::text_centered_outlined(t, x, y + u(15.0), 16.0, rgb(224, 228, 240));
+        }
     }
 }
 
@@ -660,7 +671,8 @@ pub fn player(sim: &Sim, cam: &Camera, look: &Appearance) {
         }
     }
     draw_char(&tex, f.x, f.y, flip, Color::new(1.0, 1.0, 1.0, a));
-    name_tag(f.x, f.y, &sim.save.name, None, rgb(255, 255, 255));
+    let tag = sim.guild.as_ref().map(|g| format!("<{}>", g.name));
+    name_tag(f.x, f.y, &sim.save.name, tag.as_deref(), rgb(255, 255, 255));
 }
 
 // ---------------------------------------------------------------- enemies
@@ -1097,7 +1109,8 @@ pub fn other_labels(sim: &Sim, cam: &Camera) {
             continue;
         }
         let f = o.pos;
-        name_tag(f.x, f.y, &format!("{}  Lv.{}", o.name, o.info.level), None, rgb(150, 210, 255));
+        let tag = (!o.info.guild.is_empty()).then(|| format!("<{}>", o.info.guild));
+        name_tag(f.x, f.y, &format!("{}  Lv.{}", o.name, o.info.level), tag.as_deref(), rgb(150, 210, 255));
         if !o.dead && o.st.hp < 0.999 {
             let (w, y) = (u(28.0), f.y - u(70.0));
             gfx::rect(f.x - w * 0.5, y, w, u(3.0), rgba(20, 16, 30, 200));

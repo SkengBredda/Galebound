@@ -198,7 +198,7 @@ impl Windows {
     }
 
     /// Draw everything and handle the mouse. Call after the HUD.
-    pub fn frame(&mut self, sim: &mut Sim, dt: f32) {
+    pub fn frame(&mut self, sim: &mut Sim, dt: f32, ui: &Ui) {
         gfx::clear_cam();
         self.prev_hits = std::mem::take(&mut self.hits);
         if sim.shop_open.is_some() && !self.shop_was_open {
@@ -207,7 +207,7 @@ impl Windows {
             self.shop_page = 0;
         }
         self.shop_was_open = sim.shop_open.is_some();
-        let ui = Ui::begin();
+        let ui = Ui { chars: Vec::new(), clicked: ui.clicked, enabled: ui.enabled };
         self.hotbar(sim);
         if self.character {
             self.character_window(sim, &ui);

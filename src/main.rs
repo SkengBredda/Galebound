@@ -21,6 +21,7 @@ mod pixel;
 mod render;
 mod screens;
 mod settings_panel;
+mod social_ui;
 mod sprites;
 mod townart;
 mod icons;
@@ -34,7 +35,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.8.3";
+pub const VERSION: &str = "0.9.0";
 
 /// How long to wait for the server to answer a menu action.
 pub const REPLY_WAIT: Duration = Duration::from_secs(8);
