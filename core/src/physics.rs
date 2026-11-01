@@ -12,6 +12,20 @@ pub const FAST_FALL_GRAVITY: f32 = 2900.0;
 pub const MAX_FALL: f32 = 780.0;
 pub const FAST_FALL_SPEED: f32 = 1080.0;
 
+/// Everything in the world (players, monsters, projectiles, attacks) runs at
+/// this fraction of real time, for a calmer pace. Timers that players read
+/// as real time (pet hunger, play time, toasts) are not scaled.
+pub const GAME_SPEED: f32 = 0.88;
+/// Players fall more gently than monsters: lower jumps that hang longer,
+/// for more air-combo time.
+pub const PLAYER_GRAVITY: f32 = 0.70;
+/// Jump launch speed scale, paired with [`PLAYER_GRAVITY`]
+/// (about 8% lower apex, about 20% more time in the air).
+pub const PLAYER_JUMP: f32 = 0.80;
+/// Scale for upward attack lunges so they keep their height under the
+/// lighter player gravity (sqrt of PLAYER_GRAVITY).
+pub const PLAYER_LIFT: f32 = 0.837;
+
 /// Scale for horizontal speeds tuned under the old, faster pacing.
 pub const PACE_H: f32 = 0.8;
 /// Scale for vertical launch speeds (sqrt of the gravity ratio keeps arc heights).

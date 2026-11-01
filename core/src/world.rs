@@ -215,7 +215,26 @@ fn plat(x: f32, top: f32, w: f32) -> Aabb {
     Aabb::new(x, top, w, 14.0)
 }
 
+/// At most this many flying monsters live on one map at a time.
+pub const MAX_FLYERS: usize = 4;
+
 pub fn load_map(key: &str) -> Option<Map> {
+    load_map_raw(key).map(cap_flyers)
+}
+
+/// Trim flying monster spawns so a map never holds more than [`MAX_FLYERS`].
+fn cap_flyers(mut m: Map) -> Map {
+    let flies = |k: EnemyKind| k.def().ai.is_floater();
+    let mut left = MAX_FLYERS.saturating_sub(m.fixed_enemies.iter().filter(|f| flies(f.0)).count());
+    for z in m.spawns.iter_mut().filter(|z| flies(z.kind)) {
+        z.max = z.max.min(left);
+        left -= z.max;
+    }
+    m.spawns.retain(|z| z.max > 0);
+    m
+}
+
+fn load_map_raw(key: &str) -> Option<Map> {
     match key {
         "dawnwind_glade" => Some(dawnwind_glade()),
         "breezehollow" => Some(breezehollow()),

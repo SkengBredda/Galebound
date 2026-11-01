@@ -23,7 +23,8 @@ const COYOTE: f32 = 0.09;
 const JUMP_BUFFER: f32 = 0.12;
 const ATTACK_BUFFER: f32 = 0.14;
 const DODGE_TIME: f32 = 0.34;
-const DODGE_IFRAMES: f32 = 0.27;
+/// Invincible for the whole dodge and a little after it.
+const DODGE_IFRAMES: f32 = 0.42;
 const DODGE_COOLDOWN: f32 = 0.6;
 const DODGE_SPEED: f32 = 520.0;
 const HURT_IFRAMES: f32 = 0.9;
@@ -291,6 +292,25 @@ pub struct Projectile {
     pub crit_bonus: f32,
     /// Magic damage (enemy shots: reduced by M.DEF instead of P.DEF).
     pub magic: bool,
+    /// Distance flown so far and the most it may fly (see [`max_range`]).
+    pub travelled: f32,
+    pub range: f32,
+}
+
+/// How far a projectile of this style may fly before it fizzles out.
+/// Roughly a screen's width for the longest bows and bolts, less for thrown
+/// things; monster shots reach about two-thirds of a screen.
+pub fn max_range(style: ProjStyle, team: Team) -> f32 {
+    let r: f32 = match style {
+        ProjStyle::Arrow => 760.0,
+        ProjStyle::Bolt => 640.0,
+        ProjStyle::Knife => 420.0,
+        ProjStyle::Orb => 480.0,
+        ProjStyle::Star => 560.0,
+        ProjStyle::Caltrop => 260.0,
+        ProjStyle::Shockwave => 520.0,
+    };
+    if team == Team::Enemy { r.min(620.0) } else { r }
 }
 
 impl Projectile {
@@ -366,6 +386,7 @@ impl ActiveDialog {
             DialogAction::OfferQuest(_) => Some(["Accept", "Not now"]),
             DialogAction::Shop(_) => Some(["Browse wares", "Goodbye"]),
             DialogAction::Waystone => Some(["Travel", "Cancel"]),
+            DialogAction::SummonBoss(_) => Some(["Summon it (100 gold)", "Not now"]),
             DialogAction::ClassChange(c) => Some([
                 match c {
                     ClassId::Vanguard => "Become a Vanguard",
@@ -607,12 +628,34 @@ impl Sim {
             let active = self.save.quest(b.quest).map(|q| q.state == QuestState::Active).unwrap_or(false);
             if active && !self.enemies.iter().any(|e| e.kind == b.kind) {
                 if self.online {
-                    self.outbox.push(ClientMsg::Boss { kind: b.kind.index() });
+                    self.outbox.push(ClientMsg::Boss { kind: b.kind.index(), map: self.map.key.to_string() });
                 } else {
                     self.spawn_enemy(b.kind, b.x, b.y, None);
                 }
             }
         }
+    }
+
+    /// Pay a quest NPC to call their boss into its arena on this map.
+    pub fn summon_boss(&mut self, kind: EnemyKind) -> Result<(), String> {
+        let Some(b) = self.map.bosses.iter().find(|b| b.kind == kind).cloned() else {
+            return Err("It doesn't live around here".into());
+        };
+        if self.enemies.iter().any(|e| e.kind == kind && e.state != enemies::EState::Dying) {
+            return Err(format!("The {} is already here!", kind.name()));
+        }
+        if self.save.gold < quests::BOSS_SUMMON_COST {
+            return Err(format!("You need {} gold", quests::BOSS_SUMMON_COST));
+        }
+        self.save.gold -= quests::BOSS_SUMMON_COST;
+        if self.online {
+            self.outbox.push(ClientMsg::Boss { kind: kind.index(), map: self.map.key.to_string() });
+        } else {
+            self.spawn_enemy(b.kind, b.x, b.y, None);
+        }
+        self.toast(&format!("The {} appears!", kind.name()), "Watch for its charge.");
+        self.wants_save = true;
+        Ok(())
     }
 
     pub(crate) fn spawn_enemy(&mut self, kind: EnemyKind, x: f32, feet_y: f32, zone: Option<usize>) {
@@ -677,14 +720,16 @@ impl Sim {
             return;
         }
 
-        self.update_player(input, dt);
-        self.update_drops(dt);
+        // The world runs a little slower than real time (see GAME_SPEED).
+        let gdt = dt * physics::GAME_SPEED;
+        self.update_player(input, gdt);
+        self.update_drops(gdt);
         self.update_pet(dt);
-        self.update_enemies(dt);
-        self.update_projectiles(dt);
+        self.update_enemies(gdt);
+        self.update_projectiles(gdt);
         self.update_spawns(dt);
         self.update_regions(dt);
-        self.update_fx(dt);
+        self.update_fx(gdt);
     }
 
     fn update_fx(&mut self, dt: f32) {
@@ -733,9 +778,8 @@ impl Sim {
                             quests::accept(&mut self.save, id);
                             if let Some(def) = quests::quest_def(id) {
                                 self.toast("Quest accepted", def.name);
-                                if id == "the_bramblehorn" {
-                                    self.maybe_spawn_boss();
-                                }
+                                // a boss quest calls its boss right away
+                                self.maybe_spawn_boss();
                             }
                             self.wants_save = true;
                         }
@@ -782,6 +826,14 @@ impl Sim {
                         self.heal_full();
                         close = true;
                     }
+                    DialogAction::SummonBoss(kind) => {
+                        if choice == 0 {
+                            if let Err(e) = self.summon_boss(kind) {
+                                self.info_float(&e);
+                            }
+                        }
+                        close = true;
+                    }
                     DialogAction::None => close = true,
                 }
             }
@@ -821,23 +873,26 @@ impl Sim {
         p.land_squash = (p.land_squash - dt * 6.0).max(0.0);
         p.since_hurt += dt;
 
+        // Ability cooldowns, buffs and regen run on real seconds (they're
+        // shown as seconds), not the slowed-down world clock.
+        let real = dt / physics::GAME_SPEED;
         for c in &mut p.cooldowns {
-            c.1 -= dt;
+            c.1 -= real;
         }
         p.cooldowns.retain(|c| c.1 > 0.0);
         let before = p.buffs.len();
         for b in &mut p.buffs {
-            b.left -= dt;
+            b.left -= real;
         }
         p.buffs.retain(|b| b.left > 0.0);
         let buffs_expired = p.buffs.len() != before;
 
         // Regen: MP always, HP out of combat (never while defeated).
         if p.state != PState::Dead {
-            p.mp = (p.mp + p.stats.mp_regen * dt).min(p.max_mp);
+            p.mp = (p.mp + p.stats.mp_regen * real).min(p.max_mp);
         }
         if p.since_hurt > 6.0 && p.state != PState::Dead {
-            p.hp = (p.hp + p.max_hp * 0.015 * dt).min(p.max_hp);
+            p.hp = (p.hp + p.max_hp * 0.015 * real).min(p.max_hp);
         }
 
         if buffs_expired {
@@ -923,7 +978,7 @@ impl Sim {
                 if jump_pressed {
                     p.state = PState::Normal;
                     p.state_t = 0.0;
-                    p.body.vel = V2::new(ax * run * 0.8, -p.info.jump_speed * 0.7);
+                    p.body.vel = V2::new(ax * run * 0.8, -p.info.jump_speed * physics::PLAYER_JUMP * 0.7);
                     p.air_jumps_left = p.info.air_jumps;
                     p.air_dodge_used = false;
                     if ax != 0.0 {
@@ -958,7 +1013,7 @@ impl Sim {
                         p.body.pos.y += 2.0;
                         p.jump_buffer = 0.0;
                     } else if grounded || p.coyote > 0.0 {
-                        p.body.vel.y = -p.info.jump_speed;
+                        p.body.vel.y = -p.info.jump_speed * physics::PLAYER_JUMP;
                         p.body.on_ground = false;
                         p.coyote = 0.0;
                         p.jump_buffer = 0.0;
@@ -968,7 +1023,7 @@ impl Sim {
                         self.particles.push(Particle { pos: f, vel: V2::new(60.0, -20.0), life: 0.3, max_life: 0.3, kind: FxKind::Dust, size: 4.0 });
                     } else if p.air_jumps_left > 0 {
                         p.air_jumps_left -= 1;
-                        p.body.vel.y = -p.info.jump_speed * 0.92;
+                        p.body.vel.y = -p.info.jump_speed * physics::PLAYER_JUMP * 0.92;
                         p.jump_buffer = 0.0;
                         let f = p.body.feet();
                         for i in 0..6 {
@@ -978,8 +1033,9 @@ impl Sim {
                     }
                 }
                 // Variable jump height
-                if !jump_held && p.body.vel.y < -250.0 && p.jumped_from_ground {
-                    p.body.vel.y = -250.0;
+                let cut = -250.0 * physics::PLAYER_LIFT;
+                if !jump_held && p.body.vel.y < cut && p.jumped_from_ground {
+                    p.body.vel.y = cut;
                 }
                 if let Some((heavy, _)) = p.attack_buffer {
                     start_attack = Some(heavy);
@@ -1117,7 +1173,7 @@ impl Sim {
         let was_ground = p.body.on_ground;
         let vy_before = p.body.vel.y;
         if p.state != PState::Climb {
-            physics::apply_gravity(&mut p.body, dt, fast_fall, gscale);
+            physics::apply_gravity(&mut p.body, dt, fast_fall, gscale * physics::PLAYER_GRAVITY);
             let lvl = Level { solids: &solids, platforms: &self.map.platforms, bounds: self.map.bounds() };
             physics::move_and_collide(&mut p.body, &lvl, dt);
         }
@@ -1185,7 +1241,7 @@ impl Sim {
             if let Some((lx, ly)) = def.lunge {
                 p.body.vel.x = lx * p.facing;
                 if ly != 0.0 {
-                    p.body.vel.y = ly;
+                    p.body.vel.y = if ly < 0.0 { ly * physics::PLAYER_LIFT } else { ly };
                     if ly < 0.0 {
                         p.body.on_ground = false;
                     }
@@ -1224,6 +1280,8 @@ impl Sim {
                         heavy: kind.is_heavy() || a.skill.is_some(),
                         crit_bonus,
                         magic: p.info.magic,
+                        travelled: 0.0,
+                        range: max_range(pd.style, Team::Player),
                     });
                 }
             }
@@ -1918,7 +1976,17 @@ impl Sim {
                 let npc = self.map.npcs[i].clone();
                 // Face each other
                 self.player.facing = (npc.x - self.player.body.center().x).signum();
-                let dialog = quests::talk(npc.id, npc.name, &mut self.save);
+                let mut dialog = quests::talk(npc.id, npc.name, &mut self.save);
+                if let DialogAction::SummonBoss(k) = dialog.action {
+                    // no point offering while it's already here
+                    let here = self.enemies.iter().any(|e| e.kind == k && e.state != enemies::EState::Dying);
+                    if here || !self.map.bosses.iter().any(|b| b.kind == k) {
+                        dialog.action = DialogAction::None;
+                        if dialog.lines.len() > 1 {
+                            dialog.lines.pop();
+                        }
+                    }
+                }
                 self.dialog = Some(ActiveDialog { dialog, line: 0, choice: 0, message: None });
                 self.player.body.vel.x = 0.0;
                 self.wants_save = true;
@@ -2159,6 +2227,8 @@ impl Sim {
                     heavy: s.pierce,
                     crit_bonus: 0.0,
                     magic: matches!(style, ProjStyle::Orb | ProjStyle::Star | ProjStyle::Bolt),
+                    travelled: 0.0,
+                    range: max_range(style, Team::Enemy),
                 });
             }
             ServerMsg::Shake { amount } => {
@@ -2732,11 +2802,13 @@ impl Sim {
         let dir = (p.body.center().x - from_x).signum();
         let dir = if dir == 0.0 { -p.facing } else { dir };
         let wk = 1.0 / p.info.weight;
-        p.body.vel = V2::new(kb.x * dir * wk, kb.y * wk);
-        p.body.on_ground = false;
-        p.state = PState::Hitstun;
-        p.state_t = 0.0;
-        p.attack = None;
+        if kb != V2::ZERO {
+            p.body.vel = V2::new(kb.x * dir * wk, kb.y * wk);
+            p.body.on_ground = false;
+            p.state = PState::Hitstun;
+            p.state_t = 0.0;
+            p.attack = None;
+        }
         let c = p.body.center();
         self.float(V2::new(c.x, c.y - 40.0), format!("{}", dmg as i32), FloatKind::PlayerHurt);
         self.burst(c, FxKind::Hit, 8, 220.0);
@@ -2817,6 +2889,8 @@ impl Sim {
                 heavy: s.pierce,
                 crit_bonus: 0.0,
                 magic: matches!(s.style, ProjStyle::Orb | ProjStyle::Star | ProjStyle::Bolt),
+                travelled: 0.0,
+                range: max_range(s.style, Team::Enemy),
             });
         }
         if self.settings.screen_shake {
@@ -2880,7 +2954,15 @@ impl Sim {
             if !p.grounded {
                 p.vel.y += p.gravity * dt;
             }
-            p.pos = p.pos + p.vel * dt;
+            let step = p.vel * dt;
+            p.pos = p.pos + step;
+            if !p.grounded {
+                p.travelled += step.len();
+                if p.travelled > p.range {
+                    // fade out over the last stretch
+                    p.life = p.life.min(0.06);
+                }
+            }
             let r = p.aabb();
             let in_solid = solids.iter().any(|s| s.overlaps(&r));
             if in_solid {
@@ -3032,7 +3114,7 @@ mod tests {
         run(&mut s, 1.0, InputState::default());
         assert!(s.player.body.on_ground, "landed at spawn");
         let x0 = s.player.body.pos.x;
-        run(&mut s, 0.5, press(&[], &[Action::Right]));
+        run(&mut s, 0.6, press(&[], &[Action::Right]));
         assert!(s.player.body.pos.x > x0 + 100.0);
     }
 
@@ -3143,7 +3225,7 @@ mod tests {
         for _ in 0..5 {
             run(&mut s, 0.01, press(&[Action::Interact], &[]));
         }
-        assert!(s.dialog.is_none());
+        assert!(s.dialog.is_none(), "{:?}", s.dialog.as_ref().map(|d| (&d.dialog.lines, d.line)));
         assert!(s.enemies.iter().any(|e| e.kind == EnemyKind::Bramblehorn), "boss spawned");
         // Let the boss act for a while (exercise AI paths) with the player invulnerable.
         for _ in 0..20 {
@@ -3400,6 +3482,119 @@ mod tests {
         assert_eq!(s.save.quest("storm_summit").unwrap().state, QuestState::ReadyToTurnIn);
     }
 
+    #[test]
+    fn accepting_kaels_quest_on_the_summit_calls_the_thunderhorn() {
+        let mut s = new_sim(ClassId::Vanguard);
+        quests::accept(&mut s.save, "hawk_eyes");
+        s.save.quest_mut("hawk_eyes").unwrap().state = QuestState::Done;
+        quests::accept(&mut s.save, "summit_call");
+        s.save.quest_mut("summit_call").unwrap().state = QuestState::Done;
+        s.change_map("windcrag_cliffs", 3200.0);
+        assert!(!s.enemies.iter().any(|e| e.kind == EnemyKind::Thunderhorn));
+        let kael = s.map.npcs.iter().position(|n| n.id == "stormwatcher_kael").unwrap();
+        s.player.body.pos.x = s.map.npcs[kael].x - 40.0;
+        run(&mut s, 0.4, InputState::default());
+        run(&mut s, 0.02, press(&[Action::Interact], &[]));
+        assert!(matches!(s.dialog.as_ref().unwrap().dialog.action, DialogAction::OfferQuest("storm_summit")));
+        while s.dialog.is_some() {
+            run(&mut s, 0.02, press(&[Action::Interact], &[]));
+            run(&mut s, 0.1, InputState::default());
+        }
+        assert!(s.enemies.iter().any(|e| e.kind == EnemyKind::Thunderhorn), "boss appears as soon as the quest is taken");
+    }
+
+    #[test]
+    fn quest_npcs_summon_their_boss_for_100_gold() {
+        let mut s = new_sim(ClassId::Vanguard);
+        quests::accept(&mut s.save, "storm_summit");
+        s.save.quest_mut("storm_summit").unwrap().state = QuestState::Done;
+        s.change_map("windcrag_cliffs", 3200.0);
+        let d = quests::talk("stormwatcher_kael", "Kael", &mut s.save);
+        assert_eq!(d.action, DialogAction::SummonBoss(EnemyKind::Thunderhorn));
+        s.save.gold = 50;
+        assert!(s.summon_boss(EnemyKind::Thunderhorn).is_err(), "too poor");
+        s.save.gold = 250;
+        s.summon_boss(EnemyKind::Thunderhorn).unwrap();
+        assert_eq!(s.save.gold, 150);
+        assert!(s.enemies.iter().any(|e| e.kind == EnemyKind::Thunderhorn));
+        assert!(s.summon_boss(EnemyKind::Thunderhorn).is_err(), "only one at a time");
+        assert_eq!(s.save.gold, 150);
+        // Ilsa does the same for the Bramblehorn.
+        quests::accept(&mut s.save, "the_bramblehorn");
+        let d = quests::talk("warden_ilsa", "Ilsa", &mut s.save);
+        assert_eq!(d.action, DialogAction::SummonBoss(EnemyKind::Bramblehorn));
+    }
+
+    #[test]
+    fn no_map_has_more_than_four_flyers() {
+        for key in world::all_map_keys() {
+            let m = world::load_map(key).unwrap();
+            let n: usize = m.spawns.iter().filter(|z| z.kind.def().ai.is_floater()).map(|z| z.max).sum::<usize>()
+                + m.fixed_enemies.iter().filter(|f| f.0.def().ai.is_floater()).count();
+            assert!(n <= world::MAX_FLYERS, "{} has {} flyers", key, n);
+        }
+    }
+
+    #[test]
+    fn projectiles_have_a_maximum_range() {
+        for style in [ProjStyle::Arrow, ProjStyle::Bolt, ProjStyle::Knife, ProjStyle::Orb, ProjStyle::Star] {
+            let mut s = new_sim(ClassId::Windrunner);
+            s.change_map("breezehollow", 1500.0);
+            run(&mut s, 0.3, InputState::default());
+            let c = s.player.body.center();
+            s.projectiles.push(Projectile {
+                team: Team::Player, pos: V2::new(c.x, c.y - 200.0), vel: V2::new(900.0, 0.0), w: 10.0, h: 10.0, gravity: 0.0,
+                life: 30.0, max_life: 30.0, pierce: true, damage: 1.0, kb: V2::ZERO, hitstun: 0.0, style, hit_ids: vec![],
+                grounded: false, heavy: false, crit_bonus: 0.0, magic: false, travelled: 0.0, range: max_range(style, Team::Player),
+            });
+            run(&mut s, 3.0, InputState::default());
+            assert!(s.projectiles.is_empty(), "{:?} flew forever", style);
+        }
+    }
+
+    #[test]
+    fn flyer_shots_hurt_without_knockback() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.change_map("breezehollow", 1500.0);
+        run(&mut s, 0.5, InputState::default());
+        s.player.invuln = 0.0;
+        let hp = s.player.hp;
+        let c = s.player.body.center();
+        let mut sh = None;
+        // a Gustling-style shot: aimed, no knockback
+        let mut e = enemies::Enemy::new(999, EnemyKind::Gustling, c.x + 200.0, c.y, None, &mut s.rng);
+        e.state = enemies::EState::Telegraph;
+        e.state_t = 10.0;
+        let lvl_s = s.map.solids.clone();
+        let lvl = Level { solids: &lvl_s, platforms: &s.map.platforms, bounds: s.map.bounds() };
+        let mut out = enemies::Out::default();
+        enemies::update(&mut e, &enemies::Ctx { level: &lvl, player: c, player_alive: true, dt: TICK }, &mut out);
+        if let Some(x) = out.shots.first() {
+            sh = Some(x.clone());
+        }
+        let sh = sh.expect("gustling fired");
+        assert_eq!(sh.kb, V2::ZERO);
+        s.hurt_player(10.0, c.x + 50.0, sh.kb, true);
+        assert!(s.player.hp < hp);
+        assert_ne!(s.player.state, PState::Hitstun, "no stagger from flyer shots");
+        assert!(s.player.body.on_ground);
+    }
+
+    #[test]
+    fn dodging_keeps_you_invincible_throughout() {
+        let mut s = new_sim(ClassId::Vanguard);
+        s.change_map("breezehollow", 1500.0);
+        run(&mut s, 0.5, InputState::default());
+        run(&mut s, 0.02, press(&[Action::Dodge, Action::Right], &[Action::Right]));
+        assert_eq!(s.player.state, PState::Dodge);
+        let mut t = 0.0;
+        while s.player.state == PState::Dodge {
+            assert!(s.player.is_invulnerable(), "vulnerable mid-dodge at {:.2}s", t);
+            run(&mut s, 0.01, InputState::default());
+            t += 0.01;
+        }
+    }
+
     /// Stand in a portal and press Up.
     fn take_portal(s: &mut Sim, target: &str) {
         let p = s.map.portals.iter().find(|p| p.target_map == target).unwrap_or_else(|| panic!("no portal {} -> {}", s.map.key, target)).clone();
@@ -3555,6 +3750,33 @@ mod tests {
     }
 
     #[test]
+    fn every_damaging_ability_hurts_a_monster_in_reach() {
+        for &c in classes::ALL_CLASSES {
+            for sk in skills::class_skills(c) {
+                if !matches!(sk.effect, SkillEffect::Strike { .. }) {
+                    continue;
+                }
+                let mut s = new_sim(c);
+                s.save.level = 20;
+                s.recompute_stats();
+                s.change_map("dawnwind_glade", 2900.0);
+                s.enemies.clear();
+                run(&mut s, 0.5, InputState::default());
+                s.player.facing = 1.0;
+                let feet = s.player.body.pos.y + s.player.body.h;
+                let x = s.player.body.center().x + 70.0;
+                s.spawn_enemy(EnemyKind::Rotstump, x, feet, None);
+                s.enemies[0].hp = 1.0e6;
+                let hp = s.enemies[0].hp;
+                s.player.mp = s.player.max_mp;
+                assert!(s.use_skill(sk), "{:?} {}", c, sk.id);
+                run(&mut s, 1.5, InputState::default());
+                assert!(s.enemies.is_empty() || s.enemies[0].hp < hp, "{:?} {} did no damage", c, sk.id);
+            }
+        }
+    }
+
+    #[test]
     fn defence_and_crit_stats_apply() {
         let mut s = new_sim(ClassId::Vanguard);
         s.change_map("breezehollow", 1500.0);
@@ -3692,7 +3914,7 @@ mod tests {
         assert!(!s.pick_up());
         assert_eq!(s.drops.len(), 1);
         // Loot vanishes after a while.
-        for _ in 0..13 {
+        for _ in 0..15 {
             s.player.invuln = 99.0;
             run(&mut s, 10.0, InputState::default());
         }
@@ -4007,7 +4229,7 @@ mod tests {
         s.outbox.clear();
         quests::accept(&mut s.save, "the_bramblehorn");
         s.change_map("dawnwind_glade", 5000.0);
-        assert!(s.outbox.iter().any(|m| *m == ClientMsg::Boss { kind: EnemyKind::Bramblehorn.index() }));
+        assert!(s.outbox.iter().any(|m| *m == ClientMsg::Boss { kind: EnemyKind::Bramblehorn.index(), map: "dawnwind_glade".into() }));
         assert!(s.enemies.is_empty());
     }
 

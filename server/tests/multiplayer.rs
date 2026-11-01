@@ -183,8 +183,8 @@ fn two_players_share_a_world() {
 
     // Quest bosses appear when asked for, once.
     let bramble = galebound_core::enemies::EnemyKind::Bramblehorn.index();
-    a.send(&ClientMsg::Boss { kind: bramble });
-    a.send(&ClientMsg::Boss { kind: bramble });
+    a.send(&ClientMsg::Boss { kind: bramble, map: "dawnwind_glade".into() });
+    a.send(&ClientMsg::Boss { kind: bramble, map: "dawnwind_glade".into() });
     let l = match wait(&mut a, "boss in snapshot", |m| matches!(m, ServerMsg::Enemies(l) if l.iter().any(|e| e.kind == bramble))) {
         ServerMsg::Enemies(l) => l,
         _ => unreachable!(),

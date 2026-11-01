@@ -664,6 +664,35 @@ pub enum DialogAction {
     /// Open the waystone fast-travel menu.
     Waystone,
     Heal,
+    /// Pay [`BOSS_SUMMON_COST`] to call this quest boss into its arena.
+    SummonBoss(EnemyKind),
+}
+
+/// Gold a quest NPC charges to call their boss back for another fight.
+pub const BOSS_SUMMON_COST: u32 = 100;
+
+/// The boss this NPC's quest is about, if any (giver of a "defeat the boss" quest).
+pub fn boss_for_npc(npc_id: &str) -> Option<(&'static QuestDef, EnemyKind)> {
+    QUESTS.iter().find_map(|q| match q.objective {
+        Objective::Kill(k, _) if q.giver == npc_id && k.is_boss() => Some((q, k)),
+        _ => None,
+    })
+}
+
+/// The summon offer, when this NPC's boss quest has been taken (active or done).
+fn summon_dialog(npc_id: &'static str, speaker: &'static str, save: &CharacterSave, first: Option<String>) -> Option<Dialog> {
+    let (q, kind) = boss_for_npc(npc_id)?;
+    let st = save.quest(q.id)?.state;
+    if st == QuestState::ReadyToTurnIn {
+        return None;
+    }
+    let mut lines: Vec<String> = first.into_iter().collect();
+    lines.push(format!(
+        "If the {} isn't about, I can draw it out for you. It'll cost {} gold for the bait.",
+        kind.name(),
+        BOSS_SUMMON_COST
+    ));
+    Some(Dialog { npc_id, speaker, lines, action: DialogAction::SummonBoss(kind) })
 }
 
 #[derive(Clone, Debug)]
@@ -829,6 +858,9 @@ pub fn talk(npc_id: &'static str, speaker: &'static str, save: &mut CharacterSav
         if q.state == QuestState::Active {
             if let Some(def) = quest_def(&q.id) {
                 if (def.giver == npc_id || def.turn_in == npc_id) && !def.reminder.is_empty() {
+                    if let Some(d) = summon_dialog(npc_id, speaker, save, Some(def.reminder.to_string())) {
+                        return d;
+                    }
                     return Dialog { npc_id, speaker, lines: vec![def.reminder.to_string()], action: DialogAction::None };
                 }
             }
@@ -846,6 +878,9 @@ pub fn talk(npc_id: &'static str, speaker: &'static str, save: &mut CharacterSav
     // 6) Class instructors.
     if let Some(class) = instructor_class(npc_id) {
         return instructor_dialog(npc_id, speaker, class, save);
+    }
+    if let Some(d) = summon_dialog(npc_id, speaker, save, idle_lines(npc_id, save).into_iter().next()) {
+        return d;
     }
     let action = if let Some(shop) = npc_shop(npc_id) {
         DialogAction::Shop(shop)

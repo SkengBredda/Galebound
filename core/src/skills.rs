@@ -382,6 +382,15 @@ pub fn skill_attack(class: ClassId, s: &SkillDef) -> Option<AttackDef> {
         return None;
     };
     let mut d = classes::attack_def(class, anim);
+    if proj.is_none() && (d.hw <= 0.0 || d.hh <= 0.0) {
+        // Ranged classes' animations for this slot only fire projectiles;
+        // a melee ability still needs a real hitbox in front of the caster.
+        d.hx = 34.0;
+        d.hy = -4.0;
+        d.hw = 74.0;
+        d.hh = 60.0;
+        d.hitstun = d.hitstun.max(0.3);
+    }
     d.name = s.name;
     d.mp_cost = 0.0;
     d.ends_on_land = false;

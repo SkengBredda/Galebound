@@ -87,6 +87,12 @@ pub enum Ai {
     Boss,
 }
 
+impl Ai {
+    pub fn is_floater(&self) -> bool {
+        matches!(self, Ai::Floater { .. })
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct EnemyDef {
     pub name: &'static str,
@@ -632,7 +638,8 @@ fn float_ai(e: &mut Enemy, d: &EnemyDef, ctx: &Ctx, diver: bool, out: &mut Out) 
                         life: 2.6,
                         pierce: false,
                         damage: d.proj_damage,
-                        kb: V2::new(260.0, -240.0),
+                        // flyers' shots sting but don't knock you off ledges
+                        kb: V2::ZERO,
                         style: d.proj_style,
                         grounded: false,
                     });

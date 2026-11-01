@@ -248,7 +248,8 @@ impl Server {
                 i += 1;
             }
         }
-        let dt = 1.0 / TICK_HZ as f32;
+        // monsters and loot run at the same calmer pace as the clients
+        let dt = 1.0 / TICK_HZ as f32 * physics::GAME_SPEED;
         self.update_zones(dt);
         self.tick += 1;
         if self.tick % (TICK_HZ / SNAPSHOT_HZ) as u64 == 0 {
@@ -433,7 +434,7 @@ impl Server {
             ClientMsg::Hit { enemy, damage, kbx, kby, hitstun } => self.hit(i, enemy, damage, V2::new(kbx, kby), hitstun),
             ClientMsg::PickUp { drop, pet } => self.pick_up(i, drop, pet),
             ClientMsg::DropItem(d) => self.player_drop(i, d),
-            ClientMsg::Boss { kind } => self.boss(i, kind),
+            ClientMsg::Boss { kind, map } => self.boss(i, kind, map),
             ClientMsg::Revive { target } => {
                 let me = &self.clients[i];
                 if !me.in_world() || me.pos.dead {
@@ -797,15 +798,21 @@ impl Server {
         self.spawn_drop_exact(&key, d);
     }
 
-    fn boss(&mut self, i: usize, kind: u32) {
+    fn boss(&mut self, i: usize, kind: u32, key: String) {
         let Some(kind) = EnemyKind::from_index(kind) else { return };
         if !self.clients[i].in_world() || !kind.is_boss() {
             return;
         }
-        let key = self.clients[i].map.clone();
+        // The request names the map: it can arrive just before the position
+        // update that moves this player there.
         let name = self.clients[i].name();
         if !self.zones.contains_key(&key) {
-            return;
+            let Some(m) = world::load_map(&key) else { return };
+            if !m.bosses.iter().any(|b| b.kind == kind) {
+                return;
+            }
+            let z = self.new_zone(&key);
+            self.zones.insert(key.clone(), z);
         }
         let id = self.new_id();
         let z = self.zones.get_mut(&key).unwrap();
