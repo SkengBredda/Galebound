@@ -222,7 +222,8 @@ fn pose_for(anim: Anim, frame: u8, weapon: Option<Weapon>) -> Pose {
                 p.fa.1 -= breathe;
                 p
             } else {
-                let mut p = Pose::new();
+                // relaxed "ready" stance: feet apart, fists loosely up
+                let mut p = Pose::new().lean(4.0).legs((10.0, 9.0), (-9.0, 10.0)).arms((18.0, 112.0), (30.0, 104.0));
                 p.fl.1 += dip;
                 p.bl.1 += dip;
                 match weapon {
@@ -242,6 +243,7 @@ fn pose_for(anim: Anim, frame: u8, weapon: Option<Weapon>) -> Pose {
                     _ => {
                         p.fa.1 += breathe;
                         p.ba.1 += breathe;
+                        p.fa.0 -= breathe * 0.5;
                     }
                 }
                 p
@@ -514,7 +516,14 @@ struct Rig {
     fem: bool,
 }
 
+/// Torso width scale (chunkier, sturdier bodies).
+const TW: f32 = 1.2;
+
 impl Rig {
+    /// Torso-local point scaled to the body's width (for torso and clothes).
+    fn tw(&self, x: f32, y: f32) -> P2 {
+        self.t(x * TW, y)
+    }
     /// Torso-local point (x forward, y up from the pelvis) to sprite pixels.
     fn t(&self, x: f32, y: f32) -> P2 {
         let r = self.lean.to_radians();
@@ -571,8 +580,8 @@ fn build_rig(p: &Pose, fem: bool) -> Rig {
         fem,
     };
     let sw = if fem { 0.0 } else { 0.6 };
-    let sh_f = rig.t(1.5 + sw * 0.5, 13.0);
-    let sh_b = rig.t(-2.6 - sw, 13.4);
+    let sh_f = rig.tw(1.5 + sw * 0.5, 13.0);
+    let sh_b = rig.tw(-2.6 - sw, 13.4);
     rig.fa = build_arm(sh_f, p.lean, p.fa);
     rig.ba = build_arm(sh_b, p.lean, p.ba);
     rig.head = rig.t(1.4, HEAD_Y);
@@ -727,8 +736,11 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
     // 7. Head + hair (one outline), then the face
     {
         let mut c = new();
-        draw_head(&mut c, &pal, r.head);
-        front_hair(&mut c, &look, &pal, &r, &p);
+        {
+            let mut h = Hd { c: &mut c, o: r.head, k: HEAD_K };
+            draw_head(&mut h, &pal, r.head);
+            front_hair(&mut h, &look, &pal, &r, &p);
+        }
         stamp(&mut out, c, 0.0);
         draw_face(&mut out, &pal, look.face, r.head, &p);
         hair_shine(&mut out, &look, &pal, r.head);
@@ -811,7 +823,7 @@ fn sleeve(top: u8) -> (f32, f32, f32) {
 
 fn draw_arm(c: &mut Canvas, look: &Appearance, pal: &Pal, a: &Arm, _back: bool) {
     let skin = pal.skin;
-    let (w_sh, w_el, w_wr) = if look.feminine() { (3.6, 3.1, 2.6) } else { (4.2, 3.6, 3.0) };
+    let (w_sh, w_el, w_wr) = if look.feminine() { (4.6, 4.0, 3.4) } else { (5.4, 4.8, 4.0) };
     seg(c, a.sh, a.elbow, w_sh, w_el, skin);
     seg(c, a.elbow, a.hand, w_el, w_wr, skin);
     // sleeves follow the bones
@@ -840,8 +852,11 @@ fn draw_arm(c: &mut Canvas, look: &Appearance, pal: &Pal, a: &Arm, _back: bool) 
         c.ellipse(a.sh.0, a.sh.1 + 0.5, 3.6, 2.8, rgb(168, 178, 196));
     }
     // fist
-    let fist = add(a.hand, dir(a.fore_deg), 0.8);
-    c.disc(fist.0, fist.1, 2.4, skin);
+    let fist = add(a.hand, dir(a.fore_deg), 1.0);
+    c.disc(fist.0, fist.1, 3.1, skin);
+    // knuckle line
+    let k = add(fist, dir(a.fore_deg), 1.6);
+    c.set(k.0.round() as i32, k.1.round() as i32, shadow(skin, 0.25));
 }
 
 /// Trouser coverage: (thigh fraction, shin fraction, extra width, colour factor).
@@ -872,7 +887,7 @@ fn shoe_shaft(shoes: u8) -> f32 {
 fn draw_leg(c: &mut Canvas, look: &Appearance, pal: &Pal, l: &Leg) {
     let skin = pal.skin;
     let fem = look.feminine();
-    let (w_hip, w_knee, w_calf, w_ank) = if fem { (6.4, 4.2, 4.6, 3.0) } else { (6.0, 4.5, 5.0, 3.2) };
+    let (w_hip, w_knee, w_calf, w_ank) = if fem { (7.4, 5.0, 5.6, 3.6) } else { (7.4, 5.6, 6.2, 4.0) };
     seg(c, l.hip, l.knee, w_hip, w_knee, skin);
     // calf bulge on the back of the shin
     let calf = add(lerp(l.knee, l.ankle, 0.32), dir(l.shin_deg - 90.0), 0.6);
@@ -914,7 +929,11 @@ fn draw_shoe(c: &mut Canvas, style: u8, l: &Leg) {
     let t = (f.cos(), f.sin()); // toe direction
     let u = (f.sin(), -f.cos()); // foot "up"
     let o = (l.ankle.0 - u.0 * ANKLE_H, l.ankle.1 - u.1 * ANKLE_H); // sole under the ankle
-    let pt = |x: f32, y: f32| (o.0 + t.0 * x + u.0 * y, o.1 + t.1 * x + u.1 * y);
+    // shoes are drawn a size up: big chunky sneakers and boots
+    let pt = |x: f32, y: f32| {
+        let (x, y) = (x * 1.25 + 0.6, y * 1.2);
+        (o.0 + t.0 * x + u.0 * y, o.1 + t.1 * x + u.1 * y)
+    };
     // shaft up the shin
     let shaft = shoe_shaft(style);
     let (upper, sole, accent): (Px, Px, Px) = match style {
@@ -928,7 +947,7 @@ fn draw_shoe(c: &mut Canvas, style: u8, l: &Leg) {
     };
     if shaft > 0.0 {
         let top = lerp(l.ankle, l.knee, shaft);
-        seg(c, l.ankle, top, 4.2, 4.4, upper);
+        seg(c, l.ankle, top, 5.2, 5.4, upper);
         if style == 6 || style == 1 {
             // sock peeking out of sneakers
             let s = lerp(l.ankle, l.knee, shaft + 0.06);
@@ -973,7 +992,7 @@ fn draw_shoe(c: &mut Canvas, style: u8, l: &Leg) {
 fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
     let fem = r.fem;
     let poly = |c: &mut Canvas, pts: &[(f32, f32)], col: Px| {
-        let w: Vec<P2> = pts.iter().map(|&(x, y)| r.t(x, y)).collect();
+        let w: Vec<P2> = pts.iter().map(|&(x, y)| r.tw(x, y)).collect();
         c.poly(&w, col);
     };
     // neck
@@ -987,11 +1006,11 @@ fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
     poly(c, &body, pal.skin);
     // muscle/collar hints
     if !fem {
-        let a = r.t(1.0, 9.5);
-        let b = r.t(3.5, 9.0);
+        let a = r.tw(1.0, 9.5);
+        let b = r.tw(3.5, 9.0);
         c.linef(a, b, shadow(pal.skin, 0.18));
     }
-    let belly = r.t(1.8, 4.0);
+    let belly = r.tw(1.8, 4.0);
     c.set(belly.0.round() as i32, belly.1.round() as i32, shadow(pal.skin, 0.25));
 
     // underwear (always under clothes)
@@ -1049,8 +1068,8 @@ fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
             poly(c, &b, top);
             poly(c, &[(-2.6, -2.6), (4.6, -2.6), (4.2, 2.4), (-2.0, 2.4)], shadow(top, 0.14));
             for x in [1.6f32, 3.0] {
-                let a = r.t(x, 15.0);
-                let b2 = r.t(x, 10.5);
+                let a = r.tw(x, 15.0);
+                let b2 = r.tw(x, 10.5);
                 c.linef(a, b2, rgb(236, 236, 240));
             }
             poly(c, &[(-6.0, -4.0), (6.4, -4.0), (6.4, -2.8), (-6.0, -2.8)], shadow(top, 0.2));
@@ -1060,8 +1079,8 @@ fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
             let b = grow(&body, 0.8);
             poly(c, &b, top);
             poly(c, &[(-5.2, 0.0), (5.2, 0.0), (5.2, 1.6), (-5.2, 1.6)], light(top, 0.4));
-            let a = r.t(1.0, 15.0);
-            let b2 = r.t(1.0, 1.6);
+            let a = r.tw(1.0, 15.0);
+            let b2 = r.tw(1.0, 1.6);
             c.linef(a, b2, shadow(top, 0.3));
         }
         5 => {
@@ -1069,8 +1088,8 @@ fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
             let b = grow(&body, 0.4);
             poly(c, &b, shadow(top, 0.1));
             poly(c, &[(-4.8, 5.0), (5.2, 5.0), (5.4, 12.0), (4.2, 14.8), (-3.6, 15.0), (-5.4, 12.5)], rgb(170, 180, 198));
-            let a = r.t(-2.0, 12.0);
-            let b2 = r.t(3.0, 12.0);
+            let a = r.tw(-2.0, 12.0);
+            let b2 = r.tw(3.0, 12.0);
             c.linef(a, b2, rgb(232, 238, 248));
             poly(c, &[(-5.0, -1.0), (5.0, -1.0), (5.0, 1.4), (-5.0, 1.4)], rgb(112, 72, 42));
         }
@@ -1080,8 +1099,8 @@ fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
             b[0].1 = -3.0;
             b[1].1 = -3.0;
             poly(c, &b, top);
-            let z1 = r.t(1.2, 14.5);
-            let z2 = r.t(1.2, -2.5);
+            let z1 = r.tw(1.2, 14.5);
+            let z2 = r.tw(1.2, -2.5);
             c.linef(z1, z2, shadow(top, 0.35));
             let scarf = scarf_color(look);
             poly(c, &[(-4.6, 13.0), (4.4, 13.0), (4.2, 16.2), (-4.4, 16.2)], scarf);
@@ -1094,12 +1113,12 @@ fn draw_torso(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig) {
             poly(c, &b, top);
             poly(c, &[(0.0, 15.2), (2.4, 15.2), (1.0, 12.2)], shadow(top, 0.25));
             let strap = rgb(120, 78, 44);
-            let s1 = r.t(3.8, 14.6);
-            let s2 = r.t(-5.0, -0.5);
+            let s1 = r.tw(3.8, 14.6);
+            let s2 = r.tw(-5.0, -0.5);
             c.linef(s1, s2, strap);
             c.linef((s1.0 - 1.0, s1.1), (s2.0 - 1.0, s2.1), strap);
             poly(c, &[(-5.2, -1.2), (5.2, -1.2), (5.2, 0.4), (-5.2, 0.4)], rgb(196, 162, 108));
-            let knot = r.t(2.6, -0.4);
+            let knot = r.tw(2.6, -0.4);
             c.disc(knot.0, knot.1, 1.0, rgb(170, 136, 86));
         }
         7 => {
@@ -1124,8 +1143,8 @@ fn draw_skirt(look: &Appearance, pal: &Pal, r: &Rig) -> Option<Canvas> {
         (3, _) => {
             // pleated skirt: hem at ~45% down each thigh
             let col = pal.bottom;
-            let wl = r.t(-5.4, 1.5);
-            let wr = r.t(5.2, 1.5);
+            let wl = r.tw(-5.4, 1.5);
+            let wr = r.tw(5.2, 1.5);
             let hf = add(lerp(r.fl.hip, r.fl.knee, 0.48), fwd_of(r.fl.thigh_deg), 3.6);
             let hb = add(lerp(r.bl.hip, r.bl.knee, 0.48), fwd_of(r.bl.thigh_deg), -3.6);
             let mid = (lerp(hf, hb, 0.5).0, hf.1.max(hb.1) + 0.5);
@@ -1141,13 +1160,13 @@ fn draw_skirt(look: &Appearance, pal: &Pal, r: &Rig) -> Option<Canvas> {
         (_, 4) => {
             // robe hem down to the knees
             let col = pal.top;
-            let wl = r.t(-5.6, 2.0);
-            let wr = r.t(5.6, 2.0);
+            let wl = r.tw(-5.6, 2.0);
+            let wr = r.tw(5.6, 2.0);
             let hf = add(r.fl.knee, fwd_of(r.fl.thigh_deg), 3.4);
             let hb = add(r.bl.knee, fwd_of(r.bl.thigh_deg), -3.4);
             let mid = (lerp(hf, hb, 0.5).0, hf.1.max(hb.1) + 1.0);
             c.poly(&[wl, wr, hf, mid, hb], col);
-            let s = r.t(1.0, 1.6);
+            let s = r.tw(1.0, 1.6);
             c.linef(s, mid, shadow(col, 0.3));
             Some(c)
         }
@@ -1157,7 +1176,49 @@ fn draw_skirt(look: &Appearance, pal: &Pal, r: &Rig) -> Option<Canvas> {
 
 // =================================================================== head, face, hair
 
-fn draw_head(c: &mut Canvas, pal: &Pal, (hx, hy): P2) {
+/// How much bigger the head (and hair) is drawn than the body's scale:
+/// big heads and big eyes give the characters their anime charm.
+const HEAD_K: f32 = 1.34;
+
+/// Draws head-relative shapes scaled up by `k` around the head centre `o`,
+/// so the head and every hairstyle grow together.
+struct Hd<'a> {
+    c: &'a mut Canvas,
+    o: P2,
+    k: f32,
+}
+
+impl<'a> Hd<'a> {
+    fn p(&self, (x, y): P2) -> P2 {
+        (self.o.0 + (x - self.o.0) * self.k, self.o.1 + (y - self.o.1) * self.k)
+    }
+    fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, col: Px) {
+        let q = self.p((cx, cy));
+        self.c.ellipse(q.0, q.1, rx * self.k, ry * self.k, col);
+    }
+    fn disc(&mut self, cx: f32, cy: f32, r: f32, col: Px) {
+        let q = self.p((cx, cy));
+        self.c.disc(q.0, q.1, r * self.k, col);
+    }
+    fn poly(&mut self, pts: &[P2], col: Px) {
+        let v: Vec<P2> = pts.iter().map(|&q| self.p(q)).collect();
+        self.c.poly(&v, col);
+    }
+    fn taper(&mut self, a: P2, b: P2, wa: f32, wb: f32, col: Px) {
+        let (a, b) = (self.p(a), self.p(b));
+        self.c.taper(a, b, wa * self.k, wb * self.k, col);
+    }
+    fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, col: Px) {
+        let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
+        self.poly(&[(x, y), (x + w, y), (x + w, y + h), (x, y + h)], col);
+    }
+    fn set(&mut self, x: i32, y: i32, col: Px) {
+        let q = self.p((x as f32 + 0.5, y as f32 + 0.5));
+        self.c.set(q.0.floor() as i32, q.1.floor() as i32, col);
+    }
+}
+
+fn draw_head(c: &mut Hd, pal: &Pal, (hx, hy): P2) {
     let s = pal.skin;
     c.ellipse(hx - 0.5, hy - 0.6, 7.4, 7.0, s);
     // 3/4 jaw and chin toward the front
@@ -1169,119 +1230,148 @@ fn draw_head(c: &mut Canvas, pal: &Pal, (hx, hy): P2) {
 }
 
 fn draw_face(c: &mut Canvas, pal: &Pal, face: u8, (hx, hy): P2, p: &Pose) {
-    let x = hx.round() as i32;
-    let y = hy.round() as i32 - 1;
+    // Drawn at the scaled head size: big anime eyes (near eye 5x6, far eye
+    // 2x5), each with a lash line, a dark pupil band and white highlights.
+    let x = (hx + 0.4).round() as i32;
+    let y = (hy - 2.2).round() as i32;
     let white = rgb(255, 255, 255);
     let iris = pal.eye;
+    let iris_lo = light(iris, 0.35);
+    let pupil = shadow(iris, 0.55);
     let lash = INK;
-    let skin_dk = shadow(pal.skin, 0.4);
+    let skin_dk = shadow(pal.skin, 0.38);
     let mouth_c = rgb(150, 56, 66);
-    let blush = rgb(244, 146, 156);
-    // Near eye: 4 wide, lash line on top with a flick at the back.
-    let near = |c: &mut Canvas| {
-        c.rect(x, y, 5, 1, lash);
-        c.set(x - 1, y - 1, lash);
-        c.set(x, y + 1, white);
-        c.rect(x + 1, y + 1, 3, 3, iris);
-        c.rect(x + 2, y + 2, 2, 1, shadow(iris, 0.5));
-        c.set(x + 1, y + 1, white);
-        c.rect(x + 1, y + 3, 3, 1, light(iris, 0.3));
-        c.set(x, y + 2, white);
-        c.set(x, y + 3, light(pal.skin, 0.2));
+    let blush = mix(pal.skin, rgb(244, 120, 140), 0.45);
+    let near = |c: &mut Canvas, col: Px| {
+        let lo = light(col, 0.35);
+        let pu = shadow(col, 0.55);
+        // lash line, thicker toward the back, with a flick
+        c.rect(x, y, 6, 1, lash);
+        c.rect(x - 1, y - 1, 2, 1, lash);
+        c.set(x + 5, y + 1, lash);
+        // sclera at the back, iris filling the rest
+        c.rect(x, y + 1, 1, 5, white);
+        c.rect(x + 1, y + 1, 4, 5, col);
+        c.rect(x + 2, y + 2, 2, 3, pu);
+        c.rect(x + 1, y + 5, 4, 1, lo);
+        // highlights
+        c.rect(x + 1, y + 1, 2, 2, white);
+        c.set(x + 4, y + 4, white);
+        // lower lid
+        c.rect(x + 1, y + 6, 4, 1, shadow(pal.skin, 0.2));
     };
-    // Far eye: narrow, near the face edge.
-    let far = |c: &mut Canvas| {
-        c.rect(x + 6, y, 2, 1, lash);
-        c.rect(x + 6, y + 1, 1, 3, iris);
-        c.set(x + 6, y + 1, white);
+    let far = |c: &mut Canvas, col: Px| {
+        c.rect(x + 7, y, 3, 1, lash);
+        c.rect(x + 8, y + 1, 2, 5, col);
+        c.set(x + 9, y + 3, shadow(col, 0.55));
+        c.set(x + 8, y + 1, white);
+        c.set(x + 8, y + 5, light(col, 0.35));
     };
     let closed_line = |c: &mut Canvas| {
-        c.rect(x, y + 2, 5, 1, lash);
-        c.rect(x + 6, y + 2, 2, 1, lash);
+        c.rect(x, y + 3, 6, 1, lash);
+        c.set(x + 5, y + 4, lash);
+        c.rect(x + 7, y + 3, 3, 1, lash);
     };
     let happy = |c: &mut Canvas| {
-        c.set(x, y + 3, lash);
-        c.rect(x + 1, y + 2, 3, 1, lash);
+        // ^ ^ smiling eyes
+        c.set(x, y + 4, lash);
+        c.set(x + 1, y + 3, lash);
+        c.rect(x + 2, y + 2, 2, 1, lash);
         c.set(x + 4, y + 3, lash);
-        c.set(x + 6, y + 3, lash);
-        c.set(x + 7, y + 2, lash);
+        c.set(x + 5, y + 4, lash);
+        c.set(x + 7, y + 4, lash);
+        c.set(x + 8, y + 3, lash);
+        c.set(x + 9, y + 4, lash);
     };
     let brows = |c: &mut Canvas, angry: bool| {
+        let bc = shadow(pal.hair, 0.3);
         if angry {
-            c.set(x, y - 3, lash);
-            c.rect(x + 1, y - 2, 2, 1, lash);
-            c.set(x + 3, y - 1, lash);
-            c.set(x + 6, y - 1, lash);
+            c.set(x, y - 4, lash);
+            c.rect(x + 1, y - 3, 2, 1, lash);
+            c.rect(x + 3, y - 2, 2, 1, lash);
+            c.rect(x + 7, y - 2, 2, 1, lash);
         } else {
-            c.rect(x + 1, y - 2, 3, 1, shadow(pal.hair, 0.2));
-            c.set(x + 6, y - 2, shadow(pal.hair, 0.2));
+            c.rect(x + 1, y - 3, 4, 1, bc);
+            c.rect(x + 7, y - 3, 2, 1, bc);
         }
     };
+    let cheeks = |c: &mut Canvas| {
+        c.rect(x - 1, y + 7, 3, 1, blush);
+        c.rect(x + 8, y + 7, 2, 1, blush);
+    };
+    // little nose shadow and the mouth line
+    c.set(x + 8, y + 8, skin_dk);
     if p.hurt {
-        // >< eyes
-        c.set(x + 1, y + 1, lash);
-        c.set(x + 2, y + 2, lash);
-        c.set(x + 1, y + 3, lash);
-        c.set(x + 3, y + 1, lash);
-        c.set(x + 3, y + 3, lash);
-        c.set(x + 6, y + 2, lash);
-        c.rect(x + 4, y + 6, 2, 2, mouth_c);
+        // > < eyes
+        for (dx, dy) in [(1, 1), (2, 2), (3, 3), (2, 4), (1, 5)] {
+            c.set(x + dx, y + dy, lash);
+        }
+        for (dx, dy) in [(9, 1), (8, 2), (7, 3), (8, 4), (9, 5)] {
+            c.set(x + dx, y + dy, lash);
+        }
+        c.rect(x + 5, y + 10, 3, 2, mouth_c);
         return;
     }
     let blink = p.blink;
     match face {
         0 => {
             // Calm
-            if blink { closed_line(c) } else { near(c); far(c) }
+            if blink { closed_line(c) } else { near(c, iris); far(c, iris) }
             brows(c, false);
-            c.set(x + 5, y + 6, skin_dk);
+            c.rect(x + 5, y + 10, 2, 1, skin_dk);
         }
         1 => {
             // Determined
-            if blink { closed_line(c) } else { near(c); far(c) }
+            if blink { closed_line(c) } else { near(c, iris); far(c, iris) }
             brows(c, true);
-            c.rect(x + 4, y + 6, 2, 1, lash);
+            c.rect(x + 5, y + 10, 3, 1, lash);
         }
         2 => {
             // Cheerful
             happy(c);
             brows(c, false);
-            c.rect(x - 1, y + 4, 2, 1, blush);
-            c.rect(x + 6, y + 4, 1, 1, blush);
-            c.rect(x + 4, y + 5, 2, 2, mouth_c);
-            c.rect(x + 4, y + 5, 2, 1, lash);
+            cheeks(c);
+            c.rect(x + 5, y + 9, 3, 2, mouth_c);
+            c.rect(x + 5, y + 9, 3, 1, lash);
+            c.set(x + 6, y + 10, rgb(240, 130, 140));
         }
         3 => {
-            // Sleepy: heavy lids
-            c.rect(x, y + 1, 5, 1, lash);
-            c.rect(x + 1, y + 2, 3, 2, iris);
-            c.set(x + 1, y + 2, light(iris, 0.4));
-            c.rect(x + 6, y + 1, 2, 1, lash);
-            c.set(x + 6, y + 2, iris);
-            c.set(x + 5, y + 6, skin_dk);
+            // Sleepy: heavy lids over the top half of the eyes
+            near(c, iris);
+            far(c, iris);
+            c.rect(x - 1, y, 7, 3, shadow(pal.skin, 0.06));
+            c.rect(x, y + 2, 6, 1, lash);
+            c.rect(x + 7, y, 3, 3, shadow(pal.skin, 0.06));
+            c.rect(x + 7, y + 2, 3, 1, lash);
+            c.rect(x + 5, y + 10, 2, 1, skin_dk);
         }
         4 => {
             // Fierce: narrowed red eyes, fang
-            c.rect(x, y + 1, 5, 1, lash);
-            c.rect(x + 1, y + 2, 3, 2, rgb(206, 44, 56));
-            c.set(x + 1, y + 2, white);
-            c.rect(x + 6, y + 1, 2, 1, lash);
-            c.set(x + 6, y + 2, rgb(206, 44, 56));
+            let red = rgb(206, 44, 56);
+            near(c, red);
+            far(c, red);
+            c.rect(x - 1, y, 7, 2, shadow(pal.skin, 0.04));
+            c.rect(x, y + 1, 6, 1, lash);
+            c.rect(x + 7, y, 3, 2, shadow(pal.skin, 0.04));
+            c.rect(x + 7, y + 1, 3, 1, lash);
             brows(c, true);
-            c.rect(x + 4, y + 6, 2, 1, lash);
-            c.set(x + 5, y + 7, white);
+            c.rect(x + 5, y + 10, 3, 1, lash);
+            c.set(x + 6, y + 11, white);
         }
         _ => {
             // Sly wink
-            near(c);
-            c.set(x + 6, y + 2, lash);
-            c.set(x + 7, y + 1, lash);
-            c.rect(x + 4, y + 6, 2, 1, lash);
-            c.set(x + 6, y + 5, lash);
+            near(c, iris);
+            c.set(x + 7, y + 4, lash);
+            c.rect(x + 8, y + 3, 2, 1, lash);
+            brows(c, false);
+            cheeks(c);
+            c.rect(x + 5, y + 10, 3, 1, lash);
+            c.set(x + 8, y + 9, lash);
         }
     }
+    let _ = (iris_lo, pupil);
     if p.mouth && face != 2 {
-        c.rect(x + 4, y + 5, 2, 2, mouth_c);
+        c.rect(x + 5, y + 9, 3, 2, mouth_c);
     }
 }
 
@@ -1289,7 +1379,7 @@ fn draw_face(c: &mut Canvas, pal: &Pal, face: u8, (hx, hy): P2, p: &Pose) {
 /// motion (trail = streams backward, lift = rises). Angles: 0 = down,
 /// positive = toward the back of the head.
 #[allow(clippy::too_many_arguments)]
-fn strand(c: &mut Canvas, root: P2, len: f32, base: f32, p: &Pose, w0: f32, w1: f32, col: Px, curl: f32) -> Vec<P2> {
+fn strand(c: &mut Hd, root: P2, len: f32, base: f32, p: &Pose, w0: f32, w1: f32, col: Px, curl: f32) -> Vec<P2> {
     let mut pts = vec![root];
     let n = 4;
     let mut a = root;
@@ -1313,7 +1403,7 @@ fn strand(c: &mut Canvas, root: P2, len: f32, base: f32, p: &Pose, w0: f32, w1: 
 /// A strand with its own dark edge, so neighbouring locs/strands stay
 /// visibly separate inside one hair silhouette.
 #[allow(clippy::too_many_arguments)]
-fn strand_edged(c: &mut Canvas, root: P2, len: f32, base: f32, p: &Pose, w0: f32, w1: f32, col: Px, curl: f32) {
+fn strand_edged(c: &mut Hd, root: P2, len: f32, base: f32, p: &Pose, w0: f32, w1: f32, col: Px, curl: f32) {
     strand(c, root, len, base, p, w0 + 1.2, w1 + 1.2, shadow(col, 0.55), curl);
     let pts = strand(c, root, len, base, p, w0, w1, col, curl);
     // twist texture: alternating light/dark ticks along the rope
@@ -1332,6 +1422,7 @@ fn strand_edged(c: &mut Canvas, root: P2, len: f32, base: f32, p: &Pose, w0: f32
 }
 
 fn back_hair(c: &mut Canvas, look: &Appearance, r: &Rig, pal: &Pal, p: &Pose) {
+    let c = &mut Hd { c, o: r.head, k: HEAD_K };
     let (hx, hy) = r.head;
     let col = pal.hair;
     let dark = shadow(col, 0.22);
@@ -1387,19 +1478,19 @@ fn back_hair(c: &mut Canvas, look: &Appearance, r: &Rig, pal: &Pal, p: &Pose) {
     }
 }
 
-fn front_hair(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig, p: &Pose) {
+fn front_hair(c: &mut Hd, look: &Appearance, pal: &Pal, r: &Rig, p: &Pose) {
     let (hx, hy) = r.head;
     let col = pal.hair;
     let dark = shadow(col, 0.22);
     let lite = light(col, 0.15);
     // Cap over the skull, leaving the face open.
-    let mut cap = Canvas::new(c.w, c.h);
+    let mut cap = Canvas::new(c.c.w, c.c.h);
     let bump = if look.hair == 9 { 1.0 } else { 0.0 };
-    cap.ellipse(hx - 1.0, hy - 2.4, 8.6 + bump, 7.0 + bump, col);
+    Hd { c: &mut cap, o: c.o, k: c.k }.ellipse(hx - 1.0, hy - 2.4, 8.6 + bump, 7.0 + bump, col);
     for y in 0..cap.h {
         for x in 0..cap.w {
-            let fx = x as f32 + 0.5 - hx;
-            let fy = y as f32 + 0.5 - hy;
+            let fx = (x as f32 + 0.5 - hx) / c.k;
+            let fy = (y as f32 + 0.5 - hy) / c.k;
             let face = fx > -1.2 && fy > -2.6 + (fx * 0.12).max(0.0);
             let below_ear = fx > -4.0 && fy > 1.0;
             if face || below_ear {
@@ -1407,8 +1498,8 @@ fn front_hair(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig, p: &Pose) {
             }
         }
     }
-    c.draw(&cap, 0, 0);
-    let tri = |c: &mut Canvas, a: P2, b: P2, t: P2, cl: Px| c.poly(&[(hx + a.0, hy + a.1), (hx + b.0, hy + b.1), (hx + t.0, hy + t.1)], cl);
+    c.c.draw(&cap, 0, 0);
+    let tri = |c: &mut Hd, a: P2, b: P2, t: P2, cl: Px| c.poly(&[(hx + a.0, hy + a.1), (hx + b.0, hy + b.1), (hx + t.0, hy + t.1)], cl);
     match look.hair {
         0 => {
             // windswept spikes (back/up) + sharp forward bangs
@@ -1493,8 +1584,8 @@ fn hair_shine(c: &mut Canvas, look: &Appearance, pal: &Pal, (hx, hy): P2) {
     let base = pal.hair;
     for (dx, dy) in pts.iter().copied() {
         let (dx, dy): (i32, i32) = (dx, dy);
-        let x = (hx.round() as i32) + dx;
-        let y = (hy.round() as i32) + dy + if look.hair == 5 { 1 } else { 0 };
+        let x = (hx + dx as f32 * HEAD_K).round() as i32;
+        let y = (hy + (dy as f32 + if look.hair == 5 { 1.0 } else { 0.0 }) * HEAD_K).round() as i32;
         let px = c.get(x, y);
         let close = (px[0] as i32 - base[0] as i32).abs() + (px[1] as i32 - base[1] as i32).abs() + (px[2] as i32 - base[2] as i32).abs() < 90;
         if px[3] > 0 && close {
@@ -1738,5 +1829,58 @@ mod tests {
                 let _ = motion_for(c, k);
             }
         }
+    }
+}
+
+/// Sprite sheet export for art review: `GB_SHEET=out.png cargo test --release sheet_export -- --ignored`
+#[cfg(test)]
+mod sheet {
+    use super::*;
+    use galebound_core::classes::ClassId;
+    #[test]
+    #[ignore]
+    fn sheet_export() {
+        let path = std::env::var("GB_SHEET").unwrap_or("sheet.png".into());
+        let scale = std::env::var("GB_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(3i32);
+        let looks = [
+            Appearance { body: 0, hair: 8, hair_color: 0, face: 1, top: 3, top_dye: 8, bottom: 7, bottom_dye: 9, shoes: 1, skin: 6, ..Default::default() },
+            Appearance { body: 1, hair: 2, hair_color: 9, face: 0, top: 7, top_dye: 8, bottom: 3, bottom_dye: 2, shoes: 6, skin: 1, ..Default::default() },
+            Appearance { body: 1, hair: 3, hair_color: 3, face: 2, top: 3, top_dye: 8, bottom: 6, bottom_dye: 8, shoes: 1, skin: 0, ..Default::default() },
+            Appearance { body: 0, hair: 0, hair_color: 5, face: 4, top: 6, top_dye: 1, bottom: 1, bottom_dye: 4, shoes: 0, skin: 2, ..Default::default() },
+        ];
+        let weapons = [None, None, Some(ClassId::Aethermancer.info().weapon), Some(ClassId::Vanguard.info().weapon)];
+        let mut frames: Vec<(Anim, u8)> = Vec::new();
+        for f in 0..Anim::Idle.frames() { frames.push((Anim::Idle, f)); }
+        for f in 0..Anim::Run.frames() { frames.push((Anim::Run, f)); }
+        for f in 0..4 { frames.push((Anim::Attack(Motion::Jab), f)); }
+        for f in 0..4 { frames.push((Anim::Attack(Motion::Kick), f)); }
+        frames.push((Anim::JumpUp, 0));
+        frames.push((Anim::Fall, 1));
+        let (cw, ch) = (SIZE, HEIGHT);
+        let w = cw * frames.len() as i32;
+        let h = ch * looks.len() as i32;
+        let mut out = vec![0u8; (w * h * 4 * scale * scale) as usize];
+        for (r, look) in looks.iter().enumerate() {
+            for (i, &(a, f)) in frames.iter().enumerate() {
+                let c = render(look, weapons[r], a, f);
+                for y in 0..c.h {
+                    for x in 0..c.w {
+                        let mut p = c.get(x, y);
+                        if p[3] == 0 {
+                            p = if (x / 8 + y / 8) % 2 == 0 { [214, 228, 240, 255] } else { [200, 216, 232, 255] };
+                        }
+                        for sy in 0..scale {
+                            for sx in 0..scale {
+                                let ox = (i as i32 * cw + x) * scale + sx;
+                                let oy = (r as i32 * ch + y) * scale + sy;
+                                let k = ((oy * w * scale + ox) * 4) as usize;
+                                out[k..k + 4].copy_from_slice(&p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::fs::write(&path, crate::pixel::png_rgba((w * scale) as u32, (h * scale) as u32, &out)).unwrap();
     }
 }
