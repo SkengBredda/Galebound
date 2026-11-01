@@ -249,6 +249,18 @@ pub fn drop_item_key(k: DropKind) -> String {
 }
 
 /// Another player on your map (online).
+/// One line in the chat window.
+#[derive(Clone, Debug)]
+pub struct ChatLine {
+    /// `net::CH_*`
+    pub channel: u32,
+    pub from: String,
+    /// Whisper receiver ("" otherwise).
+    pub to: String,
+    pub text: String,
+    pub age: f32,
+}
+
 #[derive(Clone, Debug)]
 pub struct OtherPlayer {
     pub id: u32,
@@ -477,7 +489,21 @@ pub struct Sim {
     /// Our player id on the server.
     pub my_id: u32,
     /// Chat and server notices (newest last): (from, text, age).
-    pub chat: Vec<(String, String, f32)>,
+    pub chat: Vec<ChatLine>,
+    /// The server's date (days since 1970), for daily rewards.
+    pub today: u32,
+    /// Friends, requests and block list (from the server).
+    pub social: crate::social::SocialNet,
+    pub party: Option<crate::social::PartyNet>,
+    pub guild: Option<crate::social::GuildNet>,
+    /// A profile the server sent, waiting to be shown.
+    pub profile: Option<crate::social::ProfileNet>,
+    pub trade: Option<crate::social::TradeNet>,
+    /// Invitations waiting for an answer: (kind, from, extra, seconds left).
+    pub invites: Vec<(u32, String, String, f32)>,
+    /// Achievements just earned (the HUD shows a banner).
+    pub new_achievements: Vec<&'static crate::achievements::AchievementDef>,
+    achievement_timer: f32,
 }
 
 fn derive_stats(save: &CharacterSave, buffs: &[Buff]) -> Derived {
@@ -598,6 +624,15 @@ impl Sim {
             outbox: Vec::new(),
             my_id: 0,
             chat: Vec::new(),
+            today: 0,
+            social: Default::default(),
+            party: None,
+            guild: None,
+            profile: None,
+            trade: None,
+            invites: Vec::new(),
+            new_achievements: Vec::new(),
+            achievement_timer: 1.0,
         };
         // Logged out as a tombstone? Still one.
         if sim.save.tomb.is_some() {
@@ -732,7 +767,16 @@ impl Sim {
 
         self.update_others(dt);
         for c in &mut self.chat {
-            c.2 += dt;
+            c.age += dt;
+        }
+        for v in &mut self.invites {
+            v.3 -= dt;
+        }
+        self.invites.retain(|v| v.3 > 0.0);
+        self.achievement_timer -= dt;
+        if self.achievement_timer <= 0.0 {
+            self.achievement_timer = 1.0;
+            self.check_achievements();
         }
         if input.pressed(Action::QuestLog) && self.dialog.is_none() {
             self.quest_log_open = !self.quest_log_open;
@@ -817,6 +861,8 @@ impl Sim {
                     }
                     DialogAction::CompleteQuest(id) => {
                         if let Some(r) = quests::complete(&mut self.save, id) {
+                            self.save.tally.quests += 1;
+                            self.sys_line(format!("Quest complete: {} (+{} EXP, +{} gold)", r.quest_name, r.exp, r.gold));
                             let body = format!(
                                 "+{} EXP  +{} gold{}",
                                 r.exp,
@@ -1510,6 +1556,10 @@ impl Sim {
         let c = e.body.center();
         let def = kind.def();
         let (exp, gold) = (def.exp, def.gold);
+        self.save.tally.kills += 1;
+        if def.boss {
+            self.save.tally.bosses += 1;
+        }
         self.burst(c, FxKind::Spark, 20, 260.0);
         self.float(V2::new(c.x, c.y - 50.0), format!("+{} EXP", exp), FloatKind::Exp);
         // Gold and loot spill onto the ground: pick them up with the Pickup key.
@@ -1637,6 +1687,7 @@ impl Sim {
             return Err("Pick a class.".into());
         }
         self.save.class = class;
+        self.save.tally.class_changed = true;
         // Refund every point so the build can be remade around the new main stats.
         let spent = (self.save.stats.total() - stats::START_STATS.total()).max(0) as u32;
         self.save.stats = stats::START_STATS;
@@ -2100,6 +2151,7 @@ impl Sim {
         if interact_key {
             if let Some(o) = self.revivable().map(|i| self.others[i].clone()) {
                 self.outbox.push(ClientMsg::Revive { target: o.id });
+                self.save.tally.revives += 1;
                 let c = self.player.body.center();
                 self.burst(o.pos, FxKind::Heal, 24, 200.0);
                 self.float(V2::new(c.x, c.y - 60.0), format!("Reviving {}...", o.name), FloatKind::Heal);
@@ -2324,6 +2376,12 @@ impl Sim {
 
     /// The server says we (and anyone else who helped) beat a monster.
     fn net_kill(&mut self, enemy: u32, kind: EnemyKind, exp: u32) {
+        let exp = ((exp as f32) * (1.0 + self.guild_exp_bonus())).round() as u32;
+        self.save.tally.kills += 1;
+        if kind.def().boss {
+            self.save.tally.bosses += 1;
+        }
+        self.sys_line(format!("{} defeated: +{} EXP", kind.name(), exp));
         let at = self.enemies.iter().find(|e| e.id == enemy).map(|e| e.body.center()).unwrap_or(self.player.body.center());
         self.burst(at, FxKind::Spark, 20, 260.0);
         self.float(V2::new(at.x, at.y - 50.0), format!("+{} EXP", exp), FloatKind::Exp);
@@ -2442,17 +2500,264 @@ impl Sim {
             ServerMsg::Revived { by } => {
                 self.revive_by_player(&by);
             }
-            ServerMsg::Chat { from, text } => self.push_chat(&from, &text),
-            ServerMsg::System { text } => self.push_chat("", &text),
+            ServerMsg::Chat { from, text } => {
+                if !self.social.is_blocked(&from) {
+                    self.push_chat(&from, &text);
+                }
+            }
+            ServerMsg::System { text } => self.push_line(net::CH_SYSTEM, "", "", &text),
+            ServerMsg::ChatCh { channel, from, to, text } => {
+                if !(channel == net::CH_WHISPER && self.social.is_blocked(&from)) {
+                    self.push_line(channel, &from, &to, &text);
+                }
+            }
+            ServerMsg::Friends(s) => {
+                self.save.tally.friends = self.save.tally.friends.max(s.friends.len() as u32);
+                self.social = s;
+            }
+            ServerMsg::Party(p) => {
+                if p.is_some() && self.party.is_none() {
+                    self.save.tally.parties += 1;
+                }
+                self.party = p;
+            }
+            ServerMsg::Guild(g) => {
+                if g.is_some() {
+                    self.save.tally.guild = true;
+                }
+                self.set_guild(g);
+            }
+            ServerMsg::Profile(p) => self.profile = Some(p),
+            ServerMsg::Invite { kind, from, extra } => {
+                if !self.social.is_blocked(&from) {
+                    self.invites.retain(|v| !(v.0 == kind && v.1 == from));
+                    self.invites.push((kind, from, extra, 60.0));
+                }
+            }
+            ServerMsg::Trade { state, reason } => {
+                self.trade = state;
+                if !reason.is_empty() {
+                    self.push_line(net::CH_SYSTEM, "", "", &reason);
+                }
+            }
+            ServerMsg::TradeDone { with, give, give_gold, get, get_gold } => self.trade_done(&with, &give, give_gold, &get, get_gold),
+            ServerMsg::Grant { gold, cost, items, reason } => self.grant(gold, cost, &items, &reason),
             _ => {}
         }
     }
 
+    /// A chat line from a player on the main channel.
     pub fn push_chat(&mut self, from: &str, text: &str) {
-        self.chat.push((from.to_string(), text.to_string(), 0.0));
-        if self.chat.len() > 60 {
+        self.push_line(if from.is_empty() { net::CH_SYSTEM } else { net::CH_ALL }, from, "", text);
+    }
+
+    pub fn push_line(&mut self, channel: u32, from: &str, to: &str, text: &str) {
+        self.chat.push(ChatLine { channel, from: from.to_string(), to: to.to_string(), text: text.to_string(), age: 0.0 });
+        if self.chat.len() > 120 {
             self.chat.remove(0);
         }
+    }
+
+    /// A line for the System tab (EXP, loot, achievements...).
+    pub fn sys_line(&mut self, text: String) {
+        self.push_line(net::CH_SYSTEM, "", "", &text);
+    }
+
+    // ------------------------------------------------------------------ social
+
+    /// Send a social request to the server.
+    pub fn social_cmd(&mut self, c: net::SocialCmd) {
+        if self.online {
+            self.outbox.push(ClientMsg::Social(c));
+        }
+    }
+
+    /// Our guild changed: keep the guild-wide buff in step with its level.
+    pub fn set_guild(&mut self, g: Option<crate::social::GuildNet>) {
+        let level = g.as_ref().map(|g| g.level()).unwrap_or(0);
+        self.guild = g;
+        self.player.buffs.retain(|b| b.id != "guild");
+        if level > 0 {
+            let mods = crate::social::guild_mods(level);
+            self.player.buffs.push(Buff { id: "guild", name: "Guild Blessing", mods, left: f32::INFINITY, total: f32::INFINITY, fx: skills::SkillFx::Holy });
+        }
+        self.recompute_stats();
+    }
+
+    /// Extra EXP fraction from our guild's level.
+    pub fn guild_exp_bonus(&self) -> f32 {
+        self.guild.as_ref().map(|g| crate::social::guild_exp_bonus(g.level())).unwrap_or(0.0)
+    }
+
+    /// Could we offer these items and this gold in a trade?
+    pub fn trade_offer_problem(&self, items: &[(String, u32)], gold: u32) -> Option<String> {
+        if gold > self.save.gold {
+            return Some("You don't have that much gold".into());
+        }
+        for (id, n) in items {
+            let Some(d) = items::item(id) else { return Some("Unknown item".into()) };
+            if !d.can_trade() {
+                return Some(format!("{} can't be traded", d.name));
+            }
+            if self.save.inventory.count(id) < *n {
+                return Some(format!("You don't have {} {}", n, d.name));
+            }
+        }
+        None
+    }
+
+    /// Would the other side's offer fit in our bag (after ours leaves it)?
+    pub fn trade_fits(&self, t: &crate::social::TradeNet) -> bool {
+        let mut inv = self.save.inventory.clone();
+        for (id, n) in &t.mine {
+            inv.remove(id, *n);
+        }
+        t.theirs.iter().all(|(id, n)| inv.add(id, *n) == 0)
+    }
+
+    fn trade_done(&mut self, with: &str, give: &[(String, u32)], give_gold: u32, get: &[(String, u32)], get_gold: u32) {
+        for (id, n) in give {
+            self.save.inventory.remove(id, *n);
+        }
+        self.save.gold = self.save.gold.saturating_sub(give_gold) + get_gold;
+        let at = self.player.body.center();
+        for (id, n) in get {
+            let left = self.save.inventory.add(id, *n);
+            if left > 0 {
+                self.outbox.push(ClientMsg::DropItem(DropNet { id: 0, item: id.clone(), count: left, x: at.x - 9.0, y: at.y - 9.0, vx: 0.0, vy: -200.0 }));
+            }
+        }
+        self.save.tally.trades += 1;
+        self.trade = None;
+        let mut got: Vec<String> = get.iter().map(|(id, n)| format!("{}x {}", n, items::item(id).map(|d| d.name).unwrap_or(id))).collect();
+        if get_gold > 0 {
+            got.push(format!("{} gold", get_gold));
+        }
+        let got = if got.is_empty() { "nothing".to_string() } else { got.join(", ") };
+        self.toast(&format!("Traded with {}", with), &format!("You received {}", got));
+        self.sys_line(format!("Trade with {} complete. Received: {}", with, got));
+        self.recompute_stats();
+        self.wants_save = true;
+    }
+
+    fn grant(&mut self, gold: u32, cost: u32, list: &[(String, u32)], reason: &str) {
+        self.save.gold = self.save.gold.saturating_sub(cost) + gold;
+        let at = self.player.body.center();
+        let mut parts = Vec::new();
+        if gold > 0 {
+            parts.push(format!("{} gold", gold));
+        }
+        for (id, n) in list {
+            let Some(d) = items::item(id) else { continue };
+            let left = self.save.inventory.add(d.id, *n);
+            if left > 0 {
+                self.outbox.push(ClientMsg::DropItem(DropNet { id: 0, item: id.clone(), count: left, x: at.x - 9.0, y: at.y - 9.0, vx: 0.0, vy: -200.0 }));
+            }
+            parts.push(format!("{}x {}", n, d.name));
+        }
+        if cost > 0 {
+            self.toast(reason, &format!("-{} gold", cost));
+            self.sys_line(format!("{} (-{} gold)", reason, cost));
+        } else {
+            self.toast(reason, &parts.join(", "));
+            self.sys_line(format!("{}: {}", reason, parts.join(", ")));
+        }
+        self.wants_save = true;
+    }
+
+    // ------------------------------------------------------------------ achievements, cosmetics, attendance
+
+    fn check_achievements(&mut self) {
+        let ways = self.attuned_waystones().len() as u32;
+        let best_pet = self.save.pets.iter().map(|p| p.level).max().unwrap_or(0);
+        let gold = self.save.gold;
+        let t = &mut self.save.tally;
+        t.most_gold = t.most_gold.max(gold);
+        t.best_pet = t.best_pet.max(best_pet);
+        t.waystones = t.waystones.max(ways);
+        let new = crate::achievements::newly_earned(&self.save);
+        for a in new {
+            self.save.achievements.push(a.id.to_string());
+            self.save.marks += a.points;
+            self.toast(&format!("Achievement: {}", a.name), &format!("{}  +{} Gale Marks", a.desc, a.points));
+            self.sys_line(format!("Achievement unlocked: {} (+{} Gale Marks)", a.name, a.points));
+            self.new_achievements.push(a);
+            self.wants_save = true;
+        }
+    }
+
+    pub fn buy_cosmetic(&mut self, id: &str) -> Result<(), String> {
+        let c = crate::achievements::cosmetic(id).ok_or("Unknown cosmetic")?;
+        if self.save.cosmetics.iter().any(|x| x == id) {
+            return Err("You already own that".into());
+        }
+        if self.save.marks < c.price {
+            return Err(format!("You need {} Gale Marks", c.price));
+        }
+        self.save.marks -= c.price;
+        self.save.cosmetics.push(id.to_string());
+        self.wear_cosmetic(id, true)?;
+        self.toast("New cosmetic!", c.name);
+        Ok(())
+    }
+
+    /// Put an owned cosmetic on (or take it off).
+    pub fn wear_cosmetic(&mut self, id: &str, on: bool) -> Result<(), String> {
+        let c = crate::achievements::cosmetic(id).ok_or("Unknown cosmetic")?;
+        if !self.save.cosmetics.iter().any(|x| x == id) {
+            return Err("You don't own that".into());
+        }
+        match c.kind {
+            crate::achievements::CosmeticKind::Hat(h) => self.save.cos_hat = if on { h } else { 0 },
+            crate::achievements::CosmeticKind::Back(b) => self.save.cos_back = if on { b } else { 0 },
+        }
+        self.look_changed = true;
+        self.wants_save = true;
+        Ok(())
+    }
+
+    pub fn wearing_cosmetic(&self, id: &str) -> bool {
+        match crate::achievements::cosmetic(id).map(|c| c.kind) {
+            Some(crate::achievements::CosmeticKind::Hat(h)) => self.save.cos_hat == h,
+            Some(crate::achievements::CosmeticKind::Back(b)) => self.save.cos_back == b,
+            None => false,
+        }
+    }
+
+    pub fn can_claim_attendance(&self) -> bool {
+        self.save.attendance.can_claim(self.today)
+    }
+
+    /// Claim today's login reward.
+    pub fn claim_attendance(&mut self) -> Result<(), String> {
+        if !self.can_claim_attendance() {
+            return Err("Come back tomorrow for your next reward".into());
+        }
+        let r = &crate::achievements::ATTENDANCE[self.save.attendance.next_index()];
+        self.save.attendance.last_day = self.today;
+        self.save.attendance.count += 1;
+        self.save.gold += r.gold;
+        self.save.marks += r.marks;
+        let at = self.player.body.center();
+        let mut parts = Vec::new();
+        if r.gold > 0 {
+            parts.push(format!("{} gold", r.gold));
+        }
+        for (id, n) in r.items {
+            let left = self.save.inventory.add(id, *n);
+            if left > 0 && self.online {
+                self.outbox.push(ClientMsg::DropItem(DropNet { id: 0, item: id.to_string(), count: left, x: at.x - 9.0, y: at.y - 9.0, vx: 0.0, vy: -200.0 }));
+            }
+            parts.push(format!("{}x {}", n, items::item(id).map(|d| d.name).unwrap_or(id)));
+        }
+        if r.marks > 0 {
+            parts.push(format!("{} Gale Marks", r.marks));
+        }
+        self.toast(&format!("Day {} reward", self.save.attendance.count), &parts.join(", "));
+        self.sys_line(format!("Attendance day {}: {}", self.save.attendance.count, parts.join(", ")));
+        self.burst(at, FxKind::LevelUp, 24, 220.0);
+        self.wants_save = true;
+        Ok(())
     }
 
     fn net_enemies(&mut self, list: Vec<EnemyNet>) {
@@ -2489,6 +2794,7 @@ impl Sim {
             let amount = (count as f32 * (1.0 + bonus)).round() as u32;
             self.save.gold += amount;
             self.float(V2::new(at.x, at.y - 30.0), format!("+{} gold", amount), FloatKind::Loot);
+            self.sys_line(format!("Picked up {} gold", amount));
         } else if let Some(def) = items::item(item) {
             let left = self.save.inventory.add(def.id, count);
             if left > 0 {
@@ -2499,6 +2805,8 @@ impl Sim {
             if got > 0 {
                 let label = if got > 1 { format!("+{}x {}", got, def.name) } else { format!("+ {}", def.name) };
                 self.float(V2::new(at.x, at.y - 30.0), label, FloatKind::Loot);
+                self.save.tally.looted += got;
+                self.sys_line(format!("Looted {}x {}", got, def.name));
             }
         }
         // fly to whoever picked it up: the pet if it went for it, else you
@@ -2525,6 +2833,7 @@ impl Sim {
             pet: pet.map(|p| p.species.key().to_string()).unwrap_or_default(),
             pet_name: pet.map(|p| p.name.clone()).unwrap_or_default(),
             pet_level: pet.map(|p| p.level).unwrap_or(0),
+            guild: String::new(),
         }
     }
 
@@ -2849,6 +3158,7 @@ impl Sim {
                     return Err("Your bag is full".into());
                 }
                 let got = d.count - left;
+                self.save.tally.looted += got;
                 let name = items::item(id).map(|x| x.name).unwrap_or(id);
                 let label = if got > 1 { format!("+{}x {}", got, name) } else { format!("+ {}", name) };
                 self.float(V2::new(at.x, at.y - 30.0), label, FloatKind::Loot);
@@ -2896,6 +3206,8 @@ impl Sim {
         if p.state == PState::Dead {
             return;
         }
+        self.save.tally.deaths += 1;
+        let p = &mut self.player;
         p.state = PState::Dead;
         p.state_t = 0.0;
         p.attack = None;
@@ -4359,7 +4671,7 @@ mod tests {
         assert_eq!(s.save.exp, 970);
         // Chat and leaving.
         s.net_apply(ServerMsg::Chat { from: "Friend".into(), text: "welcome back".into() });
-        assert_eq!(s.chat.last().unwrap().1, "welcome back");
+        assert_eq!(s.chat.last().unwrap().text, "welcome back");
         s.net_apply(ServerMsg::PlayerGone { id: 3 });
         assert!(s.others.is_empty());
         // Quest bosses are requested from the server instead of spawned.

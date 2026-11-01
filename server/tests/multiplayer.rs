@@ -1,7 +1,7 @@
 //! End-to-end: a real server on a real socket, with real clients.
 
 use galebound_core::appearance::Appearance;
-use galebound_core::net::{ClientMsg, NetClient, PlayerInfo, PlayerPos, ServerMsg, GOLD};
+use galebound_core::net::{ClientMsg, NetClient, PlayerInfo, PlayerPos, ServerMsg, SocialCmd, CH_PARTY, CH_SYSTEM, CH_WHISPER, GOLD, INV_FRIEND, INV_GUILD, INV_PARTY, INV_TRADE};
 use galebound_core::save::{self, CharacterSave};
 use galebound_server::{Config, Server};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,7 +74,7 @@ fn join(c: &mut NetClient, email: &str, name: &str) -> u32 {
     assert_eq!(acc.characters.len(), 1);
     assert_eq!(acc.hash_hex, "-", "password data never leaves the server");
     match c.request(&ClientMsg::Enter { slot: 0 }, T, |m| matches!(m, ServerMsg::Entered { .. })).unwrap() {
-        ServerMsg::Entered { id } => id,
+        ServerMsg::Entered { id, .. } => id,
         _ => unreachable!(),
     }
 }
@@ -96,7 +96,7 @@ fn two_players_share_a_world() {
     let acc = account(&mut b, ClientMsg::CreateChar { save: save::encode_character(&CharacterSave::new("Beta", Appearance::default())) }).unwrap();
     assert_eq!(acc.characters[0].level, 1);
     let idb = match b.request(&ClientMsg::Enter { slot: 0 }, T, |m| matches!(m, ServerMsg::Entered { .. })).unwrap() {
-        ServerMsg::Entered { id } => id,
+        ServerMsg::Entered { id, .. } => id,
         _ => unreachable!(),
     };
 
@@ -273,4 +273,149 @@ fn idle_menus_stay_connected() {
     assert!(a.poll().iter().all(|m| !matches!(m, ServerMsg::Pong { .. })), "keepalive echoes are hidden");
     assert!(!a.is_closed());
     join(&mut a, "idle@test.com", "Idler");
+}
+
+fn soc(c: &NetClient, cmd: SocialCmd) {
+    c.send(&ClientMsg::Social(cmd));
+}
+
+fn system_text(c: &mut NetClient, what: &str, needle: &'static str) -> String {
+    match wait(c, what, |m| matches!(m, ServerMsg::ChatCh { channel, text, .. } if *channel == CH_SYSTEM && text.contains(needle))) {
+        ServerMsg::ChatCh { text, .. } => text,
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn friends_party_guild_and_trade() {
+    let r = start("social", 16);
+    let (mut a, mut b, mut c) = (connect(&r), connect(&r), connect(&r));
+    let _ida = join(&mut a, "a@soc.com", "Alpha");
+    let idb = join(&mut b, "b@soc.com", "Beta");
+    let _idc = join(&mut c, "c@soc.com", "Cyan");
+    for (cl, x) in [(&a, 3700.0), (&b, 3720.0), (&c, 3740.0)] {
+        cl.send(&ClientMsg::Info(PlayerInfo { level: 5, class: "novice".into(), ..Default::default() }));
+        cl.send(&pos("dawnwind_glade", x, 700.0, false));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+
+    // --- friends: request, popup, accept
+    soc(&a, SocialCmd::FriendAdd { name: "beta".into() });
+    wait(&mut b, "friend invite", |m| matches!(m, ServerMsg::Invite { kind, from, .. } if *kind == INV_FRIEND && from == "Alpha"));
+    soc(&b, SocialCmd::FriendAnswer { name: "Alpha".into(), accept: true });
+    let f = wait(&mut a, "friends list", |m| matches!(m, ServerMsg::Friends(s) if s.friends.iter().any(|f| f.name == "Beta" && f.online)));
+    if let ServerMsg::Friends(s) = f {
+        assert_eq!(s.friends[0].map, "dawnwind_glade");
+    }
+    soc(&a, SocialCmd::FriendAdd { name: "Nobody Here".into() });
+    system_text(&mut a, "unknown name", "no one called");
+
+    // --- whispers, and blocking
+    soc(&a, SocialCmd::Whisper { to: "beta".into(), text: "psst".into() });
+    let w = wait(&mut b, "whisper", |m| matches!(m, ServerMsg::ChatCh { channel, .. } if *channel == CH_WHISPER));
+    assert_eq!(w, ServerMsg::ChatCh { channel: CH_WHISPER, from: "Alpha".into(), to: "Beta".into(), text: "psst".into() });
+    wait(&mut a, "whisper echo", |m| matches!(m, ServerMsg::ChatCh { channel, to, .. } if *channel == CH_WHISPER && to == "Beta"));
+    soc(&c, SocialCmd::Block { name: "alpha".into() });
+    wait(&mut c, "block list", |m| matches!(m, ServerMsg::Friends(s) if s.blocked == vec!["Alpha".to_string()]));
+    soc(&a, SocialCmd::Whisper { to: "Cyan".into(), text: "hello?".into() });
+    system_text(&mut a, "blocked whisper", "isn't receiving whispers");
+    a.send(&ClientMsg::Chat { text: "from alpha".into() });
+    std::thread::sleep(Duration::from_millis(60));
+    b.send(&ClientMsg::Chat { text: "from beta".into() });
+    let mut seen = Vec::new();
+    let end = Instant::now() + T;
+    while Instant::now() < end && !seen.iter().any(|t: &String| t == "from beta") {
+        for m in c.poll() {
+            if let ServerMsg::Chat { text, .. } = m {
+                seen.push(text);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(seen, vec!["from beta".to_string()], "Cyan never hears from Alpha");
+    soc(&a, SocialCmd::PartyInvite { name: "Cyan".into() });
+    system_text(&mut a, "blocked invite", "isn't accepting");
+
+    // --- party: invite, join, party chat, shared EXP
+    soc(&a, SocialCmd::PartyInvite { name: "Beta".into() });
+    wait(&mut b, "party invite", |m| matches!(m, ServerMsg::Invite { kind, .. } if *kind == INV_PARTY));
+    soc(&b, SocialCmd::PartyAnswer { from: "Alpha".into(), accept: true });
+    let p = wait(&mut a, "party", |m| matches!(m, ServerMsg::Party(Some(p)) if p.members.len() == 2));
+    if let ServerMsg::Party(Some(p)) = p {
+        assert_eq!(p.leader, "Alpha");
+        assert!(p.members.iter().all(|m| m.online()));
+    }
+    soc(&b, SocialCmd::PartyChat { text: "ready".into() });
+    wait(&mut a, "party chat", |m| matches!(m, ServerMsg::ChatCh { channel, from, .. } if *channel == CH_PARTY && from == "Beta"));
+    let list = match wait(&mut a, "monsters", |m| matches!(m, ServerMsg::Enemies(l) if !l.is_empty())) {
+        ServerMsg::Enemies(l) => l,
+        _ => unreachable!(),
+    };
+    let moss = galebound_core::enemies::EnemyKind::Mossling.index();
+    let target = *list.iter().find(|e| e.kind == moss).unwrap();
+    a.send(&pos("dawnwind_glade", target.x + 20.0, 700.0, false));
+    std::thread::sleep(Duration::from_millis(60));
+    a.send(&ClientMsg::Hit { enemy: target.id, damage: 99999.0, kbx: 0.0, kby: 0.0, hitstun: 0.1 });
+    wait(&mut a, "Alpha's kill", |m| matches!(m, ServerMsg::Kill { enemy, .. } if *enemy == target.id));
+    wait(&mut b, "Beta shares the kill without hitting it", |m| matches!(m, ServerMsg::Kill { enemy, .. } if *enemy == target.id));
+
+    // --- guild: found (costs gold), invite, name tag, daily chest
+    let mut rich = CharacterSave::new("Alpha", Appearance::default());
+    rich.gold = 6000;
+    a.send(&ClientMsg::Save { save: save::encode_character(&rich) });
+    soc(&a, SocialCmd::GuildCreate { name: "Second~Wind".into() });
+    let g = wait(&mut a, "guild cost", |m| matches!(m, ServerMsg::Grant { .. }));
+    assert!(matches!(g, ServerMsg::Grant { cost: 5000, .. }));
+    wait(&mut a, "guild", |m| matches!(m, ServerMsg::Guild(Some(g)) if g.name == "Second~Wind"));
+    wait(&mut b, "Alpha's guild tag", |m| matches!(m, ServerMsg::PlayerInfo(p) if p.name == "Alpha" && p.guild == "Second~Wind"));
+    soc(&a, SocialCmd::GuildInvite { name: "Beta".into() });
+    wait(&mut b, "guild invite", |m| matches!(m, ServerMsg::Invite { kind, extra, .. } if *kind == INV_GUILD && extra == "Second~Wind"));
+    soc(&b, SocialCmd::GuildAnswer { guild: "Second~Wind".into(), accept: true });
+    wait(&mut a, "two members", |m| matches!(m, ServerMsg::Guild(Some(g)) if g.members.len() == 2));
+    soc(&b, SocialCmd::GuildClaimDaily);
+    let gr = wait(&mut b, "daily chest", |m| matches!(m, ServerMsg::Grant { .. }));
+    assert!(matches!(gr, ServerMsg::Grant { gold, cost: 0, .. } if gold > 0));
+    soc(&b, SocialCmd::GuildClaimDaily);
+    system_text(&mut b, "only once a day", "already opened");
+    soc(&b, SocialCmd::GuildKick { name: "Alpha".into() });
+    system_text(&mut b, "members can't kick the leader", "can't remove");
+
+    // --- trade: request, offers (bound items refused), lock, confirm
+    soc(&a, SocialCmd::TradeRequest { name: "Beta".into() });
+    wait(&mut b, "trade request", |m| matches!(m, ServerMsg::Invite { kind, .. } if *kind == INV_TRADE));
+    soc(&b, SocialCmd::TradeAnswer { from: "Alpha".into(), accept: true });
+    wait(&mut a, "trade window", |m| matches!(m, ServerMsg::Trade { state: Some(t), .. } if t.with == "Beta"));
+    soc(&a, SocialCmd::TradeOffer { items: vec![("elixir".into(), 2), ("trainee_hp_potion".into(), 5)], gold: 10 });
+    let t = wait(&mut b, "Alpha's offer", |m| matches!(m, ServerMsg::Trade { state: Some(t), .. } if !t.theirs.is_empty()));
+    if let ServerMsg::Trade { state: Some(t), .. } = t {
+        assert_eq!(t.theirs, vec![("elixir".to_string(), 2)], "bound items can't be traded");
+        assert_eq!(t.their_gold, 10);
+    }
+    soc(&b, SocialCmd::TradeOffer { items: vec![], gold: 5 });
+    std::thread::sleep(Duration::from_millis(50));
+    soc(&a, SocialCmd::TradeConfirm);
+    soc(&a, SocialCmd::TradeLock { locked: true });
+    soc(&b, SocialCmd::TradeLock { locked: true });
+    std::thread::sleep(Duration::from_millis(50));
+    soc(&a, SocialCmd::TradeConfirm);
+    soc(&b, SocialCmd::TradeConfirm);
+    let da = wait(&mut a, "trade done", |m| matches!(m, ServerMsg::TradeDone { .. }));
+    assert_eq!(da, ServerMsg::TradeDone { with: "Beta".into(), give: vec![("elixir".into(), 2)], give_gold: 10, get: vec![], get_gold: 5 });
+    let db = wait(&mut b, "trade done", |m| matches!(m, ServerMsg::TradeDone { .. }));
+    assert_eq!(db, ServerMsg::TradeDone { with: "Alpha".into(), give: vec![], give_gold: 5, get: vec![("elixir".into(), 2)], get_gold: 10 });
+
+    // --- profiles
+    soc(&b, SocialCmd::Profile { name: "alpha".into() });
+    let pr = wait(&mut b, "profile", |m| matches!(m, ServerMsg::Profile(_)));
+    if let ServerMsg::Profile(p) = pr {
+        assert_eq!(p.name, "Alpha");
+        assert_eq!(p.guild, "Second~Wind");
+        assert_eq!(p.gear.len(), galebound_core::items::EQUIP_COUNT);
+    }
+
+    // --- leaving: party shrinks away, friends see you go offline
+    a.send(&ClientMsg::Leave);
+    wait(&mut b, "party over", |m| matches!(m, ServerMsg::Party(None)));
+    wait(&mut b, "Alpha offline", |m| matches!(m, ServerMsg::Friends(s) if s.friends.iter().any(|f| f.name == "Alpha" && !f.online)));
+    let _ = idb;
 }

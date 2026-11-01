@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 /// Bumped whenever the messages change; client and server must match.
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 pub const DEFAULT_PORT: u16 = 7777;
 /// Default player limit for a server.
 pub const MAX_PLAYERS: usize = 16;
@@ -141,6 +141,8 @@ pub struct PlayerInfo {
     pub pet: String,
     pub pet_name: String,
     pub pet_level: u32,
+    /// Guild name ("" for none). Filled in by the server.
+    pub guild: String,
 }
 
 /// Where a player is and what they're doing (sent ~15 times a second).
@@ -246,6 +248,136 @@ fn get_act(r: &mut R) -> Option<ActNet> {
     Some(ActNet { id: r.u()?, kind: r.u()?, skill: r.s()?, x: r.f()?, y: r.f()?, facing: r.i()? })
 }
 
+/// Chat channels (and the chat window's tabs, with "All" showing everything).
+pub const CH_ALL: u32 = 0;
+pub const CH_PARTY: u32 = 1;
+pub const CH_GUILD: u32 = 2;
+pub const CH_WHISPER: u32 = 3;
+pub const CH_SYSTEM: u32 = 4;
+
+/// Everything social a player can ask the server to do.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SocialCmd {
+    Whisper { to: String, text: String },
+    PartyChat { text: String },
+    GuildChat { text: String },
+    FriendAdd { name: String },
+    FriendAnswer { name: String, accept: bool },
+    FriendRemove { name: String },
+    Block { name: String },
+    Unblock { name: String },
+    PartyInvite { name: String },
+    PartyAnswer { from: String, accept: bool },
+    PartyLeave,
+    PartyKick { name: String },
+    PartyPromote { name: String },
+    GuildCreate { name: String },
+    GuildInvite { name: String },
+    GuildAnswer { guild: String, accept: bool },
+    GuildLeave,
+    GuildKick { name: String },
+    /// Set a member's rank (officer / member), or hand over leadership.
+    GuildRank { name: String, rank: u8 },
+    GuildDisband,
+    GuildNotice { text: String },
+    GuildClaimDaily,
+    GuildClaimQuest,
+    TradeRequest { name: String },
+    TradeAnswer { from: String, accept: bool },
+    TradeOffer { items: Vec<(String, u32)>, gold: u32 },
+    TradeLock { locked: bool },
+    TradeConfirm,
+    TradeCancel,
+    Profile { name: String },
+    /// Ask for the friends list, party and guild again.
+    Refresh,
+}
+
+impl SocialCmd {
+    fn parts(&self) -> (&'static str, Vec<String>) {
+        use SocialCmd::*;
+        let b = |x: bool| (x as u8).to_string();
+        match self {
+            Whisper { to, text } => ("whisper", vec![to.clone(), text.clone()]),
+            PartyChat { text } => ("pchat", vec![text.clone()]),
+            GuildChat { text } => ("gchat", vec![text.clone()]),
+            FriendAdd { name } => ("fadd", vec![name.clone()]),
+            FriendAnswer { name, accept } => ("fans", vec![name.clone(), b(*accept)]),
+            FriendRemove { name } => ("frem", vec![name.clone()]),
+            Block { name } => ("block", vec![name.clone()]),
+            Unblock { name } => ("unblock", vec![name.clone()]),
+            PartyInvite { name } => ("pinv", vec![name.clone()]),
+            PartyAnswer { from, accept } => ("pans", vec![from.clone(), b(*accept)]),
+            PartyLeave => ("pleave", vec![]),
+            PartyKick { name } => ("pkick", vec![name.clone()]),
+            PartyPromote { name } => ("ppromote", vec![name.clone()]),
+            GuildCreate { name } => ("gcreate", vec![name.clone()]),
+            GuildInvite { name } => ("ginv", vec![name.clone()]),
+            GuildAnswer { guild, accept } => ("gans", vec![guild.clone(), b(*accept)]),
+            GuildLeave => ("gleave", vec![]),
+            GuildKick { name } => ("gkick", vec![name.clone()]),
+            GuildRank { name, rank } => ("grank", vec![name.clone(), rank.to_string()]),
+            GuildDisband => ("gdisband", vec![]),
+            GuildNotice { text } => ("gnotice", vec![text.clone()]),
+            GuildClaimDaily => ("gdaily", vec![]),
+            GuildClaimQuest => ("gquest", vec![]),
+            TradeRequest { name } => ("treq", vec![name.clone()]),
+            TradeAnswer { from, accept } => ("tans", vec![from.clone(), b(*accept)]),
+            TradeOffer { items, gold } => ("toffer", vec![crate::social::encode_items(items), gold.to_string()]),
+            TradeLock { locked } => ("tlock", vec![b(*locked)]),
+            TradeConfirm => ("tok", vec![]),
+            TradeCancel => ("tcancel", vec![]),
+            Profile { name } => ("profile", vec![name.clone()]),
+            Refresh => ("refresh", vec![]),
+        }
+    }
+    fn from_parts(verb: &str, a: &[String]) -> Option<SocialCmd> {
+        use SocialCmd::*;
+        let s = |i: usize| a.get(i).cloned();
+        let b = |i: usize| a.get(i).map(|x| x == "1");
+        Some(match verb {
+            "whisper" => Whisper { to: s(0)?, text: s(1)? },
+            "pchat" => PartyChat { text: s(0)? },
+            "gchat" => GuildChat { text: s(0)? },
+            "fadd" => FriendAdd { name: s(0)? },
+            "fans" => FriendAnswer { name: s(0)?, accept: b(1)? },
+            "frem" => FriendRemove { name: s(0)? },
+            "block" => Block { name: s(0)? },
+            "unblock" => Unblock { name: s(0)? },
+            "pinv" => PartyInvite { name: s(0)? },
+            "pans" => PartyAnswer { from: s(0)?, accept: b(1)? },
+            "pleave" => PartyLeave,
+            "pkick" => PartyKick { name: s(0)? },
+            "ppromote" => PartyPromote { name: s(0)? },
+            "gcreate" => GuildCreate { name: s(0)? },
+            "ginv" => GuildInvite { name: s(0)? },
+            "gans" => GuildAnswer { guild: s(0)?, accept: b(1)? },
+            "gleave" => GuildLeave,
+            "gkick" => GuildKick { name: s(0)? },
+            "grank" => GuildRank { name: s(0)?, rank: s(1)?.parse().ok()? },
+            "gdisband" => GuildDisband,
+            "gnotice" => GuildNotice { text: s(0)? },
+            "gdaily" => GuildClaimDaily,
+            "gquest" => GuildClaimQuest,
+            "treq" => TradeRequest { name: s(0)? },
+            "tans" => TradeAnswer { from: s(0)?, accept: b(1)? },
+            "toffer" => TradeOffer { items: crate::social::decode_items(&s(0)?), gold: s(1)?.parse().ok()? },
+            "tlock" => TradeLock { locked: b(0)? },
+            "tok" => TradeConfirm,
+            "tcancel" => TradeCancel,
+            "profile" => Profile { name: s(0)? },
+            "refresh" => Refresh,
+            _ => return None,
+        })
+    }
+}
+
+/// What kind of invitation a popup is for.
+pub const INV_FRIEND: u32 = 0;
+pub const INV_PARTY: u32 = 1;
+pub const INV_GUILD: u32 = 2;
+pub const INV_TRADE: u32 = 3;
+
 // ------------------------------------------------------------------ messages
 
 #[derive(Clone, Debug, PartialEq)]
@@ -277,6 +409,7 @@ pub enum ClientMsg {
     Chat { text: String },
     Ping { t: f64 },
     Act(ActNet),
+    Social(SocialCmd),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -286,7 +419,9 @@ pub enum ServerMsg {
     /// Your account (password data stripped) and, after a "remember me"
     /// login, the new token.
     Account { account: String, token: String },
-    Entered { id: u32 },
+    /// You're in. `day` is the server's date (days since 1970), used for
+    /// daily rewards.
+    Entered { id: u32, day: u32 },
     Left,
     PlayerInfo(PlayerInfo),
     PlayerPos(PlayerPos),
@@ -308,13 +443,31 @@ pub enum ServerMsg {
     System { text: String },
     Pong { t: f64 },
     Act(ActNet),
+    /// A chat line on a channel (`CH_*`). For whispers `to` is the receiver
+    /// (so the sender sees "To X: ...").
+    ChatCh { channel: u32, from: String, to: String, text: String },
+    /// Friends, requests and block list.
+    Friends(crate::social::SocialNet),
+    /// Your party (None = not in one).
+    Party(Option<crate::social::PartyNet>),
+    Guild(Option<crate::social::GuildNet>),
+    Profile(crate::social::ProfileNet),
+    /// Someone invites you (`INV_*`); `extra` is the guild name for guild invites.
+    Invite { kind: u32, from: String, extra: String },
+    /// The trade window's state (None = closed); `reason` says why it closed.
+    Trade { state: Option<crate::social::TradeNet>, reason: String },
+    /// Both sides confirmed: hand over `give`, receive `get`.
+    TradeDone { with: String, give: Vec<(String, u32)>, give_gold: u32, get: Vec<(String, u32)>, get_gold: u32 },
+    /// The server gives you something (guild rewards), or charges you
+    /// (`cost`, e.g. founding a guild).
+    Grant { gold: u32, cost: u32, items: Vec<(String, u32)>, reason: String },
 }
 
 fn put_info(w: W, p: &PlayerInfo) -> W {
-    w.n(p.id).s(&p.name).s(&p.look).s(&p.weapon).n(p.level).s(&p.class).s(&p.pet).s(&p.pet_name).n(p.pet_level)
+    w.n(p.id).s(&p.name).s(&p.look).s(&p.weapon).n(p.level).s(&p.class).s(&p.pet).s(&p.pet_name).n(p.pet_level).s(&p.guild)
 }
 fn get_info(r: &mut R) -> Option<PlayerInfo> {
-    Some(PlayerInfo { id: r.u()?, name: r.s()?, look: r.s()?, weapon: r.s()?, level: r.u()?, class: r.s()?, pet: r.s()?, pet_name: r.s()?, pet_level: r.u()? })
+    Some(PlayerInfo { id: r.u()?, name: r.s()?, look: r.s()?, weapon: r.s()?, level: r.u()?, class: r.s()?, pet: r.s()?, pet_name: r.s()?, pet_level: r.u()?, guild: r.s()? })
 }
 fn put_pos(w: W, p: &PlayerPos) -> W {
     w.n(p.id)
@@ -380,6 +533,14 @@ impl ClientMsg {
             Chat { text } => W::new("chat").s(text),
             Ping { t } => W::new("ping").n(t),
             Act(a) => put_act(W::new("act"), a),
+            Social(c) => {
+                let (verb, args) = c.parts();
+                let mut w = W::new("soc").s(verb);
+                for a in &args {
+                    w = w.s(a);
+                }
+                w
+            }
         }
         .0
     }
@@ -409,6 +570,14 @@ impl ClientMsg {
             "chat" => Chat { text: r.s()? },
             "ping" => Ping { t: r.d()? },
             "act" => Act(get_act(&mut r)?),
+            "soc" => {
+                let verb = r.s()?;
+                let mut args = Vec::new();
+                while let Some(a) = r.s() {
+                    args.push(a);
+                }
+                Social(SocialCmd::from_parts(&verb, &args)?)
+            }
             _ => return None,
         })
     }
@@ -421,7 +590,7 @@ impl ServerMsg {
             Welcome { protocol, motd } => W::new("welcome").n(protocol).s(motd),
             Error { text } => W::new("error").s(text),
             Account { account, token } => W::new("account").s(account).s(token),
-            Entered { id } => W::new("entered").n(id),
+            Entered { id, day } => W::new("entered").n(id).n(day),
             Left => W::new("left"),
             PlayerInfo(p) => put_info(W::new("pinfo"), p),
             PlayerPos(p) => put_pos(W::new("ppos"), p),
@@ -463,6 +632,20 @@ impl ServerMsg {
             System { text } => W::new("system").s(text),
             Pong { t } => W::new("pong").n(t),
             Act(a) => put_act(W::new("act"), a),
+            ChatCh { channel, from, to, text } => W::new("chatch").n(channel).s(from).s(to).s(text),
+            Friends(s) => W::new("friends").s(&s.encode()),
+            Party(p) => W::new("party").s(&p.as_ref().map(|p| p.encode()).unwrap_or_default()),
+            Guild(g) => W::new("guild").s(&g.as_ref().map(|g| g.encode()).unwrap_or_default()),
+            Profile(p) => W::new("profile").s(&p.encode()),
+            Invite { kind, from, extra } => W::new("invite").n(kind).s(from).s(extra),
+            Trade { state, reason } => W::new("trade").s(&state.as_ref().map(|t| t.encode()).unwrap_or_default()).s(reason),
+            TradeDone { with, give, give_gold, get, get_gold } => W::new("tradedone")
+                .s(with)
+                .s(&crate::social::encode_items(give))
+                .n(give_gold)
+                .s(&crate::social::encode_items(get))
+                .n(get_gold),
+            Grant { gold, cost, items, reason } => W::new("grant").n(gold).n(cost).s(&crate::social::encode_items(items)).s(reason),
         }
         .0
     }
@@ -474,7 +657,7 @@ impl ServerMsg {
             "welcome" => Welcome { protocol: r.u()?, motd: r.s()? },
             "error" => Error { text: r.s()? },
             "account" => Account { account: r.s()?, token: r.s()? },
-            "entered" => Entered { id: r.u()? },
+            "entered" => Entered { id: r.u()?, day: r.u().unwrap_or(0) },
             "left" => Left,
             "pinfo" => PlayerInfo(get_info(&mut r)?),
             "ppos" => PlayerPos(get_pos(&mut r)?),
@@ -530,6 +713,30 @@ impl ServerMsg {
             "system" => System { text: r.s()? },
             "pong" => Pong { t: r.d()? },
             "act" => Act(get_act(&mut r)?),
+            "chatch" => ChatCh { channel: r.u()?, from: r.s()?, to: r.s()?, text: r.s()? },
+            "friends" => Friends(crate::social::SocialNet::decode(&r.s()?)?),
+            "party" => {
+                let s = r.s()?;
+                Party(if s.is_empty() { None } else { Some(crate::social::PartyNet::decode(&s)?) })
+            }
+            "guild" => {
+                let s = r.s()?;
+                Guild(if s.is_empty() { None } else { Some(crate::social::GuildNet::decode(&s)?) })
+            }
+            "profile" => Profile(crate::social::ProfileNet::decode(&r.s()?)?),
+            "invite" => Invite { kind: r.u()?, from: r.s()?, extra: r.s()? },
+            "trade" => {
+                let s = r.s()?;
+                Trade { state: if s.is_empty() { None } else { Some(crate::social::TradeNet::decode(&s)?) }, reason: r.s()? }
+            }
+            "tradedone" => TradeDone {
+                with: r.s()?,
+                give: crate::social::decode_items(&r.s()?),
+                give_gold: r.u()?,
+                get: crate::social::decode_items(&r.s()?),
+                get_gold: r.u()?,
+            },
+            "grant" => Grant { gold: r.u()?, cost: r.u()?, items: crate::social::decode_items(&r.s()?), reason: r.s()? },
             _ => return None,
         })
     }
@@ -735,7 +942,7 @@ mod tests {
 
     #[test]
     fn messages_roundtrip() {
-        let info = PlayerInfo { id: 3, name: "Sk\teng\\".into(), look: "1,2,3".into(), weapon: "ash_bow".into(), level: 12, class: "windrunner".into(), pet: "puffling".into(), pet_name: "Puff\nball".into(), pet_level: 4 };
+        let info = PlayerInfo { id: 3, name: "Sk\teng\\".into(), look: "1,2,3".into(), weapon: "ash_bow".into(), level: 12, class: "windrunner".into(), pet: "puffling".into(), pet_name: "Puff\nball".into(), pet_level: 4, guild: "Second~Wind".into() };
         let pos = PlayerPos { id: 3, x: 120.5, y: 640.0, facing: -1, anim: 17, frame: 2, hp: 0.25, dead: false, pet_on: true, pet_x: 80.0, pet_y: 640.0, pet_facing: 1, pet_frame: 1 };
         let drop = DropNet { id: 9, item: GOLD.into(), count: 40, x: 1.5, y: 2.0, vx: -30.0, vy: -300.0 };
         let cms = vec![
@@ -760,6 +967,11 @@ mod tests {
             ClientMsg::Chat { text: "hi\tthere".into() },
             ClientMsg::Ping { t: 12.5 },
             ClientMsg::Act(ActNet { id: 0, kind: 4, skill: "cyclone".into(), x: 10.5, y: -3.0, facing: -1 }),
+            ClientMsg::Social(SocialCmd::Whisper { to: "Mia Rose".into(), text: "hi\nthere".into() }),
+            ClientMsg::Social(SocialCmd::TradeOffer { items: vec![("elixir".into(), 3), ("copper_ring".into(), 1)], gold: 99 }),
+            ClientMsg::Social(SocialCmd::GuildRank { name: "Kaito".into(), rank: 1 }),
+            ClientMsg::Social(SocialCmd::PartyLeave),
+            ClientMsg::Social(SocialCmd::TradeOffer { items: vec![], gold: 0 }),
         ];
         for m in cms {
             assert_eq!(ClientMsg::decode(&m.encode()), Some(m.clone()), "{:?}", m);
@@ -770,7 +982,15 @@ mod tests {
             ServerMsg::Welcome { protocol: PROTOCOL, motd: "Hi".into() },
             ServerMsg::Error { text: "no".into() },
             ServerMsg::Account { account: "email=x\n[character]\n".into(), token: "".into() },
-            ServerMsg::Entered { id: 3 },
+            ServerMsg::Entered { id: 3, day: 20400 },
+            ServerMsg::ChatCh { channel: CH_WHISPER, from: "A".into(), to: "B c".into(), text: "psst\tthere".into() },
+            ServerMsg::Party(None),
+            ServerMsg::Guild(None),
+            ServerMsg::Invite { kind: INV_GUILD, from: "Kaito".into(), extra: "Second~Wind".into() },
+            ServerMsg::Trade { state: Some(crate::social::TradeNet { with: "K".into(), mine: vec![("elixir".into(), 2)], ..Default::default() }), reason: String::new() },
+            ServerMsg::Trade { state: None, reason: "Kaito cancelled".into() },
+            ServerMsg::TradeDone { with: "K".into(), give: vec![("elixir".into(), 1)], give_gold: 5, get: vec![], get_gold: 70 },
+            ServerMsg::Grant { gold: 400, cost: 0, items: vec![("elixir".into(), 2), ("revive_scroll".into(), 1)], reason: "Guild quest".into() },
             ServerMsg::Left,
             ServerMsg::PlayerInfo(info),
             ServerMsg::PlayerPos(pos),

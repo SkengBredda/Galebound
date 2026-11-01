@@ -2,6 +2,7 @@
 //! Zero external dependencies, fully unit-tested, and reusable by a future
 //! authoritative game server.
 
+pub mod achievements;
 pub mod appearance;
 pub mod auth;
 pub mod classes;
@@ -17,5 +18,6 @@ pub mod quests;
 pub mod save;
 pub mod sim;
 pub mod skills;
+pub mod social;
 pub mod stats;
 pub mod world;

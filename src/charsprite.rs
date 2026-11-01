@@ -1989,6 +1989,28 @@ mod tests {
         }
     }
 
+    /// Every hat and back item, in every animation, stays inside the canvas.
+    #[test]
+    fn hats_and_backs_fit() {
+        for h in 0..galebound_core::appearance::HATS.len() as u8 {
+            for b in 0..galebound_core::appearance::BACKS.len() as u8 {
+                if h != 0 && b != 0 && h != b {
+                    continue;
+                }
+                for body in 0..2u8 {
+                    let look = Appearance { body, hair: 0, top: 1, bottom: 1, hat: h, back: b, ..Default::default() };
+                    for a in all_anims() {
+                        for f in 0..a.frames() {
+                            let c = render(&look, Some(Weapon::Staff), a, f);
+                            let bb = c.bounds().expect("sprite is empty");
+                            assert!(bb.0 > 0 && bb.1 > 0 && bb.2 < SIZE - 1 && bb.3 < HEIGHT - 1, "hat {} back {} {:?} f{} touches edge {:?}", h, b, a, f, bb);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Standing and running poses keep a foot on the ground line.
     #[test]
     fn feet_are_planted() {

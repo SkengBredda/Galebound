@@ -122,6 +122,17 @@ pub struct CharacterSave {
     /// Pets you own, and which one is out with you.
     pub pets: Vec<PetSave>,
     pub active_pet: Option<usize>,
+    /// Running totals for achievements and profiles.
+    pub tally: crate::achievements::Tally,
+    /// Unlocked achievement ids.
+    pub achievements: Vec<String>,
+    /// Gale Marks: earned from achievements, spent on exclusive cosmetics.
+    pub marks: u32,
+    /// Owned cosmetic ids, and which hat / back cosmetic is worn (0 = none).
+    pub cosmetics: Vec<String>,
+    pub cos_hat: u8,
+    pub cos_back: u8,
+    pub attendance: crate::achievements::Attendance,
 }
 
 impl CharacterSave {
@@ -158,6 +169,13 @@ impl CharacterSave {
             tomb: None,
             pets: Vec::new(),
             active_pet: None,
+            tally: Default::default(),
+            achievements: Vec::new(),
+            marks: 0,
+            cosmetics: Vec::new(),
+            cos_hat: 0,
+            cos_back: 0,
+            attendance: Default::default(),
         }
     }
     pub fn has_flag(&self, f: &str) -> bool {
@@ -179,6 +197,36 @@ impl CharacterSave {
         self.stats = stats::auto_assign(self.class, stats::START_STATS, ap);
         self.ap = 0;
         self.inventory.equip[EquipSlot::Weapon.index()] = Some(items::starter_weapon(self.class).to_string());
+    }
+    /// How the character looks in the world: their outfit with gear on
+    /// top, and any exclusive cosmetics over that.
+    pub fn worn_look(&self) -> Appearance {
+        use crate::items::{EquipSlot, Look};
+        let mut l = self.look;
+        for slot in crate::items::EQUIP_SLOTS {
+            let Some(d) = self.inventory.equipped(*slot) else { continue };
+            match (slot, d.look) {
+                (EquipSlot::Torso, Look::Top(t, dye)) => {
+                    l.top = t;
+                    l.top_dye = dye;
+                }
+                (EquipSlot::Legs, Look::Bottom(b, dye)) => {
+                    l.bottom = b;
+                    l.bottom_dye = dye;
+                }
+                (EquipSlot::Boots, Look::Shoes(s)) => l.shoes = s,
+                (EquipSlot::Helmet, Look::Hat(h)) => l.hat = h,
+                (EquipSlot::Back, Look::Back(b)) => l.back = b,
+                _ => {}
+            }
+        }
+        if self.cos_hat != 0 {
+            l.hat = self.cos_hat;
+        }
+        if self.cos_back != 0 {
+            l.back = self.cos_back;
+        }
+        l.sanitized()
     }
     pub fn quest_mut(&mut self, id: &str) -> Option<&mut QuestEntry> {
         self.quests.iter_mut().find(|q| q.id == id)
@@ -318,6 +366,16 @@ pub fn encode_character(c: &CharacterSave) -> String {
     if let Some(i) = c.active_pet {
         kv("active_pet", i.to_string());
     }
+    kv("tally", c.tally.encode());
+    if !c.achievements.is_empty() {
+        kv("achievements", c.achievements.join(","));
+    }
+    kv("marks", c.marks.to_string());
+    if !c.cosmetics.is_empty() {
+        kv("cosmetics", c.cosmetics.join(","));
+    }
+    kv("cos_worn", format!("{},{}", c.cos_hat, c.cos_back));
+    kv("attendance", format!("{},{}", c.attendance.last_day, c.attendance.count));
     for q in &c.quests {
         kv("quest", format!("{},{},{}", q.id, qstate_str(q.state), q.progress));
     }
@@ -465,6 +523,21 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                     h.resize(HOTBAR_SLOTS, HotbarSlot::Empty);
                     c.hotbar = h;
                 }
+                "tally" => c.tally = crate::achievements::Tally::decode(&v),
+                "achievements" => c.achievements = v.split(',').filter(|x| crate::achievements::achievement(x).is_some()).map(String::from).collect(),
+                "marks" => c.marks = pu(&v),
+                "cosmetics" => c.cosmetics = v.split(',').filter(|x| crate::achievements::cosmetic(x).is_some()).map(String::from).collect(),
+                "cos_worn" => {
+                    if let Some((h, b)) = v.split_once(',') {
+                        c.cos_hat = pu(h) as u8;
+                        c.cos_back = pu(b) as u8;
+                    }
+                }
+                "attendance" => {
+                    if let Some((d, n)) = v.split_once(',') {
+                        c.attendance = crate::achievements::Attendance { last_day: pu(d), count: pu(n) };
+                    }
+                }
                 "hp" => c.hp = pf(&v),
                 "mp" => c.mp = pf(&v),
                 "map" => c.map = v,
@@ -582,6 +655,12 @@ mod tests {
         c.x = 123.5;
         c.trainee_buys = 4;
         c.tomb = Some(17);
+        c.tally.kills = 77;
+        c.achievements = vec!["first_blood".into()];
+        c.marks = 9;
+        c.cosmetics = vec!["cos_halo".into()];
+        c.cos_hat = 10;
+        c.attendance = crate::achievements::Attendance { last_day: 20000, count: 3 };
         let mut pet = PetSave::new(PetSpecies::Sparkwing);
         pet.name = "Zap, the Bolt".into();
         pet.level = 7;

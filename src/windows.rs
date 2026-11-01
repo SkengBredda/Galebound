@@ -1157,36 +1157,8 @@ pub fn gear_look(base: &galebound_core::appearance::Appearance, sim: &Sim) -> ga
     gear_look_save(base, &sim.save)
 }
 
-pub fn gear_look_save(base: &galebound_core::appearance::Appearance, save: &galebound_core::save::CharacterSave) -> galebound_core::appearance::Appearance {
-    let mut l = *base;
-    if let Some(d) = save.inventory.equipped(EquipSlot::Helmet) {
-        if let items::Look::Hat(h) = d.look {
-            l.hat = h;
-        }
-    }
-    if let Some(d) = save.inventory.equipped(EquipSlot::Legs) {
-        if let items::Look::Bottom(b, dye) = d.look {
-            l.bottom = b;
-            l.bottom_dye = dye;
-        }
-    }
-    if let Some(d) = save.inventory.equipped(EquipSlot::Back) {
-        if let items::Look::Back(b) = d.look {
-            l.back = b;
-        }
-    }
-    if let Some(d) = save.inventory.equipped(EquipSlot::Torso) {
-        if let items::Look::Top(t, dye) = d.look {
-            l.top = t;
-            l.top_dye = dye;
-        }
-    }
-    if let Some(d) = save.inventory.equipped(EquipSlot::Boots) {
-        if let items::Look::Shoes(s) = d.look {
-            l.shoes = s;
-        }
-    }
-    l
+pub fn gear_look_save(_base: &galebound_core::appearance::Appearance, save: &galebound_core::save::CharacterSave) -> galebound_core::appearance::Appearance {
+    save.worn_look()
 }
 
 /// Names, monsters and routes for the world map, built once.
