@@ -69,6 +69,18 @@ No port forwarding is needed, nothing is exposed to the internet, and it
 works even if your internet provider uses CGNAT. If you change the port, add it
 to the address: `100.101.102.103:7778`.
 
+**If a friend can't connect** (it works for you with `localhost`):
+1. Run **`allow-firewall.bat`** on the host PC and click Yes. Windows often
+   treats Tailscale as a *public* network, and the firewall prompt only
+   allowed private ones.
+2. Watch the server window while they try. A `connection #... from 100.x.x.x`
+   line means they reached you. No line means something is blocking the way.
+3. On the friend's PC, in PowerShell:
+   `Test-NetConnection 100.101.102.103 -Port 7777` (use your address).
+   `TcpTestSucceeded : True` means the way is open. If `tailscale ping
+   100.101.102.103` also fails, they aren't on your tailnet yet: invite them,
+   or share your PC with them, in the Tailscale admin console.
+
 **What's shared:** other players appear on your map and minimap with their
 name, level, gear, HP and pet. Monsters are the same for everyone: everyone
 who hits a monster gets EXP when it dies (split by damage, at least 20% each)

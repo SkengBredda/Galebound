@@ -26,6 +26,7 @@ copy /y "target\release\galebound.exe" "%OUT%\Galebound.exe" >nul
 copy /y "target\release\galebound-server.exe" "%OUT%\GaleboundServer.exe" >nul
 copy /y README.md "%OUT%\README.md" >nul
 copy /y PATCH_NOTES.md "%OUT%\PATCH_NOTES.md" >nul
+copy /y allow-firewall.bat "%OUT%\allow-firewall.bat" >nul
 (
   echo @echo off
   echo title Galebound Server

@@ -20,6 +20,12 @@ so the whole history is in one place.
   workaround.
 - Gameplay and the network protocol are unchanged.
 - New test: connecting with `localhost` and with the IPv6 loopback address.
+- **Added afterwards: `allow-firewall.bat`** (no change to the game):
+  - Run it on the host PC to let friends through Windows Firewall. It opens
+    TCP port 7777 on every network type, because Windows often treats
+    Tailscale as a *public* network.
+  - `build-windows.bat` now copies it into the `GaleBound_Windows` folder.
+  - The README has a new *If a friend can't connect* checklist.
 
 ---
 
