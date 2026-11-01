@@ -31,7 +31,7 @@ pub const TICK_HZ: u32 = 60;
 /// Monster snapshots per second.
 pub const SNAPSHOT_HZ: u32 = 15;
 /// Players who haven't sent anything for this long are disconnected.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 /// Empty maps keep their monsters for this long, then reset.
 const ZONE_LINGER: f32 = 60.0;
 /// How far from a monster a hit may be reported from.

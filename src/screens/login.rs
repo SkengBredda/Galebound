@@ -318,7 +318,7 @@ impl LoginScreen {
         if self.server.draw(&ui, sx + 12.0, sy, sw - 24.0, 38.0, "Server address", self.focus == Focus::Server, app.time) {
             self.focus = Focus::Server;
         }
-        gfx::text("localhost or a Tailscale IP", sx + 12.0, sy + 50.0, 12.0, widgets::ink_soft());
+        gfx::text("localhost or host:port from the host", sx + 12.0, sy + 50.0, 12.0, widgets::ink_soft());
 
         if let Some(e) = &self.error {
             widgets::message(e, gfx::VW * 0.5, py + ph + 14.0, true);

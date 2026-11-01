@@ -574,7 +574,12 @@ pub struct NetClient {
     held: std::collections::VecDeque<ServerMsg>,
     closed: bool,
     pub motd: String,
+    alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
+
+/// How often the client says "still here" on its own, whatever screen it is
+/// on (the server drops connections it hasn't heard from in a while).
+pub const KEEPALIVE: Duration = Duration::from_secs(4);
 
 impl NetClient {
     /// Connect and check that client and server speak the same protocol.
@@ -593,7 +598,20 @@ impl NetClient {
             .find_map(|a| TcpStream::connect_timeout(a, each).ok())
             .ok_or_else(|| format!("No server answered at {}. Is it running?", full))?;
         let (tx, rx, stream) = spawn_io(stream).map_err(|e| e.to_string())?;
-        let mut c = NetClient { tx, rx, stream, addr: full, held: Default::default(), closed: false, motd: String::new() };
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        {
+            // Keepalive: menus and character creation send nothing else, and a
+            // stalled window (being dragged, loading) can't send either.
+            let tx = tx.clone();
+            let alive = alive.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(KEEPALIVE);
+                if !alive.load(std::sync::atomic::Ordering::Relaxed) || tx.send(ClientMsg::Ping { t: -1.0 }.encode()).is_err() {
+                    break;
+                }
+            });
+        }
+        let mut c = NetClient { tx, rx, stream, addr: full, held: Default::default(), closed: false, motd: String::new(), alive };
         let reply = c.request(&ClientMsg::Hello { protocol: PROTOCOL }, timeout, |m| matches!(m, ServerMsg::Welcome { .. }))?;
         if let ServerMsg::Welcome { protocol, motd } = reply {
             if protocol != PROTOCOL {
@@ -618,8 +636,10 @@ impl NetClient {
         loop {
             match self.rx.try_recv() {
                 Ok(Some(l)) => {
-                    if let Some(m) = ServerMsg::decode(&l) {
-                        v.push(m);
+                    match ServerMsg::decode(&l) {
+                        None => {}
+                        Some(ServerMsg::Pong { t }) if t < 0.0 => {} // keepalive echo
+                        Some(m) => v.push(m),
                     }
                 }
                 Ok(None) | Err(mpsc::TryRecvError::Disconnected) => {
@@ -649,6 +669,9 @@ impl NetClient {
             match self.rx.recv_timeout(left) {
                 Ok(Some(l)) => {
                     let Some(msg) = ServerMsg::decode(&l) else { continue };
+                    if matches!(msg, ServerMsg::Pong { t } if t < 0.0) {
+                        continue;
+                    }
                     if let ServerMsg::Error { text } = &msg {
                         return Err(text.clone());
                     }
@@ -669,6 +692,7 @@ impl NetClient {
 
 impl Drop for NetClient {
     fn drop(&mut self) {
+        self.alive.store(false, std::sync::atomic::Ordering::Relaxed);
         let _ = self.stream.shutdown(Shutdown::Both);
     }
 }

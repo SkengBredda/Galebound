@@ -44,8 +44,8 @@ fn main() {
     println!(" Up to {} players. Saves: {}", cfg.max_players, cfg.data_dir.display());
     println!();
     println!(" You:     log in with server  localhost");
-    println!(" Friends: log in with your Tailscale address, e.g. 100.101.102.103");
-    println!("          (run  tailscale ip -4  to see yours)");
+    println!(" Friends: log in with your playit.gg tunnel address, with its port,");
+    println!("          e.g. galebound.playit.game:42311 (keep playit running)");
     println!();
     println!(" Type 'help' for commands. 'stop' saves and shuts down.");
     println!("==============================================================");

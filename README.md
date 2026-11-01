@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.8.2 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.8.3 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
@@ -21,7 +21,7 @@ cargo run --release
 
 On the login screen, put the server's address in the **Server address** box
 (bottom-left): `localhost` if the server runs on your PC, or the host's
-Tailscale address. Then create an account *on that server* and play.
+playit.gg address with its port (e.g. `galebound.playit.game:42311`). Then create an account *on that server* and play.
 
 ## Windows .exe
 
@@ -53,33 +53,34 @@ Firewall will ask whether to allow it: allow **private networks**. Type
 `--data <folder>` (where accounts are saved; default
 `%APPDATA%\Galebound\server` on Windows), `--motd "Welcome!"`.
 
-**2. Set up Tailscale (once).** You and every friend:
-- install Tailscale from https://tailscale.com/download and sign in;
-- you invite friends to your tailnet (admin console -> Users -> Invite), or
-  share just your PC with them (Machines -> your PC -> Share).
+**2. Open a playit.gg tunnel (once).** This lets friends reach your PC over
+the internet without port forwarding.
+- Install the playit agent from https://playit.gg/download (or run
+  `winget install DevelopedMethods.playit`), start it and claim it in your
+  browser with a playit account.
+- In the playit dashboard: **Tunnels -> Add tunnel**, type **TCP** (on a free
+  account, *Minecraft Java* works too: it's a plain TCP tunnel), local address
+  `127.0.0.1`, local port **7777**.
+- The tunnel page shows its address with a port, e.g.
+  `galebound.playit.game:42311`. It stays the same every time.
 
-Your PC's Tailscale address is shown in the Tailscale app, or run
-`tailscale ip -4`. It looks like `100.101.102.103`.
+Keep playit running whenever the server runs (the Windows install runs it in
+the background with a tray icon).
 
-**3. Friends connect.** They start the game and type your Tailscale address
-in **Server address** (port 7777 is added automatically). You type
-`localhost`.
-
-No port forwarding is needed, nothing is exposed to the internet, and it
-works even if your internet provider uses CGNAT. If you change the port, add it
-to the address: `100.101.102.103:7778`.
+**3. Friends connect.** They start the game and type the full tunnel address,
+port included, in **Server address**. You type `localhost`.
 
 **If a friend can't connect** (it works for you with `localhost`):
-1. Run **`allow-firewall.bat`** on the host PC and click Yes. Windows often
-   treats Tailscale as a *public* network, and the firewall prompt only
-   allowed private ones.
-2. Watch the server window while they try. A `connection #... from 100.x.x.x`
-   line means they reached you. No line means something is blocking the way.
-3. On the friend's PC, in PowerShell:
-   `Test-NetConnection 100.101.102.103 -Port 7777` (use your address).
-   `TcpTestSucceeded : True` means the way is open. If `tailscale ping
-   100.101.102.103` also fails, they aren't on your tailnet yet: invite them,
-   or share your PC with them, in the Tailscale admin console.
+1. Check the server window is open and the tunnel shows as connected in the
+   playit dashboard.
+2. Make sure they typed the port: `galebound.playit.game:42311`, not just the
+   name (without a port the game tries 7777).
+3. Watch the server window while they try. Every player arrives *from
+   127.0.0.1* through playit, so a `connection #...` line means they reached
+   you.
+4. Everyone needs the same game version. A friend on an older build gets a
+   "different game version" message, or (before 0.8.3) was dropped after
+   about 20 seconds on the menus.
 
 **What's shared:** other players appear on your map and minimap with their
 name, level, gear, HP and pet. Monsters are the same for everyone: everyone
@@ -101,7 +102,7 @@ The tests include a real server on a real socket with two clients.
 ## What's in this build
 
 **Login screen**
-- **Server address** box: `localhost` or a host's Tailscale address.
+- **Server address** box: `localhost` or the host's playit.gg address with its port.
 - Register / sign in with e-mail + password (validated, minimum 8 characters).
 - Passwords are never stored: each account keeps a random salt and a
   PBKDF2-HMAC-SHA256 hash (120k iterations). 5 wrong attempts = 30 s lockout.

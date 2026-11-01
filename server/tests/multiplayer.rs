@@ -262,3 +262,15 @@ fn version_mismatch_is_explained() {
     let err = NetClient::connect("127.0.0.1:1", Duration::from_millis(500)).err().unwrap();
     assert!(err.contains("No server answered"), "{}", err);
 }
+
+/// Sitting on the login / character screens sends nothing by hand, so the
+/// connection must keep itself alive past the server's idle limit.
+#[test]
+fn idle_menus_stay_connected() {
+    let r = start("idle", 2);
+    let mut a = connect(&r);
+    std::thread::sleep(galebound_core::net::KEEPALIVE * 3);
+    assert!(a.poll().iter().all(|m| !matches!(m, ServerMsg::Pong { .. })), "keepalive echoes are hidden");
+    assert!(!a.is_closed());
+    join(&mut a, "idle@test.com", "Idler");
+}

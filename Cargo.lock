@@ -3,8 +3,85 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+
+[[package]]
+name = "allocator-api2"
+version = "0.2.21"
+
+[[package]]
+name = "autocfg"
+version = "1.4.0"
+
+[[package]]
+name = "bitflags"
+version = "1.3.2"
+
+[[package]]
+name = "bytemuck"
+version = "1.25.2"
+
+[[package]]
+name = "byteorder"
+version = "1.5.0"
+
+[[package]]
+name = "cfg-if"
+version = "1.0.5"
+
+[[package]]
+name = "color_quant"
+version = "1.1.0"
+
+[[package]]
+name = "core_maths"
+version = "0.1.1"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "crc32fast"
+version = "1.5.3"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
+name = "equivalent"
+version = "1.0.3"
+
+[[package]]
+name = "fdeflate"
+version = "0.3.7"
+dependencies = [
+ "simd-adler32",
+]
+
+[[package]]
+name = "flate2"
+version = "1.1.2"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+]
+
+[[package]]
+name = "foldhash"
+version = "0.1.5"
+
+[[package]]
+name = "fontdue"
+version = "0.9.5"
+dependencies = [
+ "hashbrown",
+ "ttf-parser",
+]
+
+[[package]]
 name = "galebound"
-version = "0.1.0"
+version = "0.8.2"
 dependencies = [
  "galebound-core",
  "macroquad",
@@ -12,15 +89,122 @@ dependencies = [
 
 [[package]]
 name = "galebound-core"
-version = "0.1.0"
+version = "0.8.2"
+
+[[package]]
+name = "galebound-server"
+version = "0.8.2"
+dependencies = [
+ "galebound-core",
+]
+
+[[package]]
+name = "glam"
+version = "0.27.0"
+
+[[package]]
+name = "hashbrown"
+version = "0.15.5"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
+
+[[package]]
+name = "image"
+version = "0.24.9"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "color_quant",
+ "num-traits",
+ "png",
+]
+
+[[package]]
+name = "libc"
+version = "0.2.191"
+
+[[package]]
+name = "libm"
+version = "0.2.11"
 
 [[package]]
 name = "macroquad"
 version = "0.4.14"
 dependencies = [
- "mqmacro",
+ "fontdue",
+ "glam",
+ "image",
+ "macroquad_macro",
+ "miniquad",
+ "quad-rand",
 ]
 
 [[package]]
-name = "mqmacro"
-version = "0.1.0"
+name = "macroquad_macro"
+version = "0.1.8"
+
+[[package]]
+name = "miniquad"
+version = "0.4.8"
+dependencies = [
+ "libc",
+ "ndk-sys",
+ "objc-rs",
+ "winapi",
+]
+
+[[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+dependencies = [
+ "adler2",
+ "simd-adler32",
+]
+
+[[package]]
+name = "ndk-sys"
+version = "0.2.2"
+
+[[package]]
+name = "num-traits"
+version = "0.2.19"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "objc-rs"
+version = "0.2.8"
+
+[[package]]
+name = "png"
+version = "0.17.16"
+dependencies = [
+ "bitflags",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide",
+]
+
+[[package]]
+name = "quad-rand"
+version = "0.2.3"
+
+[[package]]
+name = "simd-adler32"
+version = "0.3.7"
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+dependencies = [
+ "core_maths",
+]
+
+[[package]]
+name = "winapi"
+version = "0.3.9"

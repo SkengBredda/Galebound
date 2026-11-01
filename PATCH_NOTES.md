@@ -7,6 +7,33 @@ so the whole history is in one place.
 
 ---
 
+## 0.8.3 – Staying connected through playit.gg
+*1 November 2026*
+
+**Fixed**
+- Players were disconnected after about 20 seconds on the login, character
+  select or character creation screens. The game only sent its "still here"
+  signal during play, so the server took a quiet player for a dropped one.
+  The connection now keeps itself alive in the background every 4 seconds on
+  every screen, including when the window stalls while being dragged or
+  loading.
+- The server now waits 45 seconds (was 20) before treating a silent player
+  as gone, which gives internet hiccups more slack.
+
+**Changed**
+- Hosting now uses a playit.gg tunnel instead of Tailscale. The server's
+  start-up banner, the login screen's Server address hint, and the README's
+  hosting and troubleshooting sections explain the playit.gg setup.
+
+**Tests**
+- New test: a client sits idle on the menus past the old limit and is still
+  connected (90 tests in total).
+
+**Note:** the host and every friend need 0.8.3. The server is compatible with
+0.8.2 clients, but those clients still drop on the menus.
+
+---
+
 ## 0.8.2 – "localhost" fix
 *1 November 2026*
 
