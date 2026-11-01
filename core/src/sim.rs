@@ -264,10 +264,37 @@ pub struct OtherPlayer {
     pub since: f32,
 }
 
+/// The visible sweep of a melee attack or ability (yours or another player's).
+#[derive(Clone, Debug)]
+pub struct Swing {
+    /// None = the local player; Some(id) = another player.
+    pub owner: Option<u32>,
+    /// Attacker's centre (kept following them).
+    pub pos: V2,
+    pub facing: f32,
+    /// Hitbox relative to the centre, as in `AttackDef`.
+    pub hx: f32,
+    pub hy: f32,
+    pub hw: f32,
+    pub hh: f32,
+    pub both: bool,
+    pub t: f32,
+    pub dur: f32,
+    /// Ability colour, or None for a basic attack.
+    pub fx: Option<skills::SkillFx>,
+    pub heavy: bool,
+    /// Number of waves (multi-hit abilities spin).
+    pub hits: u8,
+    pub kind: AttackKind,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Team {
     Player,
     Enemy,
+    /// Another player's projectile: drawn, but harmless here (their own
+    /// game reports what it hits).
+    Ally,
 }
 
 #[derive(Clone, Debug)]
@@ -410,6 +437,7 @@ pub struct Sim {
     pub player: Player,
     pub enemies: Vec<Enemy>,
     pub projectiles: Vec<Projectile>,
+    pub swings: Vec<Swing>,
     pub particles: Vec<Particle>,
     pub floats: Vec<FloatText>,
     pub toasts: Vec<Toast>,
@@ -542,6 +570,7 @@ impl Sim {
             player,
             enemies: Vec::new(),
             projectiles: Vec::new(),
+            swings: Vec::new(),
             particles: Vec::new(),
             floats: Vec::new(),
             toasts: Vec::new(),
@@ -727,6 +756,7 @@ impl Sim {
         self.update_pet(dt);
         self.update_enemies(gdt);
         self.update_projectiles(gdt);
+        self.update_swings(gdt);
         self.update_spawns(dt);
         self.update_regions(dt);
         self.update_fx(gdt);
@@ -1247,43 +1277,19 @@ impl Sim {
                     }
                 }
             }
-            if let Some(pd) = &def.projectile {
-                let c = p.body.center();
-                let (dmg, kbx, kby, hs, crit_bonus) = match a.skill.map(|s| s.effect) {
-                    Some(SkillEffect::Strike { damage, crit_bonus, .. }) => (damage, def.kbx, def.kby, def.hitstun, crit_bonus),
-                    _ => {
-                        let (d, x, y, h) = classes::projectile_damage(p.class, kind);
-                        (d, x, y, h, 0.0)
-                    }
-                };
-                let mult = p.info.power * p.stats.attack_mult(p.info.magic);
-                let n = pd.count.max(1);
-                for i in 0..n {
-                    let off = if n > 1 { (i as f32 / (n - 1) as f32 - 0.5) * pd.spread } else { 0.0 };
-                    let spawn = V2::new(c.x + p.facing * 22.0, c.y - 4.0);
-                    self.projectiles.push(Projectile {
-                        team: Team::Player,
-                        pos: spawn,
-                        vel: V2::new(pd.vx * p.facing + if pd.style == ProjStyle::Caltrop { off } else { 0.0 } + if pd.style == ProjStyle::Caltrop { (i as f32 - 1.0) * 120.0 * p.facing } else { 0.0 }, pd.vy + if pd.style == ProjStyle::Caltrop { 0.0 } else { off }),
-                        w: pd.w,
-                        h: pd.h,
-                        gravity: if pd.style == ProjStyle::Caltrop { 1260.0 } else { pd.gravity },
-                        life: pd.life,
-                        max_life: pd.life,
-                        pierce: pd.pierce,
-                        damage: dmg * mult,
-                        kb: V2::new(kbx, kby),
-                        hitstun: hs,
-                        style: pd.style,
-                        hit_ids: Vec::new(),
-                        grounded: false,
-                        heavy: kind.is_heavy() || a.skill.is_some(),
-                        crit_bonus,
-                        magic: p.info.magic,
-                        travelled: 0.0,
-                        range: max_range(pd.style, Team::Player),
-                    });
-                }
+            let (center, facing, magic, class) = (p.body.center(), p.facing, p.info.magic, p.class);
+            let skill = a.skill;
+            let mult = p.info.power * p.stats.attack_mult(p.info.magic);
+            self.attack_effects(None, Team::Player, &def, kind, skill, center, facing, mult, magic, class);
+            if self.online {
+                self.outbox.push(ClientMsg::Act(net::ActNet {
+                    id: 0,
+                    kind: kind.index(),
+                    skill: skill.map(|s| s.id.to_string()).unwrap_or_default(),
+                    x: center.x,
+                    y: center.y,
+                    facing: if facing < 0.0 { -1 } else { 1 },
+                }));
             }
             if def.damage > 0.0 && kind.is_heavy() {
                 self.shake = self.shake.max(2.0);
@@ -1338,6 +1344,120 @@ impl Sim {
             p.state = PState::Normal;
             p.state_t = 0.0;
         }
+    }
+
+    /// What an attack puts into the world when its active window starts: the
+    /// visible swing and any projectiles. `team` is Player for your own
+    /// attacks (they hit monsters) and Ally for other players' (just shown).
+    #[allow(clippy::too_many_arguments)]
+    fn attack_effects(&mut self, owner: Option<u32>, team: Team, def: &AttackDef, kind: AttackKind, skill: Option<&'static SkillDef>, c: V2, facing: f32, mult: f32, magic: bool, class: ClassId) {
+        let (fx, hits) = match skill.map(|s| (s.fx, s.effect)) {
+            Some((fx, SkillEffect::Strike { hits, .. })) => (Some(fx), hits),
+            _ => (None, 1),
+        };
+        if def.damage > 0.0 && def.hw > 0.0 {
+            self.swings.push(Swing {
+                owner,
+                pos: c,
+                facing,
+                hx: def.hx,
+                hy: def.hy,
+                hw: def.hw,
+                hh: def.hh,
+                both: def.both_sides,
+                t: 0.0,
+                dur: def.active + 0.14,
+                fx,
+                heavy: kind.is_heavy() || skill.is_some(),
+                hits,
+                kind,
+            });
+        }
+        let Some(pd) = def.projectile else { return };
+        let (dmg, kbx, kby, hs, crit_bonus) = match skill.map(|s| s.effect) {
+            Some(SkillEffect::Strike { damage, crit_bonus, .. }) => (damage, def.kbx, def.kby, def.hitstun, crit_bonus),
+            _ => {
+                let (d, x, y, h) = classes::projectile_damage(class, kind);
+                (d, x, y, h, 0.0)
+            }
+        };
+        let n = pd.count.max(1);
+        for i in 0..n {
+            let off = if n > 1 { (i as f32 / (n - 1) as f32 - 0.5) * pd.spread } else { 0.0 };
+            let caltrop = pd.style == ProjStyle::Caltrop;
+            let spawn = V2::new(c.x + facing * 22.0, c.y - 4.0);
+            self.projectiles.push(Projectile {
+                team,
+                pos: spawn,
+                vel: V2::new(
+                    pd.vx * facing + if caltrop { off + (i as f32 - 1.0) * 120.0 * facing } else { 0.0 },
+                    pd.vy + if caltrop { 0.0 } else { off },
+                ),
+                w: pd.w,
+                h: pd.h,
+                gravity: if caltrop { 1260.0 } else { pd.gravity },
+                life: pd.life,
+                max_life: pd.life,
+                pierce: pd.pierce,
+                damage: dmg * mult,
+                kb: V2::new(kbx, kby),
+                hitstun: hs,
+                style: pd.style,
+                hit_ids: Vec::new(),
+                grounded: false,
+                heavy: kind.is_heavy() || skill.is_some(),
+                crit_bonus,
+                magic,
+                travelled: 0.0,
+                range: max_range(pd.style, team),
+            });
+        }
+    }
+
+    /// Another player attacked or used an ability: show it.
+    fn other_acted(&mut self, a: net::ActNet) {
+        let Some(o) = self.others.iter().find(|o| o.id == a.id) else { return };
+        let class = ClassId::from_key(&o.info.class).unwrap_or(ClassId::Novice);
+        let c = V2::new(a.x, a.y);
+        let facing = if a.facing < 0 { -1.0 } else { 1.0 };
+        let skill = if a.skill.is_empty() { None } else { skills::skill(&a.skill) };
+        if a.kind == net::ACT_SKILL {
+            if let Some(s) = skill {
+                let fx = if matches!(s.effect, SkillEffect::Heal { .. }) { FxKind::Heal } else { FxKind::LevelUp };
+                self.burst(c, fx, 18, 200.0);
+                self.float(V2::new(c.x, c.y - 64.0), s.name.to_string(), FloatKind::Exp);
+            }
+            return;
+        }
+        let Some(kind) = AttackKind::from_index(a.kind) else { return };
+        let def = match skill {
+            Some(s) => match skills::skill_attack(class, s) {
+                Some(d) => d,
+                None => return,
+            },
+            None => classes::attack_def(class, kind),
+        };
+        if let Some(s) = skill {
+            self.float(V2::new(c.x, c.y - 64.0), s.name.to_string(), FloatKind::Exp);
+        }
+        let magic = class.info().magic;
+        self.attack_effects(Some(a.id), Team::Ally, &def, kind, skill, c, facing, 0.0, magic, class);
+    }
+
+    fn update_swings(&mut self, dt: f32) {
+        let me = self.player.body.center();
+        for s in &mut self.swings {
+            s.t += dt;
+            match s.owner {
+                None => s.pos = me,
+                Some(id) => {
+                    if let Some(o) = self.others.iter().find(|o| o.id == id) {
+                        s.pos = V2::new(o.pos.x, o.pos.y - PLAYER_H * 0.5);
+                    }
+                }
+            }
+        }
+        self.swings.retain(|s| s.t < s.dur);
     }
 
     #[allow(dead_code)]
@@ -1696,6 +1816,10 @@ impl Sim {
                     self.float(V2::new(c.x, c.y - 50.0), format!("+{}", h as i32), FloatKind::Heal);
                 }
             }
+        }
+        if self.online && !matches!(s.effect, SkillEffect::Strike { .. }) {
+            // attacks are announced when they swing; buffs and heals now
+            self.outbox.push(ClientMsg::Act(net::ActNet { id: 0, kind: net::ACT_SKILL, skill: s.id.to_string(), x: c.x, y: c.y, facing: 1 }));
         }
         let p = &mut self.player;
         p.mp -= s.mp;
@@ -2206,6 +2330,7 @@ impl Sim {
     pub fn net_apply(&mut self, m: ServerMsg) {
         match m {
             ServerMsg::Enemies(list) => self.net_enemies(list),
+            ServerMsg::Act(a) => self.other_acted(a),
             ServerMsg::Shot(s) => {
                 let style = crate::classes::ProjStyle::from_u32(s.style);
                 self.projectiles.push(Projectile {
@@ -2967,7 +3092,7 @@ impl Sim {
             let in_solid = solids.iter().any(|s| s.overlaps(&r));
             if in_solid {
                 match p.style {
-                    ProjStyle::Caltrop if p.team == Team::Player => {
+                    ProjStyle::Caltrop if p.team != Team::Enemy => {
                         // Settle on the ground and linger as a trap.
                         if p.vel.y > 0.0 {
                             p.pos.y -= p.vel.y * dt;
@@ -3002,6 +3127,7 @@ impl Sim {
                         }
                     }
                 }
+                Team::Ally => {}
                 Team::Enemy => {
                     if !player_inv && hurt.is_none() && r.overlaps(&pr) {
                         hurt = Some((p.damage, p.pos.x - p.vel.x.signum() * 10.0, p.kb, p.magic));

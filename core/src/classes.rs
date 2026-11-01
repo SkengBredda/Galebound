@@ -287,7 +287,27 @@ pub enum AttackKind {
     AirHeavyDown,
 }
 
+pub const ALL_ATTACK_KINDS: [AttackKind; 11] = [
+    AttackKind::LightNeutral,
+    AttackKind::LightSide,
+    AttackKind::LightDown,
+    AttackKind::AirNeutral,
+    AttackKind::AirSide,
+    AttackKind::AirDown,
+    AttackKind::HeavyNeutral,
+    AttackKind::HeavySide,
+    AttackKind::HeavyDown,
+    AttackKind::AirHeavyNeutral,
+    AttackKind::AirHeavyDown,
+];
+
 impl AttackKind {
+    pub fn index(self) -> u32 {
+        ALL_ATTACK_KINDS.iter().position(|k| *k == self).unwrap_or(0) as u32
+    }
+    pub fn from_index(i: u32) -> Option<AttackKind> {
+        ALL_ATTACK_KINDS.get(i as usize).copied()
+    }
     pub fn is_heavy(self) -> bool {
         matches!(
             self,

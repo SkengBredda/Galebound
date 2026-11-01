@@ -403,6 +403,7 @@ impl PlayScreen {
         render::enemies(&self.sim, &cam);
         render::player(&self.sim, &cam, &self.look);
         render::tufts(&self.sim, &cam);
+        render::swings(&self.sim, &cam);
         render::projectiles(&self.sim, &cam);
         render::particles(&self.sim, &cam);
         render::decos(&self.sim, &cam, 2, time);

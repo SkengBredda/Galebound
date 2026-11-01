@@ -3,7 +3,7 @@
 
 use crate::art;
 use crate::charsprite::{self, Anim};
-use crate::gfx::{self, alpha, rgb, rgba, shade};
+use crate::gfx::{self, alpha, mix, rgb, rgba, shade};
 use crate::sprites;
 use galebound_core::appearance::Appearance;
 use galebound_core::classes::ProjStyle;
@@ -787,6 +787,80 @@ pub fn enemies(sim: &Sim, cam: &Camera) {
 }
 
 // ---------------------------------------------------------------- projectiles & effects
+
+/// The sweep of melee attacks and abilities (yours and other players').
+pub fn swings(sim: &Sim, cam: &Camera) {
+    use galebound_core::classes::AttackKind as K;
+    gfx::set_cam(cam.x, cam.y);
+    for s in &sim.swings {
+        let k = (s.t / s.dur).clamp(0.0, 1.0);
+        let fade = (1.0 - k).powf(0.7);
+        let col = match s.fx {
+            Some(fx) => px_color(crate::icons::fx_color(fx)),
+            None if s.heavy => rgb(255, 232, 170),
+            None => rgb(240, 246, 255),
+        };
+        let core = mix(col, rgb(255, 255, 255), 0.55);
+        let cx = s.pos.x + if s.both { 0.0 } else { s.hx * s.facing };
+        let cy = s.pos.y + s.hy;
+        let (rx, ry) = (s.hw * 0.5, s.hh * 0.5);
+        if s.both && s.hits > 1 {
+            // a whirlwind: stacked spinning rings that rise and fade
+            let spin = s.t * 22.0;
+            for i in 0..5 {
+                let f = i as f32 / 4.0;
+                let y = cy + ry * 0.9 - f * ry * 1.9;
+                let r = rx * (0.45 + f * 0.6);
+                let a = fade * (0.55 - f * 0.25);
+                for j in 0..10 {
+                    let t0 = spin + j as f32 * 0.6 + f * 2.0;
+                    let t1 = t0 + 0.42;
+                    let (x0, y0) = (cx + t0.cos() * r, y + t0.sin() * r * 0.22);
+                    let (x1, y1) = (cx + t1.cos() * r, y + t1.sin() * r * 0.22);
+                    let front = t0.sin() > 0.0;
+                    gfx::line(x0, y0, x1, y1, u(if front { 2.0 } else { 1.0 }), alpha(if front { core } else { col }, a * if front { 1.0 } else { 0.5 }));
+                }
+            }
+            gfx::ellipse(cx, cy + ry * 0.95, rx * 0.8, u(4.0), 0.0, alpha(col, 0.25 * fade));
+            continue;
+        }
+        if s.both {
+            // a burst all around: an expanding ring
+            let r = 0.55 + k * 0.6;
+            gfx::ellipse(cx, cy, rx * r, ry * r, 0.0, alpha(col, 0.18 * fade));
+            for j in 0..28 {
+                let t0 = j as f32 / 28.0 * std::f32::consts::TAU;
+                let t1 = t0 + 0.18;
+                gfx::line(cx + t0.cos() * rx * r, cy + t0.sin() * ry * r, cx + t1.cos() * rx * r, cy + t1.sin() * ry * r, u(2.0), alpha(core, fade));
+            }
+            continue;
+        }
+        // a crescent sweeping through the hitbox, in the attack's direction
+        let (a0, a1) = match s.kind {
+            K::LightDown | K::HeavyDown | K::AirDown | K::AirHeavyDown => (-0.4, 1.9),
+            K::AirNeutral | K::AirHeavyNeutral => (-2.4, 0.4),
+            K::LightNeutral | K::HeavyNeutral => (-1.7, 0.9),
+            _ => (-1.25, 1.25),
+        };
+        let reveal = (k * 2.2).min(1.0);
+        let n = 14;
+        let (ox, oy) = (cx - s.hx * s.facing * 0.35, cy);
+        for j in 0..n {
+            let f0 = j as f32 / n as f32;
+            if f0 > reveal {
+                break;
+            }
+            let f1 = (j + 1) as f32 / n as f32;
+            let (t0, t1) = (a0 + (a1 - a0) * f0, a0 + (a1 - a0) * f1);
+            let thick = (f0 * std::f32::consts::PI).sin() * if s.heavy { 6.0 } else { 4.0 } + 1.0;
+            for (rr, w, c, a) in [(1.0, thick + 2.0, col, 0.45), (0.94, thick, core, 0.9)] {
+                let p0 = (ox + t0.cos() * rx * rr * s.facing, oy + t0.sin() * ry * rr);
+                let p1 = (ox + t1.cos() * rx * rr * s.facing, oy + t1.sin() * ry * rr);
+                gfx::line(p0.0, p0.1, p1.0, p1.1, u(w * 0.5), alpha(c, a * fade));
+            }
+        }
+    }
+}
 
 pub fn projectiles(sim: &Sim, cam: &Camera) {
     gfx::set_cam(cam.x, cam.y);

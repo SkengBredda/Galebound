@@ -435,6 +435,15 @@ impl Server {
             ClientMsg::PickUp { drop, pet } => self.pick_up(i, drop, pet),
             ClientMsg::DropItem(d) => self.player_drop(i, d),
             ClientMsg::Boss { kind, map } => self.boss(i, kind, map),
+            ClientMsg::Act(mut a) => {
+                let c = &self.clients[i];
+                if !c.in_world() || c.pos.dead || c.map.is_empty() {
+                    return;
+                }
+                a.id = c.id;
+                let map = c.map.clone();
+                self.broadcast_map(&map, &ServerMsg::Act(a), Some(c.id));
+            }
             ClientMsg::Revive { target } => {
                 let me = &self.clients[i];
                 if !me.in_world() || me.pos.dead {

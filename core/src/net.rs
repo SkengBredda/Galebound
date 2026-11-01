@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 /// Bumped whenever the messages change; client and server must match.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 pub const DEFAULT_PORT: u16 = 7777;
 /// Default player limit for a server.
 pub const MAX_PLAYERS: usize = 16;
@@ -220,6 +220,32 @@ pub struct ShotNet {
     pub grounded: bool,
 }
 
+/// A player started an attack or used an ability, so everyone nearby can see
+/// it: the swing, any projectiles (harmless copies) and ability effects.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ActNet {
+    /// Player id (filled in by the server).
+    pub id: u32,
+    /// `AttackKind::index()`, or [`ACT_SKILL`] for a buff / heal ability.
+    pub kind: u32,
+    /// Ability id, "" for a basic attack.
+    pub skill: String,
+    /// Where the attacker's centre was, and which way they faced.
+    pub x: f32,
+    pub y: f32,
+    pub facing: i32,
+}
+
+/// `ActNet::kind` for an ability that isn't an attack (buffs, heals).
+pub const ACT_SKILL: u32 = 255;
+
+fn put_act(w: W, a: &ActNet) -> W {
+    w.n(a.id).n(a.kind).s(&a.skill).f(a.x).f(a.y).n(a.facing)
+}
+fn get_act(r: &mut R) -> Option<ActNet> {
+    Some(ActNet { id: r.u()?, kind: r.u()?, skill: r.s()?, x: r.f()?, y: r.f()?, facing: r.i()? })
+}
+
 // ------------------------------------------------------------------ messages
 
 #[derive(Clone, Debug, PartialEq)]
@@ -250,6 +276,7 @@ pub enum ClientMsg {
     Revive { target: u32 },
     Chat { text: String },
     Ping { t: f64 },
+    Act(ActNet),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -280,6 +307,7 @@ pub enum ServerMsg {
     /// Server notices (someone joined, left...).
     System { text: String },
     Pong { t: f64 },
+    Act(ActNet),
 }
 
 fn put_info(w: W, p: &PlayerInfo) -> W {
@@ -351,6 +379,7 @@ impl ClientMsg {
             Revive { target } => W::new("revive").n(target),
             Chat { text } => W::new("chat").s(text),
             Ping { t } => W::new("ping").n(t),
+            Act(a) => put_act(W::new("act"), a),
         }
         .0
     }
@@ -379,6 +408,7 @@ impl ClientMsg {
             "revive" => Revive { target: r.u()? },
             "chat" => Chat { text: r.s()? },
             "ping" => Ping { t: r.d()? },
+            "act" => Act(get_act(&mut r)?),
             _ => return None,
         })
     }
@@ -432,6 +462,7 @@ impl ServerMsg {
             Chat { from, text } => W::new("chat").s(from).s(text),
             System { text } => W::new("system").s(text),
             Pong { t } => W::new("pong").n(t),
+            Act(a) => put_act(W::new("act"), a),
         }
         .0
     }
@@ -498,6 +529,7 @@ impl ServerMsg {
             "chat" => Chat { from: r.s()?, text: r.s()? },
             "system" => System { text: r.s()? },
             "pong" => Pong { t: r.d()? },
+            "act" => Act(get_act(&mut r)?),
             _ => return None,
         })
     }
@@ -727,6 +759,7 @@ mod tests {
             ClientMsg::Revive { target: 7 },
             ClientMsg::Chat { text: "hi\tthere".into() },
             ClientMsg::Ping { t: 12.5 },
+            ClientMsg::Act(ActNet { id: 0, kind: 4, skill: "cyclone".into(), x: 10.5, y: -3.0, facing: -1 }),
         ];
         for m in cms {
             assert_eq!(ClientMsg::decode(&m.encode()), Some(m.clone()), "{:?}", m);
@@ -754,6 +787,7 @@ mod tests {
             ServerMsg::Chat { from: "A".into(), text: "b".into() },
             ServerMsg::System { text: "A joined".into() },
             ServerMsg::Pong { t: 1.25 },
+            ServerMsg::Act(ActNet { id: 9, kind: ACT_SKILL, skill: "brace".into(), x: 1.0, y: 2.0, facing: 1 }),
         ];
         for m in sms {
             assert_eq!(ServerMsg::decode(&m.encode()), Some(m.clone()), "{:?}", m);
