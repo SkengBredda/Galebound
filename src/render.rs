@@ -817,20 +817,24 @@ pub fn swings(sim: &Sim, cam: &Camera) {
         let cy = s.pos.y + s.hy;
         let (rx, ry) = (s.hw * 0.5, s.hh * 0.5);
         if s.both && s.hits > 1 {
-            // a whirlwind: stacked spinning rings that rise and fade
+            // a whirlwind: a soft funnel, then stacked spinning rings
+            for i in 0..6 {
+                let f = i as f32 / 5.0;
+                gfx::ellipse(cx, cy + ry * 0.9 - f * ry * 1.9, rx * (0.45 + f * 0.6), ry * 0.22, 0.0, alpha(col, 0.13 * fade));
+            }
             let spin = s.t * 22.0;
             for i in 0..5 {
                 let f = i as f32 / 4.0;
                 let y = cy + ry * 0.9 - f * ry * 1.9;
                 let r = rx * (0.45 + f * 0.6);
-                let a = fade * (0.55 - f * 0.25);
+                let a = fade * (0.95 - f * 0.3);
                 for j in 0..10 {
                     let t0 = spin + j as f32 * 0.6 + f * 2.0;
                     let t1 = t0 + 0.42;
                     let (x0, y0) = (cx + t0.cos() * r, y + t0.sin() * r * 0.22);
                     let (x1, y1) = (cx + t1.cos() * r, y + t1.sin() * r * 0.22);
                     let front = t0.sin() > 0.0;
-                    gfx::line(x0, y0, x1, y1, u(if front { 2.0 } else { 1.0 }), alpha(if front { core } else { col }, a * if front { 1.0 } else { 0.5 }));
+                    gfx::line(x0, y0, x1, y1, u(if front { 3.0 } else { 1.5 }), alpha(if front { core } else { col }, a * if front { 1.0 } else { 0.55 }));
                 }
             }
             gfx::ellipse(cx, cy + ry * 0.95, rx * 0.8, u(4.0), 0.0, alpha(col, 0.25 * fade));

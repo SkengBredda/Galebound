@@ -169,6 +169,27 @@ impl PlayScreen {
     }
 
     #[allow(dead_code)]
+    pub fn social_mut(&mut self) -> &mut SocialUi {
+        &mut self.social
+    }
+
+    #[allow(dead_code)]
+    pub fn menu_debug(&mut self, name: &str, x: f32, y: f32) {
+        self.social.menu_for(&self.sim, name, x, y);
+    }
+    #[allow(dead_code)]
+    pub fn close_social(&mut self) {
+        self.social.close_one(&mut self.sim);
+    }
+
+    #[allow(dead_code)]
+    pub fn chat_debug(&mut self, open: bool, tab: u32, text: &str) {
+        self.chat_open = open;
+        self.chat_tab = tab;
+        self.chat_text = text.to_string();
+    }
+
+    #[allow(dead_code)]
     pub fn windows_mut(&mut self) -> &mut Windows {
         &mut self.windows
     }
@@ -357,7 +378,7 @@ impl PlayScreen {
     /// Recent chat (bottom-left) with channel tabs, and the text box while typing.
     fn draw_chat(&mut self) {
         let (x, w) = (14.0, 520.0);
-        let bottom = if self.chat_open { gfx::VH - 120.0 } else { gfx::VH - 262.0 };
+        let bottom = if self.chat_open { gfx::VH - 120.0 } else { gfx::VH - 300.0 };
         // remember who whispered us last, for /r
         if let Some(l) = self.sim.chat.iter().rev().find(|l| l.channel == net::CH_WHISPER && !l.from.eq_ignore_ascii_case(&self.sim.save.name)) {
             if l.age < 0.05 {

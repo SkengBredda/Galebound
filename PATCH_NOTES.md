@@ -7,6 +7,107 @@ so the whole history is in one place.
 
 ---
 
+## 0.9.0 – Friends, parties & guilds
+*1 November 2026*
+
+**Added: social systems** (all kept on the server)
+- **Friends list** (`U`): send requests by name (the other player gets a
+  popup), accept or decline, see who's online, their level, class and map,
+  and get a notice when a friend logs in. Up to 50 friends.
+- **Block / ignore list**: blocked players' chat, whispers and invitations
+  never reach you, and blocking ends any friendship.
+- **Parties** of up to 6: invite, accept, leave, promote a new leader,
+  remove members, party chat. The party list shows each member's level,
+  class, map and HP. Members on the same map share EXP from every kill.
+- **Guilds** (`G`): found one for 5,000 gold; invite players and friends;
+  Leader / Officer / Member ranks (promote, demote, hand over leadership,
+  remove members, disband); guild chat; an editable guild notice.
+  - **Daily guild quest**: a rotating goal the whole guild works on together
+    (defeat 120 monsters, 60 on a particular map, 2 quest bosses...).
+    Everyone can claim a reward when it's done.
+  - **Daily guild chest**: gold and potions for every member, once a day.
+  - **Guild levels and buffs**: guild EXP from members' kills, chests and
+    quests unlocks five guild-wide buffs (more EXP, attack, Max HP and
+    defence, move speed and crit).
+  - Guild names show under members' names, WindSlayer style.
+- **Right-click a player** for a menu: Whisper, View profile, Invite to
+  party, Trade, Invite to guild, Add / Remove friend, Block (plus party and
+  guild management for leaders and officers).
+- **Player profiles**: level, class, EXP to next level (%), guild,
+  achievement score, time played and all 11 equipped items with their stats.
+- **Trading** between players: add items and gold to the trade window,
+  lock in, then both confirm. Changing an offer unlocks both sides; bound
+  items can't be traded; the game checks your bag has room first.
+- **Chat tabs**: All, Party, Guild, Whisper and System. System shows EXP
+  gained, items and gold looted, quests, achievements and server notices.
+  Commands: `/w Name message`, `/r` (reply), `/p`, `/g`, `/a`.
+- **Achievements** (`H`): 33 of them, each worth score points and Gale Marks.
+- **Exclusive cosmetics**, bought only with Gale Marks: Flower Crown, Cat
+  Ears, Starry Halo, Crown of Gales, Angel Wings, Bat Wings and Star Mantle.
+  They show over your gear.
+- **Daily attendance reward**: a 7-day cycle of gold, potions, scrolls and
+  Gale Marks, using the server's date (changing your PC clock won't help).
+  A banner reminds you when today's reward is waiting.
+
+**Added: equipment**
+- 11 equipment slots: Weapon, Helmet, Torso, Legs, Boots, Necklace, 2 Rings,
+  2 Earrings and a Back item.
+- 21 new pieces of gear, including helmets (cap, sage hat, iron sallet, hood,
+  circlet...), leg armour, rings, earrings, necklaces and back items
+  (cloak, pack, cape, feather wings). Helmets, legs and back items show on
+  your character.
+- Vendors, monster drops and quest rewards now cover the new slots:
+  Quartermaster Hesper sells a Lv 8 piece for every slot, and the tutorial
+  quests hand out a novice bandana, trousers, earrings and a ring.
+- Old characters keep their gear: armour moves to Torso, and old accessories
+  move to the Necklace, Ring or Earring slot that fits them.
+
+**Changed: characters**
+- Character sprites restyled for more charm, closer to the reference sheets:
+  heads and hair about a third bigger, big anime eyes with highlights and
+  new expressions, chunkier arms, legs and torso, bigger fists and shoes, and
+  a ready "guard" idle stance that breathes.
+
+**Changed: gameplay**
+- The whole game runs about 12% slower (players, monsters, projectiles,
+  attacks). Ability cooldowns and buffs still count real seconds.
+- Jumps are a little lower but hang in the air about 20% longer, for more
+  air-combo time. Upward attack launches keep their height.
+- Dodge (A/D + L) now keeps you invincible for its whole length.
+- Projectiles have maximum ranges (about a screen for long bows and bolts,
+  less for thrown knives and orbs; monster shots reach about two-thirds of a
+  screen) instead of flying until they hit a wall.
+- At most 4 flying monsters per map.
+- Flying monsters' shots still hurt but no longer knock you back or stagger you.
+- Bosses: talk to a boss's quest NPC to summon it into its arena for 100 gold
+  (any time after taking the quest, so you can fight it again).
+
+**Fixed**
+- The Thunderhorn didn't appear when you took Kael's quest on the summit.
+  Now any boss quest calls its boss straight away. The request also names
+  the map, so the server never looks for the boss on the map you just left.
+- Other players' attacks, abilities and projectiles were invisible. You
+  now see their swings, arrows, bolts, knives, orbs and stars, and buff and
+  heal effects.
+- Melee abilities had no visual effect. Every melee swing and ability now
+  draws a sweep in its ability colour, multi-hit spins draw a whirlwind, and
+  all-round bursts draw a ring.
+- Some abilities did no damage: melee abilities used by Windrunners and
+  Aethermancers (e.g. Power Strike) borrowed a ranged attack's empty hitbox.
+  The Aethermancer's Lv 12 Cyclone now shows a whirlwind.
+
+**Tests**
+- 112 in total, including a new end-to-end server test (three players:
+  friends, whispers, blocking, party EXP sharing, guild founding, invites
+  and chest, trading, profiles) and tests for guild quests, attendance,
+  achievements, cosmetics, trades, the guild buff, projectile ranges, flyer
+  caps, dodge invincibility, boss summoning and the new save format.
+
+**Note:** the protocol changed, so the host and every friend need 0.9.0.
+Existing characters and accounts carry over.
+
+---
+
 ## 0.8.3 – Staying connected through playit.gg
 *1 November 2026*
 

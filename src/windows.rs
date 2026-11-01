@@ -321,7 +321,7 @@ impl Windows {
                 Some(d) => gfx::tex(&item_tex(d), sx + 5.0, sy + 5.0, 1.0, false, WHITE),
                 None => gfx::text_centered(&slot.name()[..1], sx + SLOT * 0.5, sy + 14.0, 16.0, rgb(190, 170, 140)),
             }
-            gfx::text_centered(slot.name(), sx + SLOT * 0.5, sy + SLOT + 3.0, 11.0, widgets::ink_soft());
+            gfx::text_centered(slot.short(), sx + SLOT * 0.5, sy + SLOT + 3.0, 11.0, widgets::ink_soft());
             self.hit((sx, sy, SLOT, SLOT), Target::Equip(slot));
         }
         // bag grid

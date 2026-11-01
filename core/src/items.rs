@@ -118,6 +118,20 @@ impl EquipSlot {
             s => s.kind().name(),
         }
     }
+    /// A short label for tight slot grids.
+    pub fn short(self) -> &'static str {
+        match self {
+            EquipSlot::Weapon => "Weapon",
+            EquipSlot::Helmet => "Head",
+            EquipSlot::Torso => "Torso",
+            EquipSlot::Legs => "Legs",
+            EquipSlot::Boots => "Boots",
+            EquipSlot::Necklace => "Neck",
+            EquipSlot::Ring1 | EquipSlot::Ring2 => "Ring",
+            EquipSlot::Earring1 | EquipSlot::Earring2 => "Ear",
+            EquipSlot::Back => "Back",
+        }
+    }
     pub fn key(self) -> &'static str {
         match self {
             EquipSlot::Weapon => "weapon",

@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.8.3 – multiplayer.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.9.0 – friends, parties & guilds.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
@@ -165,8 +165,15 @@ walk to the door and press Up to go inside, talk to the shopkeeper to trade:
 
 - **General store** - HP/Mana potions, elixirs, tonics (temporary buffs).
 - **Weapon shop** - the town class's weapons (Lv 14 and 18 upgrades).
-- **Armour shop** - armour, boots and accessories (armour and boots change
+- **Armour shop** - helmets, torso armour, legs, boots, necklaces, rings,
+  earrings and back items (helmets, torso, legs, boots and back items change
   how your character looks).
+
+**Equipment (11 slots).** Weapon, Helmet, Torso, Legs, Boots, Necklace, two
+Rings, two Earrings and a Back item (cloaks, capes, packs, wings). A ring or
+earring goes into whichever of its two slots is free; drag it onto a slot to
+choose. Quartermaster Hesper sells a Lv 8 piece for every slot, the tutorial
+quests hand out Lv 1 novice pieces, and monsters drop the rest.
 
 **Roads and hunting grounds.** Each class town is reached by its own road
 from Wayfarer's Crossroads (Lv 10-13), and every town has a hunting ground
@@ -318,6 +325,43 @@ windows are tuned for a calmer MMO feel. All the knobs live in
 `core/src/classes.rs` (`ATTACK_TIME`). F1 toggles the
 on-screen key hints. Up enters portals. Down + Jump drops through wooden
 platforms; holding Down while falling fast-falls.
+
+**Friends, party and guild.** All of this lives on the server.
+- **Friends & Party (`U`)**: add friends by name (they get a request popup),
+  see who's online and where, and get a notice when a friend logs in. Block
+  someone and you won't see their chat, whispers or invitations.
+- **Right-click a player** for their menu: Whisper, View profile, Invite to
+  party, Trade, Invite to guild, Add / Remove friend, Block. Party leaders
+  can also promote and remove party members; guild leaders and officers can
+  promote, demote and remove guild members.
+- **Parties** of up to 6. Members on the same map share the EXP from every
+  monster any of them defeats (at least 20% each). The party list shows
+  everyone's level, map and HP.
+- **Guilds (`G`)**: found one for 5,000 gold. Leader, officers and members;
+  up to 30. Every day there's a **guild quest** the whole guild works on
+  together (e.g. "defeat 120 monsters" or "60 monsters on Windcrag Cliffs");
+  when it's done, everyone can claim a reward. A **daily chest** gives every
+  member gold and potions once a day. Guild EXP comes from members' kills,
+  chests and quests, and each guild level unlocks a **guild-wide buff**
+  (more EXP, attack, HP and defence, speed and crit). Guild names show
+  under members' names.
+- **Profiles**: level, class, EXP %, guild, achievement score, time played
+  and every equipped item (hover for stats).
+- **Trading**: both players add items (and gold) to the trade window, lock
+  in, then confirm. Any change unlocks both sides. Bound items can't be traded.
+
+**Chat tabs**: All, Party, Guild, Whisper and System (your EXP, loot,
+achievements and server notices). Type `/w Name message` to whisper, `/r` to
+reply, `/p` for party, `/g` for guild, `/a` for everyone; plain text goes to
+the tab you're on.
+
+**Achievements, cosmetics and daily rewards (`H`)**. 33 achievements (monster
+hunting, bosses, levels, quests, friends, parties, guilds, trades, pets, gold,
+playing time...). Each earns score points and the same number of **Gale
+Marks**, spent in the **Cosmetics** tab on exclusive cosmetics (Flower Crown,
+Cat Ears, Starry Halo, Crown of Gales, Angel Wings, Bat Wings, Star Mantle)
+that show over your gear. **Attendance**: log in each day to collect a
+reward on a 7-day cycle (gold, potions, scrolls and, on day 7, Gale Marks).
 
 ## Project layout
 

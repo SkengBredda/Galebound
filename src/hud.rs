@@ -85,9 +85,13 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
         let c = crate::icons::fx_color(b.fx);
         let col = rgb(c[0], c[1], c[2]);
         gfx::rrect(bx, 146.0, 30.0, 30.0, 6.0, rgba(20, 24, 40, 200));
-        gfx::rrect(bx + 3.0, 149.0, 24.0, 24.0 * (b.left / b.total).clamp(0.0, 1.0), 4.0, shade(col, 0.8));
+        let frac = if b.total.is_finite() { (b.left / b.total).clamp(0.0, 1.0) } else { 1.0 };
+        gfx::rrect(bx + 3.0, 149.0, 24.0, 24.0 * frac, 4.0, shade(col, 0.8));
         gfx::text_centered_outlined(&b.name[..1], bx + 15.0, 152.0, 16.0, rgb(255, 255, 255));
-        gfx::text_centered_outlined(&format!("{}", b.left.ceil() as i32), bx + 15.0, 178.0, 12.0, rgb(230, 230, 240));
+        // lasting buffs (the guild's) have no countdown
+        if b.left.is_finite() {
+            gfx::text_centered_outlined(&format!("{}", b.left.ceil() as i32), bx + 15.0, 178.0, 12.0, rgb(230, 230, 240));
+        }
         bx += 36.0;
     }
 

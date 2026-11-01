@@ -178,6 +178,21 @@ fn time_played(secs: u64) -> String {
 }
 
 impl SocialUi {
+    /// Screenshot / debug helpers.
+    #[allow(dead_code)]
+    pub fn show(&mut self, social_tab: usize, ach_tab: usize) {
+        self.social_tab = social_tab;
+        self.ach_tab = ach_tab;
+    }
+    #[allow(dead_code)]
+    pub fn menu_for(&mut self, sim: &Sim, name: &str, x: f32, y: f32) {
+        self.open_menu(sim, name, x, y);
+    }
+    #[allow(dead_code)]
+    pub fn hide_attendance(&mut self) {
+        self.attendance_prompt = false;
+    }
+
     /// Is a text box focused (so keys type instead of playing)?
     pub fn typing(&self) -> bool {
         self.focus.is_some()
@@ -580,17 +595,17 @@ impl SocialUi {
             nx += 22.0;
         }
         gfx::text(&m.name, nx, y + 1.0, 16.0, if m.online() { widgets::ink() } else { widgets::ink_soft() });
+        let right = |t: &str, yy: f32, size: f32, c: Color| gfx::text(t, x + w - 12.0 - gfx::text_w(t, size), yy, size, c);
         if let Some(r) = rank {
-            gfx::text(social::rank_name(r), x + w - 90.0, y + 2.0, 12.0, if r >= RANK_OFFICER { widgets::accent() } else { widgets::ink_soft() });
+            right(social::rank_name(r), y + 2.0, 12.0, if r >= RANK_OFFICER { widgets::accent() } else { widgets::ink_soft() });
+        } else if m.online() {
+            progress_bar(x + w - 122.0, y + 5.0, 110.0, 8.0, m.hp, rgb(226, 72, 80));
         }
         gfx::text(&format!("Lv.{} {}", m.level, class_name(&m.class)), nx, y + 20.0, 12.0, widgets::ink_soft());
         if m.online() {
-            gfx::text(&map_name(&m.map), x + 200.0, y + 20.0, 12.0, widgets::accent());
-            if leader.is_some() {
-                progress_bar(x + 200.0, y + 5.0, 120.0, 8.0, m.hp, rgb(226, 72, 80));
-            }
+            right(&map_name(&m.map), y + 20.0, 12.0, widgets::accent());
         } else {
-            gfx::text("Offline", x + 200.0, y + 20.0, 12.0, widgets::ink_soft());
+            right("Offline", y + 20.0, 12.0, widgets::ink_soft());
         }
         if hover && ui.clicked && !m.name.eq_ignore_ascii_case(&sim.save.name) {
             let (mx, my) = gfx::mouse();
@@ -601,7 +616,7 @@ impl SocialUi {
     // ------------------------------------------------------------------ guild
 
     fn guild_window(&mut self, sim: &mut Sim, ui: &Ui) {
-        let (x, y, w, h) = (gfx::VW * 0.5 - 250.0, 60.0, 500.0, 590.0);
+        let (x, y, w, h) = (gfx::VW * 0.5 - 300.0, 56.0, 600.0, 600.0);
         widgets::panel(x, y, w, h);
         if widgets::button(ui, x + w - 52.0, y + 12.0, 34.0, 30.0, "X", ButtonStyle::Secondary, true) {
             self.guild = false;
@@ -651,8 +666,8 @@ impl SocialUi {
         let (lo, hi) = (social::GUILD_LEVELS[(level - 1) as usize], social::guild_next(level));
         match hi {
             Some(hi) => {
-                progress_bar(x + 140.0, yy + 4.0, 200.0, 12.0, (g.exp - lo) as f32 / (hi - lo).max(1) as f32, rgb(110, 190, 110));
-                gfx::text(&format!("{} / {} guild EXP", g.exp, hi), x + 350.0, yy + 2.0, 12.0, widgets::ink_soft());
+                progress_bar(x + 140.0, yy + 4.0, 220.0, 12.0, (g.exp - lo) as f32 / (hi - lo).max(1) as f32, rgb(110, 190, 110));
+                gfx::text(&format!("{} / {} guild EXP", g.exp, hi), x + 372.0, yy + 2.0, 12.0, widgets::ink_soft());
             }
             None => gfx::text("Max level!", x + 140.0, yy + 2.0, 14.0, widgets::accent()),
         }
@@ -660,7 +675,9 @@ impl SocialUi {
         // buffs
         for b in GUILD_BUFFS {
             let on = level >= b.level;
-            gfx::text(&format!("{} {}: {}", if on { "*" } else { "-" }, b.name, b.desc), x + 30.0, yy, 12.0, if on { rgb(40, 130, 60) } else { rgba(90, 80, 70, 140) });
+            let c = if on { rgb(40, 130, 60) } else { rgba(90, 80, 70, 150) };
+            gfx::text(&format!("Lv.{} {}", b.level, b.name), x + 30.0, yy, 12.0, c);
+            gfx::text(b.desc, x + 260.0, yy, 12.0, c);
             yy += 17.0;
         }
         yy += 8.0;
@@ -679,7 +696,7 @@ impl SocialUi {
         // daily chest
         let (cg, ci) = social::guild_daily_reward(level);
         let items: Vec<String> = ci.iter().map(|(id, n)| format!("{}x {}", n, items::item(id).map(|d| d.name).unwrap_or(id))).collect();
-        gfx::text(&format!("Daily chest: {} gold, {}", cg, items.join(", ")), x + 30.0, yy + 6.0, 13.0, widgets::ink());
+        gfx::text(&format!("Daily chest: {} gold + {}", cg, items.join(", ")), x + 30.0, yy + 6.0, 13.0, widgets::ink());
         if small(ui, x + w - 120.0, yy, 90.0, if g.daily_claimed { "Opened" } else { "Open" }, ButtonStyle::Primary, !g.daily_claimed) {
             sim.social_cmd(SocialCmd::GuildClaimDaily);
         }
@@ -690,8 +707,8 @@ impl SocialUi {
             if self.focus != Some(Field::Notice) && self.notice.text.is_empty() {
                 self.notice.text = g.notice.clone();
             }
-            let enter = self.field(ui, Field::Notice, x + 80.0, yy - 6.0, 300.0, time);
-            if (small(ui, x + 392.0, yy - 3.0, 80.0, "Set", ButtonStyle::Secondary, true) || enter) && self.notice.text.trim() != g.notice {
+            let enter = self.field(ui, Field::Notice, x + 80.0, yy - 6.0, 400.0, time);
+            if (small(ui, x + 492.0, yy - 3.0, 80.0, "Set", ButtonStyle::Secondary, true) || enter) && self.notice.text.trim() != g.notice {
                 let t = self.take(Field::Notice);
                 sim.social_cmd(SocialCmd::GuildNotice { text: t });
             }
@@ -718,25 +735,25 @@ impl SocialUi {
         // invite / leave / disband
         let by = y + h - 56.0;
         if my_rank >= RANK_OFFICER {
-            let enter = self.field(ui, Field::GuildInvite, x + 26.0, by, 180.0, time);
-            if (small(ui, x + 214.0, by + 3.0, 80.0, "Invite", ButtonStyle::Primary, !self.guild_invite.text.trim().is_empty()) || enter) && !self.guild_invite.text.trim().is_empty() {
+            let enter = self.field(ui, Field::GuildInvite, x + 26.0, by, 220.0, time);
+            if (small(ui, x + 254.0, by + 3.0, 90.0, "Invite", ButtonStyle::Primary, !self.guild_invite.text.trim().is_empty()) || enter) && !self.guild_invite.text.trim().is_empty() {
                 let n = self.take(Field::GuildInvite);
                 sim.social_cmd(SocialCmd::GuildInvite { name: n });
             }
         }
         if my_rank == RANK_LEADER {
             if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
-                if small(ui, x + 304.0, by + 3.0, 80.0, "Disband", ButtonStyle::Danger, true) {
+                if small(ui, x + 390.0, by + 3.0, 90.0, "Disband", ButtonStyle::Danger, true) {
                     sim.social_cmd(SocialCmd::GuildDisband);
                 }
             } else {
-                small(ui, x + 304.0, by + 3.0, 80.0, "Disband", ButtonStyle::Danger, false);
-                if gfx::mouse_in(x + 304.0, by, 80.0, 30.0) {
-                    gfx::text_centered_outlined("Hold Shift to disband", x + 344.0, by - 18.0, 12.0, rgb(255, 200, 190));
+                small(ui, x + 390.0, by + 3.0, 90.0, "Disband", ButtonStyle::Danger, false);
+                if gfx::mouse_in(x + 390.0, by, 90.0, 30.0) {
+                    gfx::text_centered_outlined("Hold Shift to disband", x + 435.0, by - 18.0, 12.0, rgb(255, 200, 190));
                 }
             }
         }
-        if small(ui, x + 392.0, by + 3.0, 80.0, "Leave", ButtonStyle::Secondary, true) {
+        if small(ui, x + 490.0, by + 3.0, 90.0, "Leave", ButtonStyle::Secondary, true) {
             sim.social_cmd(SocialCmd::GuildLeave);
         }
     }
@@ -798,7 +815,7 @@ impl SocialUi {
                 gfx::text_wrapped("Exclusive cosmetics, bought only with Gale Marks from achievements. They're worn over whatever gear is in that slot.", x + 26.0, top, w - 52.0, 13.0, widgets::ink_soft());
                 for (k, c) in COSMETICS.iter().enumerate() {
                     let (col, rowi) = (k % 4, k / 4);
-                    let (cx, cy) = (x + 24.0 + col as f32 * 128.0, top + 44.0 + rowi as f32 * 204.0);
+                    let (cx, cy) = (x + 24.0 + col as f32 * 128.0, top + 46.0 + rowi as f32 * 204.0);
                     let owned = sim.save.cosmetics.iter().any(|x| x == c.id);
                     let worn = sim.wearing_cosmetic(c.id);
                     gfx::rrect(cx, cy, 120.0, 196.0, 8.0, if worn { rgba(120, 200, 255, 90) } else { rgba(255, 255, 255, 60) });
@@ -808,7 +825,7 @@ impl SocialUi {
                         achievements::CosmeticKind::Hat(hat) => look.hat = hat,
                         achievements::CosmeticKind::Back(b) => look.back = b,
                     }
-                    crate::render::char_ui(&look, None, crate::charsprite::Anim::Idle, 0, cx + 60.0, cy + 112.0, 1.0, false);
+                    crate::render::char_ui(&look, None, crate::charsprite::Anim::Idle, 0, cx + 60.0, cy + 108.0, 0.72, false);
                     gfx::text_centered(c.name, cx + 60.0, cy + 118.0, 13.0, widgets::ink());
                     if owned {
                         if small(ui, cx + 10.0, cy + 152.0, 100.0, if worn { "Take off" } else { "Wear" }, ButtonStyle::Secondary, true) {
@@ -873,7 +890,7 @@ impl SocialUi {
             return;
         }
         let (w, h) = (420.0, 64.0);
-        let (x, y) = (gfx::VW * 0.5 - w * 0.5, 96.0);
+        let (x, y) = (16.0, 196.0);
         gfx::rrect(x, y, w, h, 10.0, rgba(24, 22, 40, 225));
         gfx::rect_lines(x + 1.0, y + 1.0, w - 2.0, h - 2.0, 1.0, rgba(255, 220, 120, 180));
         gfx::text(&format!("Daily reward ready: day {}!", sim.save.attendance.count + 1), x + 16.0, y + 10.0, 16.0, rgb(255, 230, 150));
@@ -891,7 +908,7 @@ impl SocialUi {
 
     fn profile_window(&mut self, sim: &mut Sim, ui: &Ui) {
         let Some(p) = sim.profile.clone() else { return };
-        let (x, y, w, h) = (gfx::VW - 420.0, 70.0, 390.0, 520.0);
+        let (x, y, w, h) = (gfx::VW - 460.0, 70.0, 430.0, 520.0);
         widgets::panel(x, y, w, h);
         widgets::title(&p.name, x + w * 0.5, y + 14.0, 22.0);
         if widgets::button(ui, x + w - 52.0, y + 12.0, 34.0, 30.0, "X", ButtonStyle::Secondary, true) {
@@ -902,7 +919,7 @@ impl SocialUi {
         let look = Appearance::decode(&p.look).unwrap_or_default();
         let weapon = p.gear.first().filter(|g| !g.is_empty()).and_then(|g| items::weapon_art(g));
         gfx::rrect(x + 22.0, y + 52.0, 130.0, 170.0, 8.0, rgba(140, 190, 240, 90));
-        crate::render::char_ui(&look, weapon, crate::charsprite::Anim::Idle, ((sim.time * 4.0) as u8) % 4, x + 87.0, y + 206.0, 1.6, false);
+        crate::render::char_ui(&look, weapon, crate::charsprite::Anim::Idle, ((sim.time * 4.0) as u8) % 4, x + 87.0, y + 210.0, 1.05, false);
         let tx = x + 170.0;
         let mut yy = y + 56.0;
         let line = |t: &str, v: String, yy: &mut f32| {
@@ -917,14 +934,14 @@ impl SocialUi {
         gfx::text(&format!("{:.1}%", p.exp_frac * 100.0), tx + 92.0, yy + 15.0, 11.0, widgets::ink_soft());
         yy += 32.0;
         line("Guild", if p.guild.is_empty() { "-".into() } else { p.guild.clone() }, &mut yy);
-        line("Score", format!("{} ({} achievements)", p.score, p.achievements), &mut yy);
+        line("Score", format!("{}  ({} achieved)", p.score, p.achievements), &mut yy);
         line("Played", time_played(p.play_seconds), &mut yy);
         // gear
         let gy = y + 240.0;
         gfx::text("Equipped", x + 24.0, gy, 14.0, widgets::ink_soft());
         let mut hovered: Option<&'static items::ItemDef> = None;
         for (k, slot) in EQUIP_SLOTS.iter().enumerate() {
-            let sx = x + 24.0 + (k % 6) as f32 * 56.0;
+            let sx = x + 24.0 + (k % 6) as f32 * 64.0;
             let sy = gy + 22.0 + (k / 6) as f32 * 66.0;
             let def = p.gear.get(k).filter(|g| !g.is_empty()).and_then(|g| items::item(g));
             gfx::rrect(sx, sy, 46.0, 46.0, 6.0, def.map(|d| alpha(px_color(icons::tier_color(d.tier)), 0.5)).unwrap_or(rgba(0, 0, 0, 30)));
@@ -937,7 +954,7 @@ impl SocialUi {
                 }
                 None => gfx::text_centered(&slot.name()[..1], sx + 23.0, sy + 14.0, 16.0, rgb(190, 170, 140)),
             }
-            gfx::text_centered(slot.name(), sx + 23.0, sy + 48.0, 10.0, widgets::ink_soft());
+            gfx::text_centered(slot.short(), sx + 23.0, sy + 48.0, 11.0, widgets::ink_soft());
         }
         // actions
         let by = y + h - 56.0;
@@ -948,7 +965,7 @@ impl SocialUi {
         if !sim.social.is_friend(&name) && small(ui, x + 140.0, by, 110.0, "Add friend", ButtonStyle::Primary, true) {
             sim.social_cmd(SocialCmd::FriendAdd { name: name.clone() });
         }
-        if small(ui, x + 258.0, by, 110.0, "More...", ButtonStyle::Secondary, true) {
+        if small(ui, x + 298.0, by, 110.0, "More...", ButtonStyle::Secondary, true) {
             let (mx, my) = gfx::mouse();
             self.open_menu(sim, &name, mx - 120.0, my - 200.0);
         }
@@ -1102,7 +1119,7 @@ impl SocialUi {
         let list = sim.invites.clone();
         let (w, h) = (440.0, 70.0);
         for (k, (kind, from, extra, left)) in list.iter().enumerate() {
-            let (x, y) = (gfx::VW * 0.5 - w * 0.5, 170.0 + k as f32 * (h + 8.0));
+            let (x, y) = (gfx::VW - w - 16.0, 110.0 + k as f32 * (h + 8.0));
             gfx::rrect(x, y, w, h, 10.0, rgba(24, 22, 40, 230));
             gfx::rect_lines(x + 1.0, y + 1.0, w - 2.0, h - 2.0, 1.0, rgba(120, 220, 255, 160));
             let text = match *kind {
