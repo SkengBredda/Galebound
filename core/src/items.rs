@@ -13,39 +13,124 @@ pub const TRAINEE_DISCOUNT_BUYS: u32 = 10;
 /// ...by this fraction (40% off).
 pub const TRAINEE_DISCOUNT: f32 = 0.4;
 
+/// What kind of gear an item is. Rings and earrings fit either of their
+/// two slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GearKind {
+    Weapon,
+    Helmet,
+    Torso,
+    Legs,
+    Boots,
+    Necklace,
+    Ring,
+    Earring,
+    Back,
+}
+
+impl GearKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            GearKind::Weapon => "Weapon",
+            GearKind::Helmet => "Helmet",
+            GearKind::Torso => "Torso",
+            GearKind::Legs => "Legs",
+            GearKind::Boots => "Boots",
+            GearKind::Necklace => "Necklace",
+            GearKind::Ring => "Ring",
+            GearKind::Earring => "Earring",
+            GearKind::Back => "Back",
+        }
+    }
+    /// The equipment slots this kind of gear can go in.
+    pub fn slots(self) -> &'static [EquipSlot] {
+        use EquipSlot as E;
+        match self {
+            GearKind::Weapon => &[E::Weapon],
+            GearKind::Helmet => &[E::Helmet],
+            GearKind::Torso => &[E::Torso],
+            GearKind::Legs => &[E::Legs],
+            GearKind::Boots => &[E::Boots],
+            GearKind::Necklace => &[E::Necklace],
+            GearKind::Ring => &[E::Ring1, E::Ring2],
+            GearKind::Earring => &[E::Earring1, E::Earring2],
+            GearKind::Back => &[E::Back],
+        }
+    }
+}
+
+/// Where gear is worn: eleven slots, two each for rings and earrings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EquipSlot {
     Weapon,
-    Armor,
+    Helmet,
+    Torso,
+    Legs,
     Boots,
-    Accessory,
+    Necklace,
+    Ring1,
+    Ring2,
+    Earring1,
+    Earring2,
+    Back,
 }
 
-pub const EQUIP_SLOTS: &[EquipSlot] = &[EquipSlot::Weapon, EquipSlot::Armor, EquipSlot::Boots, EquipSlot::Accessory];
+pub const EQUIP_SLOTS: &[EquipSlot] = &[
+    EquipSlot::Weapon,
+    EquipSlot::Helmet,
+    EquipSlot::Torso,
+    EquipSlot::Legs,
+    EquipSlot::Boots,
+    EquipSlot::Necklace,
+    EquipSlot::Ring1,
+    EquipSlot::Ring2,
+    EquipSlot::Earring1,
+    EquipSlot::Earring2,
+    EquipSlot::Back,
+];
+
+/// Number of equipment slots.
+pub const EQUIP_COUNT: usize = 11;
 
 impl EquipSlot {
     pub fn index(self) -> usize {
+        EQUIP_SLOTS.iter().position(|s| *s == self).unwrap()
+    }
+    pub fn kind(self) -> GearKind {
         match self {
-            EquipSlot::Weapon => 0,
-            EquipSlot::Armor => 1,
-            EquipSlot::Boots => 2,
-            EquipSlot::Accessory => 3,
+            EquipSlot::Weapon => GearKind::Weapon,
+            EquipSlot::Helmet => GearKind::Helmet,
+            EquipSlot::Torso => GearKind::Torso,
+            EquipSlot::Legs => GearKind::Legs,
+            EquipSlot::Boots => GearKind::Boots,
+            EquipSlot::Necklace => GearKind::Necklace,
+            EquipSlot::Ring1 | EquipSlot::Ring2 => GearKind::Ring,
+            EquipSlot::Earring1 | EquipSlot::Earring2 => GearKind::Earring,
+            EquipSlot::Back => GearKind::Back,
         }
     }
     pub fn name(self) -> &'static str {
         match self {
-            EquipSlot::Weapon => "Weapon",
-            EquipSlot::Armor => "Armor",
-            EquipSlot::Boots => "Boots",
-            EquipSlot::Accessory => "Accessory",
+            EquipSlot::Ring1 => "Ring I",
+            EquipSlot::Ring2 => "Ring II",
+            EquipSlot::Earring1 => "Earring I",
+            EquipSlot::Earring2 => "Earring II",
+            s => s.kind().name(),
         }
     }
     pub fn key(self) -> &'static str {
         match self {
             EquipSlot::Weapon => "weapon",
-            EquipSlot::Armor => "armor",
+            EquipSlot::Helmet => "helmet",
+            EquipSlot::Torso => "torso",
+            EquipSlot::Legs => "legs",
             EquipSlot::Boots => "boots",
-            EquipSlot::Accessory => "accessory",
+            EquipSlot::Necklace => "necklace",
+            EquipSlot::Ring1 => "ring1",
+            EquipSlot::Ring2 => "ring2",
+            EquipSlot::Earring1 => "earring1",
+            EquipSlot::Earring2 => "earring2",
+            EquipSlot::Back => "back",
         }
     }
     pub fn from_key(s: &str) -> Option<EquipSlot> {
@@ -77,7 +162,7 @@ pub enum Special {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ItemKind {
     Consumable(Effect),
-    Equip(EquipSlot),
+    Equip(GearKind),
     /// Monster loot: stacks, sells to any shop.
     Material,
     Special(Special),
@@ -91,6 +176,12 @@ pub enum Look {
     Top(u8, u8),
     /// Overrides shoes with (style).
     Shoes(u8),
+    /// Overrides the outfit bottom with (bottom style, dye).
+    Bottom(u8, u8),
+    /// A hat / helmet style (see `appearance::HATS`).
+    Hat(u8),
+    /// Something worn on the back (see `appearance::BACKS`).
+    Back(u8),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,7 +216,8 @@ impl ItemDef {
     pub fn can_drop(&self) -> bool {
         !self.bound
     }
-    pub fn slot(&self) -> Option<EquipSlot> {
+    /// What kind of gear this is (None for anything you can't wear).
+    pub fn slot(&self) -> Option<GearKind> {
         match self.kind {
             ItemKind::Equip(s) => Some(s),
             _ => None,
@@ -195,11 +287,11 @@ const fn consumable(id: &'static str, name: &'static str, desc: &'static str, pr
 
 #[allow(clippy::too_many_arguments)]
 const fn weapon(id: &'static str, name: &'static str, desc: &'static str, class: ClassId, price: u32, level: u32, mods: StatMods, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Equip(EquipSlot::Weapon), price, level, class: Some(class), mods, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Equip(GearKind::Weapon), price, level, class: Some(class), mods, look: Look::None, tier, bound: false }
 }
 
 #[allow(clippy::too_many_arguments)]
-const fn gear(id: &'static str, name: &'static str, desc: &'static str, slot: EquipSlot, price: u32, level: u32, mods: StatMods, look: Look, tier: u8) -> ItemDef {
+const fn gear(id: &'static str, name: &'static str, desc: &'static str, slot: GearKind, price: u32, level: u32, mods: StatMods, look: Look, tier: u8) -> ItemDef {
     ItemDef { id, name, desc, kind: ItemKind::Equip(slot), price, level, class: None, mods, look, tier, bound: false }
 }
 
@@ -224,7 +316,7 @@ const fn def(p: f32, m: f32, hp: f32) -> StatMods {
 }
 
 use ClassId::*;
-use EquipSlot::*;
+use GearKind::*;
 
 pub const ITEMS: &[ItemDef] = &[
     // ---------------------------------------------------------------- consumables
@@ -284,18 +376,34 @@ pub const ITEMS: &[ItemDef] = &[
     weapon("apprentice_staff", "Apprentice Staff", "A plain staff with a chip of aether crystal.", Aethermancer, 0, 10, matk(14.0, 10.0), 1),
     weapon("runed_staff", "Runed Staff", "Runes carved along its length glow when you cast.", Aethermancer, 260, 14, matk(23.0, 25.0), 2),
     weapon("starfall_staff", "Starfall Staff", "Topped with a shard that fell from the sky.", Aethermancer, 620, 18, StatMods { matk: 34.0, mp: 40.0, main: ms(0, 0, 4, 0), ..Z }, 3),
-    // ---------------------------------------------------------------- armour
-    gear("novice_garb", "Adventurer's Garb", "Linen shirt, rope belt and a satchel for the road ahead.", Armor, 0, 1, def(2.0, 2.0, 0.0), Look::Top(8, 5), 0),
-    gear("novice_tunic", "Novice's Tunic", "Ranger Pell's old tunic, patched at the elbows.", Armor, 12, 1, def(3.0, 3.0, 10.0), Look::Top(1, 7), 0),
-    gear("trail_gambeson", "Padded Gambeson", "Quilted layers that soak up blows.", Armor, 200, 8, def(12.0, 6.0, 22.0), Look::Top(2, 3), 1),
-    gear("cloth_tunic", "Traveller's Tunic", "Simple and comfortable.", Armor, 25, 1, def(3.0, 2.0, 0.0), Look::Top(1, 1), 0),
-    gear("leather_vest", "Leather Jerkin", "Boiled leather over linen.", Armor, 90, 5, def(8.0, 4.0, 15.0), Look::Top(2, 0), 1),
-    gear("mage_robe", "Apprentice Robe", "Threaded with silver to ward off spells.", Armor, 110, 5, def(4.0, 10.0, 0.0), Look::Top(4, 4), 1),
-    gear("chain_shirt", "Chain Shirt", "Rings of iron under a surcoat.", Armor, 240, 10, def(16.0, 7.0, 30.0), Look::Top(5, 8), 2),
-    gear("shadow_garb", "Shadowsilk Jacket", "Dark, light and quiet.", Armor, 240, 10, StatMods { pdef: 11.0, mdef: 9.0, crit: 2.0, ..Z }, Look::Top(6, 9), 2),
-    gear("sage_robe", "Sage's Robe", "Embroidered with protective glyphs.", Armor, 260, 10, StatMods { pdef: 7.0, mdef: 18.0, mp: 30.0, ..Z }, Look::Top(4, 6), 2),
-    gear("plate_armor", "Galeplate Cuirass", "Heavy plate with a wind-sigil on the chest.", Armor, 560, 15, def(26.0, 12.0, 60.0), Look::Top(5, 3), 3),
-    gear("monk_gi", "Tempest Gi", "Training robes of the monastery.", Armor, 520, 15, StatMods { pdef: 18.0, mdef: 14.0, speed_pct: 0.04, ..Z }, Look::Top(3, 2), 3),
+    // ---------------------------------------------------------------- torso
+    gear("novice_garb", "Adventurer's Garb", "Linen shirt, rope belt and a satchel for the road ahead.", Torso, 0, 1, def(2.0, 2.0, 0.0), Look::Top(8, 5), 0),
+    gear("novice_tunic", "Novice's Tunic", "Ranger Pell's old tunic, patched at the elbows.", Torso, 12, 1, def(3.0, 3.0, 10.0), Look::Top(1, 7), 0),
+    gear("trail_gambeson", "Padded Gambeson", "Quilted layers that soak up blows.", Torso, 200, 8, def(12.0, 6.0, 22.0), Look::Top(2, 3), 1),
+    gear("cloth_tunic", "Traveller's Tunic", "Simple and comfortable.", Torso, 25, 1, def(3.0, 2.0, 0.0), Look::Top(1, 1), 0),
+    gear("leather_vest", "Leather Jerkin", "Boiled leather over linen.", Torso, 90, 5, def(8.0, 4.0, 15.0), Look::Top(2, 0), 1),
+    gear("mage_robe", "Apprentice Robe", "Threaded with silver to ward off spells.", Torso, 110, 5, def(4.0, 10.0, 0.0), Look::Top(4, 4), 1),
+    gear("chain_shirt", "Chain Shirt", "Rings of iron under a surcoat.", Torso, 240, 10, def(16.0, 7.0, 30.0), Look::Top(5, 8), 2),
+    gear("shadow_garb", "Shadowsilk Jacket", "Dark, light and quiet.", Torso, 240, 10, StatMods { pdef: 11.0, mdef: 9.0, crit: 2.0, ..Z }, Look::Top(6, 9), 2),
+    gear("sage_robe", "Sage's Robe", "Embroidered with protective glyphs.", Torso, 260, 10, StatMods { pdef: 7.0, mdef: 18.0, mp: 30.0, ..Z }, Look::Top(4, 6), 2),
+    gear("plate_armor", "Galeplate Cuirass", "Heavy plate with a wind-sigil on the chest.", Torso, 560, 15, def(26.0, 12.0, 60.0), Look::Top(5, 3), 3),
+    gear("monk_gi", "Tempest Gi", "Training robes of the monastery.", Torso, 520, 15, StatMods { pdef: 18.0, mdef: 14.0, speed_pct: 0.04, ..Z }, Look::Top(3, 2), 3),
+    // ---------------------------------------------------------------- helmets
+    gear("novice_bandana", "Novice's Bandana", "A knotted headband. Keeps the hair out of your eyes.", Helmet, 10, 1, def(1.0, 1.0, 5.0), Look::Hat(1), 0),
+    gear("leather_cap", "Leather Cap", "A snug cap of boiled leather.", Helmet, 60, 5, def(3.0, 1.0, 10.0), Look::Hat(2), 1),
+    gear("trail_hat", "Trailblazer's Hat", "A wide-brimmed hat with a jaunty feather.", Helmet, 140, 8, StatMods { pdef: 5.0, mdef: 3.0, hp: 15.0, ..Z }, Look::Hat(5), 1),
+    gear("iron_helm", "Iron Sallet", "Riveted iron, open-faced for a clear view.", Helmet, 220, 10, def(8.0, 3.0, 25.0), Look::Hat(4), 2),
+    gear("sage_hat", "Pointed Sage Hat", "Every spell is easier under a proper hat.", Helmet, 220, 10, StatMods { pdef: 3.0, mdef: 9.0, mp: 20.0, ..Z }, Look::Hat(3), 2),
+    gear("ranger_hood", "Ranger's Hood", "A deep green hood that hides your eyes.", Helmet, 220, 10, StatMods { pdef: 5.0, mdef: 5.0, crit: 1.0, ..Z }, Look::Hat(6), 2),
+    gear("gale_circlet", "Galewind Circlet", "A silver band set with a storm-blue stone.", Helmet, 520, 15, StatMods { pdef: 12.0, mdef: 12.0, hp: 30.0, main: ms(1, 1, 1, 1), ..Z }, Look::Hat(7), 3),
+    // ---------------------------------------------------------------- legs
+    gear("novice_trousers", "Novice's Trousers", "Sturdy trousers with patched knees.", Legs, 10, 1, def(2.0, 1.0, 5.0), Look::Bottom(1, 4), 0),
+    gear("leather_breeches", "Leather Breeches", "Supple leather that moves with you.", Legs, 70, 5, def(5.0, 2.0, 10.0), Look::Bottom(1, 9), 1),
+    gear("trail_cargos", "Trailblazer Cargos", "Pockets for everything. Even more pockets.", Legs, 160, 8, StatMods { pdef: 6.0, mdef: 3.0, hp: 15.0, ..Z }, Look::Bottom(4, 0), 1),
+    gear("chain_leggings", "Chain Leggings", "Mail from hip to ankle.", Legs, 230, 10, def(10.0, 4.0, 25.0), Look::Bottom(1, 8), 2),
+    gear("shadow_leggings", "Shadowsilk Leggings", "Fitted and silent.", Legs, 230, 10, StatMods { pdef: 7.0, mdef: 6.0, crit: 1.0, ..Z }, Look::Bottom(6, 8), 2),
+    gear("sage_hakama", "Glyphwoven Hakama", "Wide, pleated and warded.", Legs, 240, 10, StatMods { pdef: 4.0, mdef: 11.0, mp: 15.0, ..Z }, Look::Bottom(5, 6), 2),
+    gear("gale_greaves", "Galeplate Tassets", "Plate over padded trousers.", Legs, 500, 15, def(16.0, 8.0, 40.0), Look::Bottom(4, 1), 3),
     // ---------------------------------------------------------------- boots
     gear("novice_boots", "Novice's Boots", "Tamsin's scouting boots. Light and quiet.", Boots, 12, 1, StatMods { pdef: 2.0, mdef: 1.0, speed_pct: 0.02, ..Z }, Look::Shoes(0), 0),
     gear("trail_boots", "Trailblazer Boots", "Sturdy boots for long roads.", Boots, 150, 8, StatMods { pdef: 6.0, mdef: 3.0, speed_pct: 0.03, ..Z }, Look::Shoes(3), 1),
@@ -303,14 +411,29 @@ pub const ITEMS: &[ItemDef] = &[
     gear("leather_boots", "Leather Boots", "Laced, worn-in and dependable.", Boots, 70, 5, StatMods { pdef: 4.0, mdef: 2.0, speed_pct: 0.02, ..Z }, Look::Shoes(0), 1),
     gear("windstep_boots", "Windstep Boots", "Feathers stitched at the heel.", Boots, 220, 10, StatMods { pdef: 6.0, mdef: 4.0, speed_pct: 0.06, ..Z }, Look::Shoes(5), 2),
     gear("iron_greaves", "Iron Greaves", "Heavy, but nothing gets through.", Boots, 260, 12, def(12.0, 5.0, 25.0), Look::Shoes(3), 2),
-    // ---------------------------------------------------------------- accessories
-    gear("novice_charm", "Novice's Wind Charm", "Elder Wynn's blessing, carved into a pebble.", Accessory, 10, 1, StatMods { main: ms(0, 1, 0, 1), ..Z }, Look::None, 0),
-    gear("copper_ring", "Copper Ring", "A plain band. Feels lucky.", Accessory, 40, 1, StatMods { main: ms(0, 0, 0, 2), ..Z }, Look::None, 0),
-    gear("power_band", "Band of Might", "+3 STR.", Accessory, 120, 6, StatMods { main: ms(3, 0, 0, 0), hp: 15.0, ..Z }, Look::None, 1),
-    gear("hunter_charm", "Hunter's Charm", "+3 DEX, +2% Crit.", Accessory, 120, 6, StatMods { main: ms(0, 3, 0, 0), crit: 2.0, ..Z }, Look::None, 1),
-    gear("sage_pendant", "Sage's Pendant", "+3 INT, +20 Mana.", Accessory, 120, 6, StatMods { main: ms(0, 0, 3, 0), mp: 20.0, ..Z }, Look::None, 1),
-    gear("rogue_coin", "Rogue's Coin", "+4 LUK, +10% Crit Damage.", Accessory, 140, 6, StatMods { main: ms(0, 0, 0, 4), crit_dmg: 10.0, ..Z }, Look::None, 1),
-    gear("storm_amulet", "Storm Amulet", "A sliver of trapped lightning.", Accessory, 480, 14, StatMods { main: ms(2, 2, 2, 2), crit: 3.0, atk_pct: 0.05, ..Z }, Look::None, 3),
+    // ---------------------------------------------------------------- necklaces
+    gear("novice_charm", "Novice's Wind Charm", "Elder Wynn's blessing, carved into a pebble on a cord.", Necklace, 10, 1, StatMods { main: ms(0, 1, 0, 1), ..Z }, Look::None, 0),
+    gear("fang_necklace", "Wolf Fang Necklace", "A lucky fang on a leather thong.", Necklace, 130, 8, StatMods { main: ms(2, 1, 0, 0), patk: 2.0, ..Z }, Look::None, 1),
+    gear("sage_pendant", "Sage's Pendant", "+3 INT, +20 Mana.", Necklace, 120, 6, StatMods { main: ms(0, 0, 3, 0), mp: 20.0, ..Z }, Look::None, 1),
+    gear("storm_amulet", "Storm Amulet", "A sliver of trapped lightning.", Necklace, 480, 14, StatMods { main: ms(2, 2, 2, 2), crit: 3.0, atk_pct: 0.05, ..Z }, Look::None, 3),
+    // ---------------------------------------------------------------- rings
+    gear("copper_ring", "Copper Ring", "A plain band. Feels lucky.", Ring, 40, 1, StatMods { main: ms(0, 0, 0, 2), ..Z }, Look::None, 0),
+    gear("novice_ring", "Novice's Signet", "Stamped with the Glade's wind-sigil.", Ring, 10, 1, StatMods { main: ms(1, 0, 1, 0), ..Z }, Look::None, 0),
+    gear("power_band", "Band of Might", "+3 STR.", Ring, 120, 6, StatMods { main: ms(3, 0, 0, 0), hp: 15.0, ..Z }, Look::None, 1),
+    gear("silver_ring", "Silver Ring", "Polished to a mirror shine.", Ring, 150, 8, StatMods { main: ms(1, 1, 1, 1), mdef: 2.0, ..Z }, Look::None, 1),
+    gear("sage_ring", "Ring of Insight", "+3 INT, +3 M.ATK.", Ring, 200, 10, StatMods { main: ms(0, 0, 3, 0), matk: 3.0, ..Z }, Look::None, 2),
+    gear("gale_ring", "Ring of Gales", "The wind wraps around your fingers.", Ring, 460, 14, StatMods { main: ms(2, 2, 0, 0), speed_pct: 0.03, crit: 2.0, ..Z }, Look::None, 3),
+    // ---------------------------------------------------------------- earrings
+    gear("pebble_studs", "Pebble Studs", "Smooth river pebbles set in tin.", Earring, 10, 1, StatMods { mdef: 1.0, mp: 5.0, ..Z }, Look::None, 0),
+    gear("hunter_charm", "Hunter's Feather Earring", "+3 DEX, +2% Crit.", Earring, 120, 6, StatMods { main: ms(0, 3, 0, 0), crit: 2.0, ..Z }, Look::None, 1),
+    gear("rogue_coin", "Rogue's Coin Earring", "+4 LUK, +10% Crit Damage.", Earring, 140, 6, StatMods { main: ms(0, 0, 0, 4), crit_dmg: 10.0, ..Z }, Look::None, 1),
+    gear("brass_hoops", "Brass Hoops", "Bright and loud, like their owner.", Earring, 130, 8, StatMods { main: ms(0, 1, 0, 2), mdef: 2.0, ..Z }, Look::None, 1),
+    gear("star_drop", "Stardrop Earring", "A falling star caught in glass.", Earring, 440, 14, StatMods { main: ms(0, 0, 2, 2), mp: 25.0, crit_dmg: 8.0, ..Z }, Look::None, 3),
+    // ---------------------------------------------------------------- back
+    gear("travel_cloak", "Traveller's Cloak", "Keeps the rain off and the wind at your back.", Back, 80, 5, StatMods { mdef: 3.0, hp: 10.0, speed_pct: 0.01, ..Z }, Look::Back(1), 1),
+    gear("trail_pack", "Trailblazer's Pack", "Bedroll, rope, snacks. Mostly snacks.", Back, 140, 8, StatMods { pdef: 3.0, hp: 25.0, ..Z }, Look::Back(4), 1),
+    gear("gale_cape", "Galeborne Cape", "Billows even when there's no wind.", Back, 260, 10, StatMods { pdef: 4.0, mdef: 6.0, speed_pct: 0.03, ..Z }, Look::Back(2), 2),
+    gear("feather_wings", "Featherdown Wings", "Too small to fly. Not too small to look amazing.", Back, 560, 15, StatMods { mdef: 8.0, speed_pct: 0.05, main: ms(0, 2, 2, 0), ..Z }, Look::Back(3), 3),
 ];
 
 /// What a weapon looks like in the character's hand.
@@ -353,7 +476,7 @@ pub struct Inventory {
     /// Up to INVENTORY_SLOTS stacks, in display order.
     pub slots: Vec<Stack>,
     /// Equipped item ids, indexed by EquipSlot::index().
-    pub equip: [Option<String>; 4],
+    pub equip: [Option<String>; EQUIP_COUNT],
 }
 
 impl Inventory {
@@ -420,6 +543,12 @@ impl Inventory {
         }
         Some((id, take))
     }
+    /// Where a piece of gear of this kind would go: the first empty slot it
+    /// fits, else the first one (which it would replace).
+    pub fn slot_for(&self, kind: GearKind) -> EquipSlot {
+        let slots = kind.slots();
+        slots.iter().copied().find(|s| self.equip[s.index()].is_none()).unwrap_or(slots[0])
+    }
     pub fn equipped(&self, slot: EquipSlot) -> Option<&'static ItemDef> {
         self.equip[slot.index()].as_deref().and_then(item)
     }
@@ -471,9 +600,12 @@ pub const GLADE_SHOP: &str = "glade_outfitter";
 /// Bound potions that are 40% off for a character's first purchases.
 pub const TRAINEE_POTIONS: &[&str] = &["trainee_hp_potion", "trainee_mp_potion"];
 const ARMOR_STOCK: &[&str] = &[
+    "leather_cap", "iron_helm", "sage_hat", "ranger_hood", "gale_circlet",
     "cloth_tunic", "leather_vest", "mage_robe", "chain_shirt", "shadow_garb", "sage_robe", "plate_armor", "monk_gi",
+    "leather_breeches", "chain_leggings", "shadow_leggings", "sage_hakama", "gale_greaves",
     "sandals", "leather_boots", "windstep_boots", "iron_greaves",
-    "copper_ring", "power_band", "hunter_charm", "sage_pendant", "rogue_coin", "storm_amulet",
+    "sage_pendant", "storm_amulet", "copper_ring", "power_band", "sage_ring", "gale_ring",
+    "hunter_charm", "rogue_coin", "star_drop", "travel_cloak", "gale_cape", "feather_wings",
 ];
 
 pub const SHOPS: &[ShopDef] = &[
@@ -481,11 +613,14 @@ pub const SHOPS: &[ShopDef] = &[
         id: GLADE_SHOP,
         name: "Quartermaster Hesper's Wagon",
         kind: ShopKind::General,
-        stock: &["trainee_hp_potion", "trainee_mp_potion", "revive_scroll", "ironwood_blade", "ironbound_cudgel", "trail_gambeson", "trail_boots"],
+        stock: &[
+            "trainee_hp_potion", "trainee_mp_potion", "revive_scroll", "ironwood_blade", "ironbound_cudgel",
+            "trail_hat", "trail_gambeson", "trail_cargos", "trail_boots", "fang_necklace", "silver_ring", "brass_hoops", "trail_pack",
+        ],
     },
     ShopDef { id: PET_SHOP, name: "Whisker & Wing Pet Shop", kind: ShopKind::Pets, stock: &["pet_breeze_fox", "pet_puffling", "pet_sparkwing", "pet_food"] },
     ShopDef { id: "breezehollow_general", name: "Mira's Remedies", kind: ShopKind::General, stock: &["hp_potion", "mp_potion", "might_tonic", "iron_tonic", "revive_scroll"] },
-    ShopDef { id: "breezehollow_smith", name: "Garrick's Forge", kind: ShopKind::Weapons, stock: &["wood_sword", "wood_club", "oak_club", "cloth_tunic", "leather_vest", "sandals", "leather_boots", "copper_ring"] },
+    ShopDef { id: "breezehollow_smith", name: "Garrick's Forge", kind: ShopKind::Weapons, stock: &["wood_sword", "wood_club", "oak_club", "leather_cap", "cloth_tunic", "leather_vest", "leather_breeches", "sandals", "leather_boots", "copper_ring", "travel_cloak"] },
     ShopDef { id: "ironhold_general", name: "The Iron Kettle", kind: ShopKind::General, stock: GENERAL_STOCK },
     ShopDef { id: "ironhold_weapons", name: "Ironhold Armoury", kind: ShopKind::Weapons, stock: &["steel_sword", "gale_sword", "oak_club"] },
     ShopDef { id: "ironhold_armor", name: "Plate & Rivet", kind: ShopKind::Armor, stock: ARMOR_STOCK },
@@ -552,7 +687,9 @@ mod tests {
             assert!(d.bound && !d.can_sell() && !d.can_trade() && !d.can_drop());
         }
         let gear: Vec<_> = glade.stock.iter().filter_map(|id| item(id)).filter(|d| d.slot().is_some()).collect();
-        assert!(gear.iter().any(|d| d.slot() == Some(EquipSlot::Weapon)) && gear.iter().any(|d| d.slot() == Some(EquipSlot::Armor)));
+        for k in [GearKind::Weapon, GearKind::Helmet, GearKind::Torso, GearKind::Legs, GearKind::Boots, GearKind::Necklace, GearKind::Ring, GearKind::Earring, GearKind::Back] {
+            assert!(gear.iter().any(|d| d.slot() == Some(k)), "the outfitter sells no {:?}", k);
+        }
         for d in gear {
             assert_eq!(d.level, 8, "{}", d.id);
             assert!(d.class.is_none() || d.class == Some(ClassId::Novice), "{} must be usable by Novices", d.id);

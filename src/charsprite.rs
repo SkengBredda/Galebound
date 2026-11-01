@@ -676,10 +676,22 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
     let mut out = Canvas::new(SIZE, HEIGHT);
     let new = || Canvas::new(SIZE, HEIGHT);
 
+    // 0. Cloaks and packs behind everything (wings go over the back hair)
+    let winged = matches!(look.back, 3 | 5 | 6);
+    if look.back != 0 && !winged {
+        let mut c = new();
+        draw_back(&mut c, &look, &pal, &r, &p);
+        stamp(&mut out, c, 0.0);
+    }
     // 1. Hair behind the body
     {
         let mut c = new();
         back_hair(&mut c, &look, &r, &pal, &p);
+        if winged {
+            stamp(&mut out, c, 0.0);
+            c = new();
+            draw_back(&mut c, &look, &pal, &r, &p);
+        }
         if look.top == 3 {
             // hood resting on the back
             let n = r.t(-3.5, 15.5);
@@ -740,6 +752,9 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
             let mut h = Hd { c: &mut c, o: r.head, k: HEAD_K };
             draw_head(&mut h, &pal, r.head);
             front_hair(&mut h, &look, &pal, &r, &p);
+            if look.hat != 0 {
+                draw_hat(&mut h, &look, &pal, r.head, &p);
+            }
         }
         stamp(&mut out, c, 0.0);
         draw_face(&mut out, &pal, look.face, r.head, &p);
@@ -1594,6 +1609,190 @@ fn hair_shine(c: &mut Canvas, look: &Appearance, pal: &Pal, (hx, hy): P2) {
     }
 }
 
+// =================================================================== hats and backs
+
+fn draw_hat(c: &mut Hd, look: &Appearance, pal: &Pal, (hx, hy): P2, p: &Pose) {
+    let tr = p.hair_trail;
+    let lf = p.hair_lift;
+    match look.hat {
+        1 => {
+            // bandana: a band over the brow, knot tails flutter behind
+            let red = rgb(196, 60, 64);
+            c.poly(&[(hx - 8.8, hy - 4.6), (hx + 7.4, hy - 6.4), (hx + 7.6, hy - 3.8), (hx - 8.6, hy - 2.0)], red);
+            c.poly(&[(hx - 8.8, hy - 4.6), (hx + 7.4, hy - 6.4), (hx + 7.4, hy - 5.6), (hx - 8.8, hy - 3.8)], light(red, 0.2));
+            let knot = (hx - 9.0, hy - 3.4);
+            c.taper(knot, (knot.0 - 5.0 - tr * 3.0, knot.1 + 3.0 - lf * 4.0), 2.4, 1.2, shadow(red, 0.12));
+            c.taper(knot, (knot.0 - 3.5 - tr * 2.0, knot.1 + 5.0 - lf * 3.0), 2.2, 1.0, red);
+        }
+        2 => {
+            // leather cap with a short peak
+            let col = rgb(150, 100, 60);
+            c.poly(&[(hx - 9.4, hy - 3.0), (hx - 7.0, hy - 9.0), (hx - 1.0, hy - 10.6), (hx + 5.0, hy - 9.0), (hx + 7.6, hy - 4.6), (hx - 9.4, hy - 2.6)], col);
+            c.poly(&[(hx + 3.0, hy - 5.4), (hx + 11.4, hy - 4.6), (hx + 10.6, hy - 3.2), (hx + 3.0, hy - 3.8)], shadow(col, 0.18));
+            c.poly(&[(hx - 6.0, hy - 8.6), (hx - 1.0, hy - 10.0), (hx - 1.0, hy - 9.0), (hx - 6.0, hy - 7.6)], light(col, 0.25));
+        }
+        3 => {
+            // pointed sage hat, tip bending back
+            let col = rgb(78, 78, 170);
+            let tip = (hx - 8.0 - tr * 3.0, hy - 20.0 + lf * 2.0);
+            c.poly(&[(hx - 7.4, hy - 6.4), (hx + 5.4, hy - 7.0), (hx - 1.0, hy - 15.0), tip, (hx - 4.0, hy - 13.0)], col);
+            c.ellipse(hx - 1.0, hy - 6.4, 11.4, 2.4, shadow(col, 0.1));
+            c.poly(&[(hx - 7.0, hy - 8.2), (hx + 5.0, hy - 8.8), (hx + 5.0, hy - 7.0), (hx - 7.0, hy - 6.4)], rgb(230, 196, 90));
+        }
+        4 => {
+            // iron sallet: dome, neck guard, a ridge
+            let st = rgb(176, 184, 200);
+            c.poly(&[(hx - 10.0, hy + 3.0), (hx - 9.6, hy - 5.0), (hx - 6.0, hy - 10.4), (hx + 1.0, hy - 11.4), (hx + 6.4, hy - 8.6), (hx + 8.4, hy - 4.2), (hx + 2.0, hy - 3.6), (hx - 3.0, hy - 2.0), (hx - 6.0, hy + 3.6)], st);
+            c.poly(&[(hx - 4.0, hy - 10.8), (hx + 1.0, hy - 11.6), (hx + 1.0, hy - 10.4), (hx - 4.0, hy - 9.8)], light(st, 0.4));
+            c.poly(&[(hx - 1.0, hy - 4.0), (hx + 8.4, hy - 4.8), (hx + 8.6, hy - 3.4), (hx - 1.0, hy - 2.6)], shadow(st, 0.22));
+            for i in 0..3 {
+                c.disc(hx - 7.0 + i as f32 * 3.0, hy - 4.0, 0.6, rgb(240, 244, 252));
+            }
+        }
+        5 => {
+            // feathered hat with a wide brim
+            let col = rgb(150, 104, 64);
+            c.ellipse(hx - 1.0, hy - 9.4, 7.0, 4.0, col);
+            c.ellipse(hx - 0.5, hy - 6.4, 12.4, 2.2, shadow(col, 0.1));
+            c.poly(&[(hx - 7.6, hy - 8.0), (hx + 5.8, hy - 8.4), (hx + 6.0, hy - 6.8), (hx - 7.6, hy - 6.6)], rgb(196, 60, 64));
+            let q = (hx - 6.0, hy - 9.0);
+            c.taper(q, (q.0 - 7.0 - tr * 3.0, q.1 - 7.0 + lf * 3.0), 2.6, 0.8, rgb(244, 244, 250));
+        }
+        6 => {
+            // hood over the hair, open at the face, falling to the shoulders
+            let col = rgb(70, 120, 76);
+            let mut tmp = Canvas::new(c.c.w, c.c.h);
+            {
+                let mut t = Hd { c: &mut tmp, o: c.o, k: c.k };
+                t.ellipse(hx - 1.6, hy - 2.4, 10.2, 9.6, col);
+                t.poly(&[(hx - 11.0, hy), (hx - 2.0, hy + 4.0), (hx - 4.0, hy + 11.0), (hx - 12.0, hy + 9.0)], col);
+                t.taper((hx - 9.0, hy - 6.0), (hx - 16.0 - tr * 3.0, hy + 2.0 - lf * 3.0), 4.0, 1.4, shadow(col, 0.1));
+            }
+            for y in 0..tmp.h {
+                for x in 0..tmp.w {
+                    let fx = (x as f32 + 0.5 - hx) / c.k;
+                    let fy = (y as f32 + 0.5 - hy) / c.k;
+                    if fx > -0.6 && fy > -5.8 + (fx * 0.1).max(0.0) && fy < 9.0 {
+                        tmp.px[(y * tmp.w + x) as usize] = [0, 0, 0, 0];
+                    }
+                }
+            }
+            c.c.draw(&tmp, 0, 0);
+        }
+        7 => {
+            // silver circlet with a blue stone
+            c.poly(&[(hx - 9.0, hy - 5.2), (hx + 7.4, hy - 7.0), (hx + 7.4, hy - 5.8), (hx - 9.0, hy - 4.0)], rgb(214, 220, 236));
+            c.disc(hx + 4.6, hy - 6.6, 1.6, rgb(80, 150, 240));
+            c.set((hx + 4.0).round() as i32, (hy - 7.4).round() as i32, rgb(220, 240, 255));
+        }
+        8 => {
+            // cat ears
+            let col = pal.hair;
+            let inner = rgb(240, 160, 176);
+            c.poly(&[(hx - 8.0, hy - 6.0), (hx - 3.4, hy - 9.6), (hx - 8.4, hy - 15.0)], col);
+            c.poly(&[(hx - 7.4, hy - 7.0), (hx - 4.6, hy - 9.0), (hx - 7.6, hy - 12.6)], inner);
+            c.poly(&[(hx + 0.4, hy - 9.8), (hx + 5.6, hy - 7.2), (hx + 3.4, hy - 15.2)], col);
+            c.poly(&[(hx + 1.6, hy - 9.6), (hx + 4.6, hy - 7.8), (hx + 3.4, hy - 12.6)], inner);
+        }
+        9 => {
+            // flower crown
+            let cols = [rgb(248, 150, 176), rgb(255, 230, 120), rgb(250, 250, 255), rgb(176, 140, 240)];
+            for i in 0..8 {
+                let a = std::f32::consts::PI * (1.05 + i as f32 * 0.12);
+                let (x, y) = (hx - 1.0 + a.cos() * 8.6, hy - 3.4 + a.sin() * 6.4);
+                c.disc(x, y, 1.8, cols[i % 4]);
+                c.disc(x, y, 0.6, rgb(250, 200, 80));
+            }
+            c.disc(hx - 9.0, hy - 2.0, 1.2, rgb(110, 180, 90));
+        }
+        10 => {
+            // starry halo floating above
+            let gold = rgb(255, 226, 120);
+            for i in 0..18 {
+                let a = i as f32 / 18.0 * std::f32::consts::TAU;
+                c.disc(hx - 1.0 + a.cos() * 6.4, hy - 14.0 + a.sin() * 1.6, 0.9, if a.sin() > 0.0 { gold } else { shadow(gold, 0.2) });
+            }
+            c.disc(hx - 7.0, hy - 15.0, 0.7, rgb(255, 255, 255));
+            c.disc(hx + 5.0, hy - 13.0, 0.7, rgb(255, 255, 255));
+        }
+        11 => {
+            // crown of gales: a little golden crown
+            let gold = rgb(240, 196, 70);
+            c.poly(&[(hx - 6.6, hy - 8.0), (hx + 4.6, hy - 9.0), (hx + 4.8, hy - 12.2), (hx + 2.4, hy - 10.6), (hx - 0.6, hy - 14.0), (hx - 2.4, hy - 10.2), (hx - 5.6, hy - 12.6)], gold);
+            c.poly(&[(hx - 6.6, hy - 8.0), (hx + 4.6, hy - 9.0), (hx + 4.6, hy - 8.0), (hx - 6.6, hy - 7.0)], shadow(gold, 0.25));
+            c.disc(hx - 0.6, hy - 10.0, 1.1, rgb(80, 200, 220));
+        }
+        _ => {}
+    }
+}
+
+/// Cloaks, wings and packs, hung from the shoulders and fluttering with
+/// movement. Drawn behind the body.
+fn draw_back(c: &mut Canvas, look: &Appearance, pal: &Pal, r: &Rig, p: &Pose) {
+    let tr = p.hair_trail;
+    let lf = p.hair_lift;
+    let cape = |c: &mut Canvas, len: f32, col: Px, stars: bool| {
+        let top_b = r.tw(-4.6, 14.4);
+        let top_f = r.tw(0.6, 15.0);
+        let sway = tr * 7.0 + 2.5;
+        let hem_b = r.t(-9.5 - sway - len * 0.12, 13.0 - len + lf * len * 0.4);
+        let hem_f = r.t(-3.0 - sway * 0.6, 13.0 - len - 1.0 + lf * len * 0.3);
+        c.poly(&[top_b, top_f, hem_f, hem_b], col);
+        c.linef(lerp(top_b, top_f, 0.5), lerp(hem_b, hem_f, 0.5), shadow(col, 0.25));
+        if stars {
+            for i in 0..6 {
+                let q = lerp(lerp(top_b, hem_b, 0.2 + i as f32 * 0.13), lerp(top_f, hem_f, 0.2 + i as f32 * 0.13), (i % 3) as f32 * 0.35 + 0.15);
+                c.set(q.0.round() as i32, q.1.round() as i32, rgb(255, 240, 170));
+            }
+        }
+        let clasp = r.tw(0.0, 14.8);
+        c.disc(clasp.0, clasp.1, 1.3, rgb(230, 196, 90));
+    };
+    let wings = |c: &mut Canvas, col: Px, big: f32, bat: bool| {
+        let root = r.tw(-3.4, 11.5);
+        let flap = (lf * 18.0) + if p.plant == Plant::Air { 12.0 } else { 0.0 };
+        // angles: 0 = down, negative = toward the back
+        for (k, base) in [(0, -150.0f32), (1, -122.0), (2, -96.0)] {
+            let a = base + flap * 0.6 - tr * 8.0;
+            let len = (17.0 - k as f32 * 3.5) * big;
+            let tip = add(root, dir(a), len);
+            if bat {
+                c.poly(&[root, tip, add(root, dir(a + 26.0), len * 0.7)], col);
+            } else {
+                c.taper(root, tip, 5.5 * big, 1.6, if k % 2 == 0 { col } else { shadow(col, 0.1) });
+            }
+        }
+        if bat {
+            for (k, base) in [(0, -150.0f32), (1, -122.0), (2, -96.0)] {
+                let a = base + flap * 0.6 - tr * 8.0;
+                let tip = add(root, dir(a), (17.0 - k as f32 * 3.5) * big);
+                c.linef(root, tip, shadow(col, 0.4));
+            }
+        }
+    };
+    match look.back {
+        1 => cape(c, 13.0, rgb(150, 66, 60), false),
+        2 => cape(c, 22.0, rgb(58, 104, 186), false),
+        3 => wings(c, rgb(244, 244, 252), 1.0, false),
+        4 => {
+            // travel pack with a bedroll
+            let a = r.tw(-8.4, 3.0);
+            let b = r.tw(-3.0, 12.6);
+            let col = rgb(150, 104, 62);
+            c.poly(&[a, (b.0, a.1), b, (a.0, b.1)], col);
+            let roll = r.tw(-5.6, 13.6);
+            c.ellipse(roll.0, roll.1, 4.0, 2.0, rgb(80, 120, 170));
+            let flap = r.tw(-5.6, 9.0);
+            c.disc(flap.0, flap.1, 1.0, rgb(230, 196, 90));
+        }
+        5 => wings(c, rgb(255, 255, 255), 1.45, false),
+        6 => wings(c, rgb(90, 50, 110), 1.35, true),
+        7 => cape(c, 24.0, rgb(40, 44, 96), true),
+        _ => {}
+    }
+    let _ = pal;
+}
+
 // =================================================================== weapons
 
 fn steel() -> Px {
@@ -1842,6 +2041,42 @@ mod sheet {
     fn sheet_export() {
         let path = std::env::var("GB_SHEET").unwrap_or("sheet.png".into());
         let scale = std::env::var("GB_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(3i32);
+        if std::env::var("GB_GEAR").is_ok() {
+            // every hat (idle) and every back item (running), on one sheet
+            let mut cells: Vec<Canvas> = Vec::new();
+            for h in 1..galebound_core::appearance::HATS.len() as u8 {
+                let l = Appearance { body: (h % 2), hair: h % 10, hair_color: h % 10, face: h % 6, top: 1 + h % 8, top_dye: h % 10, bottom: 1 + h % 7, bottom_dye: (h + 3) % 10, shoes: h % 7, skin: h % 8, hat: h, back: 0 };
+                cells.push(render(&l, None, Anim::Idle, 0));
+            }
+            for b in 1..galebound_core::appearance::BACKS.len() as u8 {
+                let l = Appearance { body: (b % 2), hair: b % 10, hair_color: (b + 4) % 10, face: b % 6, top: 1 + b % 8, top_dye: b % 10, bottom: 1 + b % 7, bottom_dye: (b + 3) % 10, shoes: b % 7, skin: (b + 3) % 8, hat: 0, back: b };
+                cells.push(render(&l, None, Anim::Idle, 0));
+                cells.push(render(&l, None, Anim::Run, 2));
+            }
+            let cols = 9;
+            let rows = cells.len().div_ceil(cols) as i32;
+            let (w, h) = (SIZE * cols as i32 * scale, HEIGHT * rows * scale);
+            let mut out = vec![0u8; (w * h * 4) as usize];
+            for (i, c) in cells.iter().enumerate() {
+                let (cx, cy) = ((i % cols) as i32 * SIZE, (i / cols) as i32 * HEIGHT);
+                for y in 0..c.h {
+                    for x in 0..c.w {
+                        let mut p = c.get(x, y);
+                        if p[3] == 0 {
+                            p = if (x / 8 + y / 8) % 2 == 0 { [214, 228, 240, 255] } else { [200, 216, 232, 255] };
+                        }
+                        for sy in 0..scale {
+                            for sx in 0..scale {
+                                let k = ((((cy + y) * scale + sy) * w + (cx + x) * scale + sx) * 4) as usize;
+                                out[k..k + 4].copy_from_slice(&p);
+                            }
+                        }
+                    }
+                }
+            }
+            std::fs::write(&path, crate::pixel::png_rgba(w as u32, h as u32, &out)).unwrap();
+            return;
+        }
         let looks = [
             Appearance { body: 0, hair: 8, hair_color: 0, face: 1, top: 3, top_dye: 8, bottom: 7, bottom_dye: 9, shoes: 1, skin: 6, ..Default::default() },
             Appearance { body: 1, hair: 2, hair_color: 9, face: 0, top: 7, top_dye: 8, bottom: 3, bottom_dye: 2, shoes: 6, skin: 1, ..Default::default() },

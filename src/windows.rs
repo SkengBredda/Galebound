@@ -300,7 +300,7 @@ impl Windows {
     // ------------------------------------------------------------------ inventory
 
     fn inventory_window(&mut self, sim: &mut Sim, ui: &Ui) {
-        let (x, y, w, h) = (gfx::VW - 404.0, 100.0, 384.0, 506.0);
+        let (x, y, w, h) = (gfx::VW - 404.0, 56.0, 384.0, 572.0);
         widgets::panel(x, y, w, h);
         self.hit((x, y, w, h), Target::Window);
         widgets::title("Inventory", x + w * 0.5, y + 14.0, 22.0);
@@ -312,19 +312,20 @@ impl Windows {
         // equipment
         gfx::text("Equipped", x + 24.0, y + 50.0, 14.0, widgets::ink_soft());
         for (k, &slot) in EQUIP_SLOTS.iter().enumerate() {
-            let sx = x + 36.0 + k as f32 * 84.0;
-            let sy = y + 70.0;
+            // two rows of six (the weapon first)
+            let sx = x + 24.0 + (k % 6) as f32 * 58.0;
+            let sy = y + 66.0 + (k / 6) as f32 * 70.0;
             let def = sim.save.inventory.equipped(slot);
             slot_bg(sx, sy, SLOT, hover == Some(Target::Equip(slot)), def.map(|d| px_color(icons::tier_color(d.tier))));
             match def {
                 Some(d) => gfx::tex(&item_tex(d), sx + 5.0, sy + 5.0, 1.0, false, WHITE),
                 None => gfx::text_centered(&slot.name()[..1], sx + SLOT * 0.5, sy + 14.0, 16.0, rgb(190, 170, 140)),
             }
-            gfx::text_centered(slot.name(), sx + SLOT * 0.5, sy + SLOT + 4.0, 12.0, widgets::ink_soft());
+            gfx::text_centered(slot.name(), sx + SLOT * 0.5, sy + SLOT + 3.0, 11.0, widgets::ink_soft());
             self.hit((sx, sy, SLOT, SLOT), Target::Equip(slot));
         }
         // bag grid
-        let gy = y + 172.0;
+        let gy = y + 232.0;
         gfx::text(&format!("Bag ({}/{})", sim.save.inventory.slots.len(), INVENTORY_SLOTS), x + 24.0, gy - 20.0, 14.0, widgets::ink_soft());
         let cols = 6;
         for i in 0..INVENTORY_SLOTS {
@@ -1008,8 +1009,8 @@ impl Windows {
                     _ => self.say("Only consumables go on the hotbar", true),
                 }
             }
-            (Target::Inv(i), Some(Target::Equip(_))) => {
-                if let Err(e) = sim.equip_from_slot(i) {
+            (Target::Inv(i), Some(Target::Equip(slot))) => {
+                if let Err(e) = sim.equip_into(i, slot) {
                     self.say(e, true);
                 }
             }
@@ -1052,6 +1053,7 @@ impl Windows {
                 ItemKind::Special(items::Special::Pet(_)) => "Pet - click to adopt".to_string(),
                 ItemKind::Special(items::Special::PetFood) => "Pet Food - click to feed your pet".to_string(),
                 ItemKind::Equip(s) => match def.class {
+                    _ if s == items::GearKind::Ring || s == items::GearKind::Earring => format!("{} - fits either {} slot", s.name(), s.name().to_lowercase()),
                     Some(c) => format!("{} - {}", s.name(), c.info().name),
                     None => s.name().to_string(),
                 },
@@ -1157,7 +1159,23 @@ pub fn gear_look(base: &galebound_core::appearance::Appearance, sim: &Sim) -> ga
 
 pub fn gear_look_save(base: &galebound_core::appearance::Appearance, save: &galebound_core::save::CharacterSave) -> galebound_core::appearance::Appearance {
     let mut l = *base;
-    if let Some(d) = save.inventory.equipped(EquipSlot::Armor) {
+    if let Some(d) = save.inventory.equipped(EquipSlot::Helmet) {
+        if let items::Look::Hat(h) = d.look {
+            l.hat = h;
+        }
+    }
+    if let Some(d) = save.inventory.equipped(EquipSlot::Legs) {
+        if let items::Look::Bottom(b, dye) = d.look {
+            l.bottom = b;
+            l.bottom_dye = dye;
+        }
+    }
+    if let Some(d) = save.inventory.equipped(EquipSlot::Back) {
+        if let items::Look::Back(b) = d.look {
+            l.back = b;
+        }
+    }
+    if let Some(d) = save.inventory.equipped(EquipSlot::Torso) {
         if let items::Look::Top(t, dye) = d.look {
             l.top = t;
             l.top_dye = dye;

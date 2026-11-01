@@ -78,6 +78,36 @@ pub const SKIN_TONES: &[(&str, [u8; 3])] = &[
     ("Ebony", [72, 46, 34]),
 ];
 
+/// Headwear (from helmets or cosmetics). Index 0 = none.
+pub const HATS: &[&str] = &[
+    "None",
+    "Bandana",
+    "Leather Cap",
+    "Pointed Hat",
+    "Iron Sallet",
+    "Feathered Hat",
+    "Hood",
+    "Circlet",
+    // exclusive cosmetics
+    "Cat Ears",
+    "Flower Crown",
+    "Starry Halo",
+    "Crown of Gales",
+];
+
+/// Worn on the back (from back gear or cosmetics). Index 0 = none.
+pub const BACKS: &[&str] = &[
+    "None",
+    "Short Cloak",
+    "Long Cape",
+    "Feather Wings",
+    "Travel Pack",
+    // exclusive cosmetics
+    "Angel Wings",
+    "Bat Wings",
+    "Star Mantle",
+];
+
 /// Dye colours available for the top and bottom.
 pub const DYES: &[(&str, [u8; 3])] = &[
     ("Forest", [70, 128, 86]),
@@ -105,6 +135,9 @@ pub struct Appearance {
     pub bottom_dye: u8,
     pub shoes: u8,
     pub skin: u8,
+    /// Gear and cosmetics only (not chosen in the creator): 0 = none.
+    pub hat: u8,
+    pub back: u8,
 }
 
 /// One editable slot in the character creator.
@@ -219,6 +252,12 @@ impl Appearance {
             let v = self.get(s);
             self.set(s, v);
         }
+        if self.hat as usize >= HATS.len() {
+            self.hat = 0;
+        }
+        if self.back as usize >= BACKS.len() {
+            self.back = 0;
+        }
         self
     }
     /// Random look. Body type is kept; clothes are always worn (never "None").
@@ -242,12 +281,17 @@ impl Appearance {
         self.body == 1
     }
 
-    /// Encode as comma-separated indices (save format v2).
+    /// Encode as comma-separated indices (10 numbers, plus hat and back
+    /// when either is worn).
     pub fn encode(&self) -> String {
-        format!(
+        let mut s = format!(
             "{},{},{},{},{},{},{},{},{},{}",
             self.body, self.hair, self.hair_color, self.face, self.top, self.top_dye, self.bottom, self.bottom_dye, self.shoes, self.skin
-        )
+        );
+        if self.hat != 0 || self.back != 0 {
+            s.push_str(&format!(",{},{}", self.hat, self.back));
+        }
+        s
     }
 
     /// Decode either format: 10 numbers (v2) or the original 9 numbers (v1,
@@ -255,7 +299,20 @@ impl Appearance {
     pub fn decode(s: &str) -> Option<Appearance> {
         let n: Vec<u8> = s.split(',').map(|x| x.trim().parse().unwrap_or(0)).collect();
         let a = match n.len() {
-            10 => Appearance { body: n[0], hair: n[1], hair_color: n[2], face: n[3], top: n[4], top_dye: n[5], bottom: n[6], bottom_dye: n[7], shoes: n[8], skin: n[9] },
+            10 | 12 => Appearance {
+                body: n[0],
+                hair: n[1],
+                hair_color: n[2],
+                face: n[3],
+                top: n[4],
+                top_dye: n[5],
+                bottom: n[6],
+                bottom_dye: n[7],
+                shoes: n[8],
+                skin: n[9],
+                hat: n.get(10).copied().unwrap_or(0),
+                back: n.get(11).copied().unwrap_or(0),
+            },
             9 => Appearance {
                 body: 0,
                 hair: n[0],
@@ -267,6 +324,8 @@ impl Appearance {
                 bottom_dye: n[6],
                 shoes: n[7],
                 skin: n[8],
+                hat: 0,
+                back: 0,
             },
             _ => return None,
         };

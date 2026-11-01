@@ -3,7 +3,7 @@
 
 use crate::pixel::{light, rgb, shadow, Canvas, Layer, Px, INK};
 use galebound_core::classes::Weapon;
-use galebound_core::items::{self, Effect, EquipSlot, ItemDef, ItemKind};
+use galebound_core::items::{self, Effect, GearKind, ItemDef, ItemKind};
 use galebound_core::skills::{SkillDef, SkillEffect, SkillFx};
 
 pub const ICON: i32 = 18;
@@ -119,8 +119,8 @@ pub fn item(def: &ItemDef) -> Canvas {
             c.set(6, 7, arrow);
             c.set(5, 7, arrow);
         }),
-        ItemKind::Equip(EquipSlot::Weapon) => weapon_icon(items::weapon_art(def.id).unwrap_or(Weapon::Club), accent),
-        ItemKind::Equip(EquipSlot::Armor) => outlined(|c| {
+        ItemKind::Equip(GearKind::Weapon) => weapon_icon(items::weapon_art(def.id).unwrap_or(Weapon::Club), accent),
+        ItemKind::Equip(GearKind::Torso) => outlined(|c| {
             let body = match def.look {
                 items::Look::Top(t, d) => {
                     let dye = galebound_core::appearance::DYES[(d as usize) % galebound_core::appearance::DYES.len()].1;
@@ -142,7 +142,103 @@ pub fn item(def: &ItemDef) -> Canvas {
                 c.rect(5, 11, 8, 1, accent);
             }
         }),
-        ItemKind::Equip(EquipSlot::Boots) => outlined(|c| {
+        ItemKind::Equip(GearKind::Helmet) => outlined(|c| {
+            let hat = match def.look {
+                items::Look::Hat(h) => h,
+                _ => 2,
+            };
+            match hat {
+                1 => {
+                    // bandana: a band with knot tails
+                    c.rect(3, 8, 12, 4, rgb(196, 60, 64));
+                    c.rect(3, 8, 12, 1, rgb(232, 110, 110));
+                    c.rect(14, 10, 3, 2, rgb(170, 48, 52));
+                    c.rect(15, 12, 2, 3, rgb(170, 48, 52));
+                }
+                3 => {
+                    // pointed hat
+                    c.poly(&[(3.0, 14.0), (15.0, 14.0), (10.0, 2.0)], rgb(80, 80, 170));
+                    c.rect(1, 13, 16, 3, rgb(66, 66, 150));
+                    c.rect(6, 11, 7, 2, rgb(230, 196, 90));
+                }
+                4 => {
+                    // iron sallet
+                    c.disc(9.0, 10.0, 6.5, rgb(176, 184, 200));
+                    c.rect(2, 10, 15, 6, rgb(0, 0, 0));
+                    c.rect(3, 9, 13, 2, rgb(146, 154, 172));
+                    c.rect(8, 3, 2, 7, rgb(214, 220, 234));
+                }
+                5 => {
+                    // wide-brimmed hat with a feather
+                    c.rect(1, 12, 16, 3, rgb(130, 90, 56));
+                    c.disc(9.0, 10.0, 5.0, rgb(150, 104, 64));
+                    c.rect(4, 10, 10, 2, rgb(196, 60, 64));
+                    c.taper((12.0, 9.0), (16.0, 2.0), 2.0, 0.8, rgb(240, 240, 250));
+                }
+                6 => {
+                    // hood
+                    c.disc(9.0, 9.0, 7.0, rgb(70, 120, 76));
+                    c.disc(10.0, 11.0, 4.0, rgb(0, 0, 0));
+                    c.rect(4, 14, 10, 3, rgb(60, 104, 66));
+                }
+                7 => {
+                    // circlet
+                    c.ellipse(9.0, 10.0, 7.0, 3.0, rgb(214, 220, 236));
+                    c.ellipse(9.0, 10.0, 5.0, 1.6, rgb(0, 0, 0));
+                    c.disc(9.0, 7.0, 2.2, rgb(90, 160, 240));
+                }
+                _ => {
+                    // leather cap
+                    c.disc(9.0, 10.0, 6.5, rgb(150, 100, 60));
+                    c.rect(2, 11, 15, 6, rgb(0, 0, 0));
+                    c.rect(9, 12, 7, 2, rgb(120, 78, 44));
+                    c.rect(5, 6, 3, 1, rgb(186, 136, 90));
+                }
+            }
+        }),
+        ItemKind::Equip(GearKind::Legs) => outlined(|c| {
+            let col = match def.look {
+                items::Look::Bottom(_, d) => {
+                    let dye = galebound_core::appearance::DYES[(d as usize) % galebound_core::appearance::DYES.len()].1;
+                    rgb(dye[0], dye[1], dye[2])
+                }
+                _ => rgb(110, 90, 70),
+            };
+            let col = if def.mods.pdef >= 10.0 { rgb(170, 178, 194) } else { col };
+            c.rect(4, 2, 10, 4, col);
+            c.rect(4, 5, 4, 12, col);
+            c.rect(10, 5, 4, 12, shadow(col, 0.12));
+            c.rect(4, 2, 10, 1, accent);
+            c.rect(8, 6, 2, 3, shadow(col, 0.3));
+        }),
+        ItemKind::Equip(GearKind::Back) => outlined(|c| {
+            let back = match def.look {
+                items::Look::Back(b) => b,
+                _ => 1,
+            };
+            match back {
+                3 => {
+                    for k in 0..4 {
+                        let y = 4.0 + k as f32 * 2.6;
+                        c.taper((8.0, y), (16.0 - k as f32, y + 4.0), 3.0, 1.0, rgb(244, 244, 252));
+                        c.taper((10.0, y), (2.0 + k as f32, y + 4.0), 3.0, 1.0, rgb(226, 230, 244));
+                    }
+                }
+                4 => {
+                    c.rect(4, 4, 10, 12, rgb(150, 104, 62));
+                    c.rect(4, 4, 10, 3, rgb(120, 80, 46));
+                    c.rect(6, 10, 6, 4, rgb(176, 128, 80));
+                    c.rect(3, 15, 12, 2, rgb(80, 120, 170));
+                }
+                _ => {
+                    let col = if back == 2 { rgb(60, 110, 190) } else { rgb(150, 70, 60) };
+                    c.poly(&[(6.0, 2.0), (12.0, 2.0), (16.0, if back == 2 { 17.0 } else { 13.0 }), (2.0, if back == 2 { 17.0 } else { 13.0 })], col);
+                    c.rect(5, 2, 8, 2, rgb(230, 196, 90));
+                    c.line(9, 4, 9, 12, shadow(col, 0.3));
+                }
+            }
+        }),
+        ItemKind::Equip(GearKind::Boots) => outlined(|c| {
             let col = if def.mods.pdef >= 10.0 { rgb(170, 176, 190) } else if def.mods.speed_pct > 0.05 { rgb(120, 170, 120) } else { rgb(150, 100, 60) };
             c.rect(4, 3, 4, 10, col);
             c.rect(4, 12, 8, 3, col);
@@ -153,7 +249,7 @@ pub fn item(def: &ItemDef) -> Canvas {
                 c.rect(2, 4, 2, 3, rgb(250, 250, 250));
             }
         }),
-        ItemKind::Equip(EquipSlot::Accessory) => outlined(|c| {
+        ItemKind::Equip(GearKind::Necklace) | ItemKind::Equip(GearKind::Ring) | ItemKind::Equip(GearKind::Earring) => outlined(|c| {
             let gem = if def.mods.main.str > 0 {
                 rgb(220, 70, 70)
             } else if def.mods.main.dex > 0 {
@@ -163,7 +259,15 @@ pub fn item(def: &ItemDef) -> Canvas {
             } else {
                 rgb(240, 200, 70)
             };
-            if def.id.contains("amulet") || def.id.contains("pendant") || def.id.contains("charm") {
+            if def.slot() == Some(GearKind::Earring) {
+                // a pair of hanging earrings
+                for x in [5.0f32, 13.0] {
+                    c.disc(x, 4.0, 1.6, rgb(220, 190, 90));
+                    c.line(x as i32, 5, x as i32, 9, rgb(220, 190, 90));
+                    c.disc(x, 12.0, 2.8, if def.id.contains("coin") { rgb(240, 200, 80) } else { gem });
+                    c.set(x as i32 - 1, 11, light(gem, 0.6));
+                }
+            } else if def.slot() == Some(GearKind::Necklace) {
                 c.line(4, 2, 9, 9, rgb(220, 190, 90));
                 c.line(14, 2, 9, 9, rgb(220, 190, 90));
                 c.disc(9.0, 11.0, 4.0, gem);

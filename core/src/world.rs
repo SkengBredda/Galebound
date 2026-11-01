@@ -200,7 +200,7 @@ impl Map {
 /// (0 = first real item), so NPCs are always dressed.
 #[allow(clippy::too_many_arguments)]
 fn look(body: u8, hair: u8, hc: u8, face: u8, top: u8, td: u8, bottom: u8, bd: u8, shoes: u8, skin: u8) -> Appearance {
-    Appearance { body, hair, hair_color: hc, face, top: top + 1, top_dye: td, bottom: bottom + 1, bottom_dye: bd, shoes, skin }
+    Appearance { body, hair, hair_color: hc, face, top: top + 1, top_dye: td, bottom: bottom + 1, bottom_dye: bd, shoes, skin, hat: 0, back: 0 }
 }
 
 fn deco(kind: DecoKind, x: f32, y: f32, scale: f32, layer: u8) -> Deco {
@@ -795,7 +795,7 @@ pub struct TownSpec {
 }
 
 const fn lk(body: u8, hair: u8, hc: u8, face: u8, top: u8, td: u8, bottom: u8, bd: u8, shoes: u8, skin: u8) -> Appearance {
-    Appearance { body, hair, hair_color: hc, face, top: top + 1, top_dye: td, bottom: bottom + 1, bottom_dye: bd, shoes, skin }
+    Appearance { body, hair, hair_color: hc, face, top: top + 1, top_dye: td, bottom: bottom + 1, bottom_dye: bd, shoes, skin, hat: 0, back: 0 }
 }
 
 const fn shops(prefix: [&'static str; 3], maps: [&'static str; 3], titles: [&'static str; 3], looks: [Appearance; 3]) -> [ShopSpec; 3] {

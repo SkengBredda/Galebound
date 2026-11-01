@@ -14,7 +14,7 @@ use crate::pets::{PetSave, PetSpecies};
 use std::path::PathBuf;
 
 pub const MAX_CHARACTERS: usize = 3;
-pub const SAVE_VERSION: u32 = 4;
+pub const SAVE_VERSION: u32 = 5;
 
 /// How the game window is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,7 +130,7 @@ impl CharacterSave {
         let mut inventory = Inventory::default();
         inventory.add("hp_potion", 3);
         inventory.equip[EquipSlot::Weapon.index()] = Some(items::starter_weapon(ClassId::Novice).to_string());
-        inventory.equip[EquipSlot::Armor.index()] = Some("novice_garb".to_string());
+        inventory.equip[EquipSlot::Torso.index()] = Some("novice_garb".to_string());
         let mut hotbar = vec![HotbarSlot::Empty; HOTBAR_SLOTS];
         hotbar[0] = HotbarSlot::Skill("power_strike".into());
         hotbar[HOTBAR_SLOTS - 2] = HotbarSlot::Item("hp_potion".into());
@@ -441,9 +441,21 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                 }
                 "equip" => {
                     if let Some((slot, id)) = v.split_once(',') {
-                        if let (Some(slot), Some(def)) = (EquipSlot::from_key(slot), items::item(id)) {
-                            if def.slot() == Some(slot) {
-                                c.inventory.equip[slot.index()] = Some(id.to_string());
+                        if let Some(def) = items::item(id) {
+                            // v4 and older had armor / accessory slots: put
+                            // the item wherever its kind of gear goes now.
+                            let slot = EquipSlot::from_key(slot).filter(|s| def.slot() == Some(s.kind()));
+                            let slot = match (slot, def.slot()) {
+                                (Some(s), _) => Some(s),
+                                (None, Some(k)) => Some(c.inventory.slot_for(k)),
+                                _ => None,
+                            };
+                            if let Some(s) = slot {
+                                if c.inventory.equip[s.index()].is_none() {
+                                    c.inventory.equip[s.index()] = Some(id.to_string());
+                                } else {
+                                    c.inventory.add(id, 1);
+                                }
                             }
                         }
                     }
@@ -562,7 +574,8 @@ mod tests {
         c.ap = 4;
         c.inventory.add("elixir", 2);
         c.inventory.add("chain_shirt", 1);
-        c.inventory.equip[EquipSlot::Accessory.index()] = Some("copper_ring".into());
+        c.inventory.equip[EquipSlot::Ring2.index()] = Some("copper_ring".into());
+        c.inventory.equip[EquipSlot::Back.index()] = Some("gale_cape".into());
         c.hotbar[3] = HotbarSlot::Skill("thunder_palm".into());
         c.quests.push(QuestEntry { id: "first_breeze".into(), state: QuestState::Done, progress: 1 });
         c.set_flag("met_elder");
@@ -620,4 +633,24 @@ mod tests {
         let fresh = CharacterSave::new("New", Appearance::default());
         assert_eq!(fresh.class, ClassId::Novice);
     }
+
+    #[test]
+    fn old_equipment_slots_move_to_the_new_ones() {
+        let old = "version=4\nemail=a@b.co\nsalt=00\nhash=ab\n[character]\nname=Old\nclass=vanguard\nlevel=12\nstats=10,5,5,5\n\
+                   equip=weapon,iron_sword\nequip=armor,chain_shirt\nequip=boots,leather_boots\nequip=accessory,rogue_coin\n";
+        let a = decode_account(old).unwrap();
+        let c = &a.characters[0];
+        let e = |s: EquipSlot| c.inventory.equip[s.index()].as_deref();
+        assert_eq!(e(EquipSlot::Weapon), Some("iron_sword"));
+        assert_eq!(e(EquipSlot::Torso), Some("chain_shirt"));
+        assert_eq!(e(EquipSlot::Boots), Some("leather_boots"));
+        assert_eq!(e(EquipSlot::Earring1), Some("rogue_coin"), "the old accessory finds its new slot");
+        // and the new format round-trips, both ring slots included
+        let mut c2 = c.clone();
+        c2.inventory.equip[EquipSlot::Ring1.index()] = Some("copper_ring".into());
+        c2.inventory.equip[EquipSlot::Ring2.index()] = Some("power_band".into());
+        let back = decode_character(&encode_character(&c2)).unwrap();
+        assert_eq!(back.inventory.equip, c2.inventory.equip);
+    }
+
 }

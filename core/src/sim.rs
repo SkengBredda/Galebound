@@ -1943,11 +1943,22 @@ impl Sim {
 
     pub fn equip_from_slot(&mut self, idx: usize) -> Result<(), String> {
         let id = self.save.inventory.slots.get(idx).ok_or("No item")?.id.clone();
+        let kind = items::item(&id).ok_or("Unknown item")?.slot().ok_or("Can't equip that")?;
+        let slot = self.save.inventory.slot_for(kind);
+        self.equip_into(idx, slot)
+    }
+
+    /// Equip the item in a bag slot into a particular equipment slot (e.g.
+    /// your second ring slot), swapping out whatever was there.
+    pub fn equip_into(&mut self, idx: usize, slot: EquipSlot) -> Result<(), String> {
+        let id = self.save.inventory.slots.get(idx).ok_or("No item")?.id.clone();
         if let Some(e) = self.equip_problem(&id) {
             return Err(e);
         }
         let def = items::item(&id).ok_or("Unknown item")?;
-        let slot = def.slot().ok_or("Can't equip that")?;
+        if def.slot() != Some(slot.kind()) {
+            return Err(format!("That doesn't go in the {} slot", slot.name()));
+        }
         self.save.inventory.take_slot(idx, 1);
         if let Some(old) = self.save.inventory.equip[slot.index()].replace(id) {
             self.save.inventory.add(&old, 1);
@@ -3911,7 +3922,7 @@ mod tests {
         let hp = s.player.hp;
         s.hurt_player(40.0, 0.0, V2::ZERO, false);
         let soft = hp - s.player.hp;
-        s.save.inventory.equip[1] = Some("plate_armor".into());
+        s.save.inventory.equip[EquipSlot::Torso.index()] = Some("plate_armor".into());
         s.recompute_stats();
         s.player.hp = s.player.max_hp;
         let hp = s.player.hp;
