@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.9.0 – friends, parties & guilds.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.9.1 – friends, parties & guilds.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
@@ -362,6 +362,13 @@ Marks**, spent in the **Cosmetics** tab on exclusive cosmetics (Flower Crown,
 Cat Ears, Starry Halo, Crown of Gales, Angel Wings, Bat Wings, Star Mantle)
 that show over your gear. **Attendance**: log in each day to collect a
 reward on a 7-day cycle (gold, potions, scrolls and, on day 7, Gale Marks).
+
+**Graphics (Esc > Graphics).** Render resolution 1280x720, 1600x900 or
+1920x1080: the same view and layout, drawn on a finer grid (smoother edges,
+scrolling and text) while the pixel art stays crisp. In a window, the window
+resizes to match; in fullscreen the picture is scaled to your screen. Display
+mode: Windowed, Windowed Fullscreen or Fullscreen. Both are remembered on
+your computer.
 
 ## Project layout
 

@@ -35,7 +35,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.9.0";
+pub const VERSION: &str = "0.9.1";
 
 /// How long to wait for the server to answer a menu action.
 pub const REPLY_WAIT: Duration = Duration::from_secs(8);
@@ -94,10 +94,11 @@ pub enum Go {
 fn window_conf() -> Conf {
     let mode = display::saved_mode();
     display::started_in(mode);
+    let (w, h) = display::saved_resolution();
     Conf {
         window_title: GAME_TITLE.to_owned(),
-        window_width: display::WINDOW_W as i32,
-        window_height: display::WINDOW_H as i32,
+        window_width: w as i32,
+        window_height: h as i32,
         fullscreen: mode != galebound_core::save::DisplayMode::Windowed,
         window_resizable: true,
         high_dpi: true,
@@ -109,7 +110,7 @@ fn window_conf() -> Conf {
 #[macroquad::main(window_conf)]
 async fn main() {
     prevent_quit();
-    gfx::init();
+    gfx::init(display::saved_resolution());
     let mut app = App { account: None, net: None, time: 0.0, quit: false, save_error: None };
     let mut screen = Screen::Login(LoginScreen::new(&app));
 

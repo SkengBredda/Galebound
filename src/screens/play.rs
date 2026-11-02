@@ -157,6 +157,11 @@ impl PlayScreen {
     }
 
     #[allow(dead_code)]
+    pub fn open_graphics(&mut self) {
+        self.menu = Menu::Graphics;
+    }
+
+    #[allow(dead_code)]
     pub fn open_settings(&mut self) {
         self.menu = Menu::Settings;
     }
@@ -764,10 +769,25 @@ impl PlayScreen {
         let ui = Ui::begin();
         let mut changed = false;
         gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(10, 14, 30, 160));
-        let (w, h) = (520.0, 360.0);
+        let (w, h) = (560.0, 500.0);
         let (x, y) = ((gfx::VW - w) * 0.5, (gfx::VH - h) * 0.5);
         widgets::panel(x, y, w, h);
         widgets::title("Graphics", x + w * 0.5, y + 22.0, 28.0);
+        // render resolution
+        gfx::text("Resolution", x + 40.0, y + 74.0, 18.0, widgets::ink());
+        let cur_res = gfx::resolution();
+        let bw = (w - 80.0 - 2.0 * 12.0) / gfx::RESOLUTIONS.len() as f32;
+        let mut res_hover = false;
+        for (i, &(rw, rh)) in gfx::RESOLUTIONS.iter().enumerate() {
+            let bx = x + 40.0 + i as f32 * (bw + 12.0);
+            let on = cur_res == (rw, rh);
+            let style = if on { widgets::ButtonStyle::Primary } else { widgets::ButtonStyle::Secondary };
+            if widgets::button(&ui, bx, y + 102.0, bw, 44.0, &format!("{} x {}", rw, rh), style, true) && !on {
+                crate::display::set_resolution(rw, rh);
+            }
+            res_hover |= gfx::mouse_in(bx, y + 102.0, bw, 44.0);
+        }
+        let y = y + 100.0;
         gfx::text("Display mode", x + 40.0, y + 74.0, 18.0, widgets::ink());
         let help = [
             "A normal window you can move and resize.",
@@ -789,7 +809,13 @@ impl PlayScreen {
             }
         }
         let cur = DISPLAY_MODES.iter().position(|m| *m == self.sim.settings.display).unwrap_or(0);
-        gfx::text_wrapped(help[hovered.unwrap_or(cur)], x + 40.0, y + h - 82.0, w - 200.0, 14.0, widgets::ink_soft());
+        let y = y - 100.0;
+        let tip = if res_hover {
+            "How finely the game is drawn. Higher looks smoother and sharper on big screens; the view and pixel art stay the same."
+        } else {
+            help[hovered.unwrap_or(cur)]
+        };
+        gfx::text_wrapped(tip, x + 40.0, y + h - 82.0, w - 200.0, 14.0, widgets::ink_soft());
         let back = widgets::button(&ui, x + w - 150.0, y + h - 70.0, 110.0, 40.0, "Back", widgets::ButtonStyle::Secondary, true);
         if back || is_key_pressed(KeyCode::Escape) {
             self.menu = Menu::Pause;

@@ -7,6 +7,31 @@ so the whole history is in one place.
 
 ---
 
+## 0.9.1 – 1080p rendering
+*2 November 2026*
+
+**Added**
+- **Resolution** option in Esc > Graphics: 1280 x 720, 1600 x 900 or
+  1920 x 1080. The game now draws at the chosen resolution instead of a
+  640 x 360 canvas scaled up. You see the same amount of the world with the
+  same layout, but edges, glows, shapes, text and scrolling are much finer,
+  and the pixel art stays crisp.
+- In a window, the window resizes to the chosen resolution. In Windowed
+  Fullscreen or Fullscreen, the picture is scaled to fit your screen.
+- Your choice is saved on your computer (`resolution.cfg` next to
+  `display.cfg`), and the game opens at that size next time.
+
+**Changed**
+- Even at the default 1280 x 720 the game now renders at full window
+  resolution (it used to render at 640 x 360 and double it), so movement and
+  shapes are smoother than in 0.9.0.
+
+**Note:** 1280 x 720 and 1920 x 1080 are exact multiples of the pixel-art
+grid. At 1600 x 900 a few font and sprite pixels are slightly uneven in size.
+Clients and servers from 0.9.0 and 0.9.1 work together.
+
+---
+
 ## 0.9.0 – Friends, parties & guilds
 *1 November 2026*
 

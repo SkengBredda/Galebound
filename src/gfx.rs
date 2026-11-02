@@ -1,9 +1,14 @@
 //! Pixel-art rendering pipeline.
 //!
-//! Everything is drawn into a 640x360 render target with no smoothing, then
-//! scaled to the window with hard pixel edges (integer scale when possible).
-//! Callers keep working in a 1280x720 "virtual" UI space; world drawing uses
-//! a camera (`set_cam`) where 1 world unit = 0.85 canvas pixels.
+//! Everything is drawn into a render target with no smoothing, then scaled
+//! to the window with hard pixel edges (integer scale when possible).
+//! Layout works on a 640x360 "logical canvas" (the pixel-art grid); the
+//! render target is that canvas times the *render scale*: 2 = 1280x720,
+//! 2.5 = 1600x900, 3 = 1920x1080 (see [`RESOLUTIONS`]). A higher render
+//! scale keeps the same view and layout but draws edges, shapes, text and
+//! movement on a finer grid. Callers keep working in a 1280x720 "virtual"
+//! UI space; world drawing uses a camera (`set_cam`) where 1 world unit =
+//! 0.85 logical canvas pixels.
 //! Text uses the hand-made pixel font in `font.rs` via a glyph atlas.
 
 use crate::font::Font;
@@ -19,9 +24,12 @@ use std::cell::{Cell, RefCell};
 /// Virtual UI space (all UI code uses these coordinates).
 pub const VW: f32 = 1280.0;
 pub const VH: f32 = 720.0;
-/// The pixel canvas actually rendered.
+/// The logical pixel canvas (the pixel-art grid layout is built on).
 pub const CW: f32 = 640.0;
 pub const CH: f32 = 360.0;
+
+/// Render resolutions offered in the Graphics menu: (width, height).
+pub const RESOLUTIONS: &[(u32, u32)] = &[(1280, 720), (1600, 900), (1920, 1080)];
 /// Canvas pixels per virtual unit.
 const UI_S: f32 = CW / VW;
 /// Canvas pixels per world unit.
@@ -50,15 +58,50 @@ struct State {
 
 thread_local! {
     static XF: Cell<Xf> = const { Cell::new(Xf { cx: 0.0, cy: 0.0, z: 1.0 }) };
+    /// Render pixels per logical canvas pixel.
+    static RS: Cell<f32> = const { Cell::new(2.0) };
     static ST: RefCell<Option<State>> = const { RefCell::new(None) };
 }
 
-/// Create the render target and font atlas. Call once at startup.
-pub fn init() {
-    let rt = render_target(CW as u32, CH as u32);
+#[inline]
+fn rs() -> f32 {
+    RS.with(|r| r.get())
+}
+
+/// The render target and its camera for a resolution.
+fn target(w: u32, h: u32) -> (RenderTarget, Camera2D) {
+    let rt = render_target(w, h);
     rt.texture.set_filter(FilterMode::Nearest);
-    let mut cam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, CW, CH));
+    let mut cam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, w as f32, h as f32));
     cam.render_target = Some(rt.clone());
+    (rt, cam)
+}
+
+/// Render at this resolution (one of [`RESOLUTIONS`]).
+pub fn set_resolution(w: u32, _h: u32) {
+    let w = w.clamp(640, 3840);
+    let h = (w as f32 * CH / CW).round() as u32;
+    let (rt, cam) = target(w, h);
+    RS.with(|r| r.set(w as f32 / CW));
+    ST.with(|s| {
+        if let Some(st) = s.borrow_mut().as_mut() {
+            st.rt = rt;
+            st.cam = cam;
+        }
+    });
+}
+
+/// The resolution being rendered.
+pub fn resolution() -> (u32, u32) {
+    let k = rs();
+    ((CW * k).round() as u32, (CH * k).round() as u32)
+}
+
+/// Create the render target and font atlas. Call once at startup.
+pub fn init(res: (u32, u32)) {
+    RS.with(|r| r.set(res.0.clamp(640, 3840) as f32 / CW));
+    let (w, h) = resolution();
+    let (rt, cam) = target(w, h);
     let font = Font::new();
     // Glyph atlas: 128 cells of 6x8, white pixels.
     let mut c = Canvas::new(128 * 6, 8);
@@ -95,11 +138,12 @@ pub fn end_frame() {
     set_default_camera();
     clear_background(Color::new(0.0, 0.0, 0.0, 1.0));
     let (sw, sh) = (screen_width(), screen_height());
-    let fit = (sw / CW).min(sh / CH);
+    let (cw, ch) = (CW * rs(), CH * rs());
+    let fit = (sw / cw).min(sh / ch);
     // Integer scaling keeps every pixel the same size; fall back to
     // fractional only when the window is smaller than one canvas.
     let scale = if fit >= 1.0 { fit.floor() } else { fit };
-    let (w, h) = (CW * scale, CH * scale);
+    let (w, h) = (cw * scale, ch * scale);
     let (x, y) = (((sw - w) * 0.5).floor(), ((sh - h) * 0.5).floor());
     ST.with(|s| {
         if let Some(st) = s.borrow_mut().as_mut() {
@@ -118,8 +162,10 @@ pub fn end_frame() {
 /// Draw in world space: camera top-left at (cx, cy) world units.
 /// The camera is snapped to whole canvas pixels so nothing shimmers.
 pub fn set_cam(cx: f32, cy: f32) {
-    let sx = (cx * WORLD_PX).round() / WORLD_PX;
-    let sy = (cy * WORLD_PX).round() / WORLD_PX;
+    // snap to whole render pixels (finer at higher resolutions: smoother scrolling)
+    let k = WORLD_PX * rs();
+    let sx = (cx * k).round() / k;
+    let sy = (cy * k).round() / k;
     XF.with(|x| x.set(Xf { cx: sx, cy: sy, z: WORLD_ZOOM }));
 }
 /// Back to UI space (no camera, no zoom).
@@ -131,15 +177,16 @@ pub fn clear_cam() {
 fn xf() -> Xf {
     XF.with(|x| x.get())
 }
-/// Current space -> canvas pixels.
+/// Current space -> render pixels.
 #[inline]
 fn p(x: f32, y: f32) -> (f32, f32) {
     let t = xf();
-    ((x - t.cx) * t.z * UI_S, (y - t.cy) * t.z * UI_S)
+    let k = t.z * UI_S * rs();
+    ((x - t.cx) * k, (y - t.cy) * k)
 }
 #[inline]
 fn sc(v: f32) -> f32 {
-    v * xf().z * UI_S
+    v * xf().z * UI_S * rs()
 }
 /// Snap to whole canvas pixels.
 #[inline]
@@ -272,7 +319,7 @@ pub fn tex(t: &Texture2D, x: f32, y: f32, k: f32, flip_x: bool, tint: Color) {
         sx,
         sy,
         tint,
-        DrawTextureParams { dest_size: Some(vec2(t.width() * k, t.height() * k)), flip_x, ..Default::default() },
+        DrawTextureParams { dest_size: Some(vec2(t.width() * k * rs(), t.height() * k * rs())), flip_x, ..Default::default() },
     );
 }
 
@@ -285,7 +332,7 @@ pub fn tex_part(t: &Texture2D, x: f32, y: f32, src: (f32, f32, f32, f32), k: f32
         sy,
         tint,
         DrawTextureParams {
-            dest_size: Some(vec2(src.2 * k, src.3 * k)),
+            dest_size: Some(vec2(src.2 * k * rs(), src.3 * k * rs())),
             source: Some(Rect::new(src.0, src.1, src.2, src.3)),
             ..Default::default()
         },
@@ -318,7 +365,7 @@ pub fn text_h(size: f32) -> f32 {
 }
 
 fn draw_glyphs(s: &str, x: f32, y: f32, size: f32, c: Color) {
-    let k = font_k(size);
+    let k = font_k(size) * rs();
     let (mut cx, cy) = pr(x, y);
     with(|st| {
         for ch in s.chars() {
@@ -404,7 +451,8 @@ pub fn text_wrapped(s: &str, x: f32, y: f32, max_w: f32, size: f32, c: Color) ->
 pub fn mouse() -> (f32, f32) {
     let (mx, my) = mouse_position();
     let (bx, by, k) = ST.with(|s| s.borrow().as_ref().map(|st| st.blit).unwrap_or((0.0, 0.0, 1.0)));
-    (((mx - bx) / k) / UI_S, ((my - by) / k) / UI_S)
+    let u = UI_S * rs();
+    (((mx - bx) / k) / u, ((my - by) / k) / u)
 }
 
 /// The mouse position in world units, for a camera at (cx, cy).
