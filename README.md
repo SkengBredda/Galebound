@@ -376,7 +376,7 @@ pads on Android:
 - RB talk, LB pick up, L3 potion, R3 quest log, Start menu, Back bag.
 - Hold LT + A/B/X/Y for hotbar 1-4, or RT + A/B/X/Y for 5-8.
 
-**Android & touch.** `./build-android.sh` builds `Galebound.apk` (Linux +
+**Android & touch.** `./build-android.sh` (Linux) or `build-android.bat` (Windows) builds `Galebound.apk` (
 Docker). Phones get a floating joystick and action buttons (Jump, Attack,
 Heavy, Dodge, Talk, Loot) plus Menu / Bag / Chat / Quest buttons. Windows,
 the hotbar and menus work by tapping; tap a player for their menu. Android

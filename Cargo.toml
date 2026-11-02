@@ -4,7 +4,7 @@ exclude = ["third_party"]
 
 [package]
 name = "galebound"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 description = "Galebound Online - a side-scrolling action MMO prototype"
 

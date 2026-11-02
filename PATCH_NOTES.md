@@ -7,6 +7,16 @@ so the whole history is in one place.
 
 ---
 
+## 0.10.1 – Build the APK on Windows
+*2 November 2026*
+
+**Added**
+- `build-android.bat`: builds `Galebound.apk` on Windows 10/11 with Docker
+  Desktop (double-click it in the source folder). No game changes, so 0.10.1
+  plays with 0.9.x and 0.10.0.
+
+---
+
 ## 0.10.0 – Android, touch & controllers
 *2 November 2026*
 
