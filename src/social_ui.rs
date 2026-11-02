@@ -252,7 +252,10 @@ impl SocialUi {
 
     /// Right-click in the world: open the menu for the player under the mouse.
     pub fn right_click(&mut self, sim: &Sim, cam_x: f32, cam_y: f32) -> bool {
-        if !is_mouse_button_pressed(MouseButton::Right) {
+        // touch screens: tap a player (not on the on-screen controls)
+        let (mx, my) = gfx::mouse();
+        let tap = crate::touch::active() && is_mouse_button_pressed(MouseButton::Left) && !crate::touch::on_control(mx, my) && self.menu.is_none();
+        if !is_mouse_button_pressed(MouseButton::Right) && !tap {
             return false;
         }
         let (wx, wy) = gfx::mouse_world(cam_x, cam_y);

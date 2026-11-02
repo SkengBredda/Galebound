@@ -455,6 +455,13 @@ pub fn mouse() -> (f32, f32) {
     (((mx - bx) / k) / u, ((my - by) / k) / u)
 }
 
+/// A window position (e.g. a touch) in virtual UI coordinates.
+pub fn screen_to_virtual(x: f32, y: f32) -> (f32, f32) {
+    let (bx, by, k) = ST.with(|s| s.borrow().as_ref().map(|st| st.blit).unwrap_or((0.0, 0.0, 1.0)));
+    let u = UI_S * rs();
+    (((x - bx) / k) / u, ((y - by) / k) / u)
+}
+
 /// The mouse position in world units, for a camera at (cx, cy).
 pub fn mouse_world(cx: f32, cy: f32) -> (f32, f32) {
     let (mx, my) = mouse();

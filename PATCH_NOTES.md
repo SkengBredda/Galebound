@@ -7,6 +7,49 @@ so the whole history is in one place.
 
 ---
 
+## 0.10.0 – Android, touch & controllers
+*2 November 2026*
+
+**Added**
+- **Android version** (phones and tablets, Android 5.0+, landscape). It
+  plays on the same servers as the PC version: Android and PC players see
+  each other, party, trade and chat as normal. Build the .apk on Linux with
+  `./build-android.sh` (needs Docker; see `android/README.md`).
+- **Touch controls**, shown automatically on Android (and on a PC touch
+  screen once you touch it):
+  - a floating joystick (put your thumb anywhere bottom-left);
+  - Jump, Attack, Heavy, Dodge, Talk and Loot buttons;
+  - small Menu, Bag, Chat and Quest buttons.
+  Windows, the hotbar and menus work by tapping; tap another player for
+  their menu (profile, whisper, party, trade...). The controls hide while a
+  window is open. Text boxes and chat bring up the phone's keyboard, and the
+  phone's Back button works like Esc.
+- **Controller support**:
+  - Xbox-style pads on Windows (XInput) and Linux (`/dev/input/js*`), and
+    Bluetooth / USB pads on Android.
+  - Layout: left stick / D-pad move, A jump, X attack, Y heavy, B dodge,
+    RB talk, LB pick up, L3 potion, R3 quest log, Start menu, Back / Select
+    bag.
+  - Hold LT + A / B / X / Y for hotbar 1-4, or RT + A / B / X / Y for 5-8.
+  - The pause menu, dialogs and the defeat screen work with the pad
+    (D-pad to move, A to choose, B / Start to go back).
+- The pause menu now has Friends & Party, Guild and Achievements (handy on
+  touch screens and controllers).
+- **Linux builds** of the game and server (x86-64; Zorin OS 17 / Ubuntu
+  22.04 or newer).
+
+**Technical**
+- The project now includes a lightly patched copy of miniquad (the window and
+  input library) in `third_party/`. Android drops controller buttons and
+  sticks by default; the patch passes them through.
+- Android saves and settings go in the app's private storage.
+
+**Note:** no protocol change: 0.9.x and 0.10.0 clients and servers all work
+together. The Android build hasn't been run on a phone yet (it can't be built
+here); please report anything odd.
+
+---
+
 ## 0.9.1 – 1080p rendering
 *2 November 2026*
 

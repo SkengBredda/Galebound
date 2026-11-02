@@ -602,6 +602,11 @@ pub fn data_dir() -> PathBuf {
     if let Ok(p) = std::env::var("GALEBOUND_DATA") {
         return PathBuf::from(p);
     }
+    // Android: the app's private storage (package name from Cargo.toml).
+    #[cfg(target_os = "android")]
+    {
+        return PathBuf::from("/data/data/com.galebound.online/files");
+    }
     #[cfg(target_os = "windows")]
     {
         if let Ok(p) = std::env::var("APPDATA") {

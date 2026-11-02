@@ -69,11 +69,15 @@ pub struct InputCollector {
 }
 
 impl InputCollector {
+    /// Keyboard, controller and touch controls together.
     pub fn poll(&mut self, layout: Layout) {
+        crate::pad::update();
         for &a in ALL_ACTIONS {
             let keys = layout.keys(a);
-            let held = keys.iter().filter_map(|k| keycode(k)).any(is_key_down);
-            let pressed = keys.iter().filter_map(|k| keycode(k)).any(is_key_pressed);
+            let (ph, pp) = crate::pad::action(a);
+            let (th, tp) = crate::touch::action(a);
+            let held = keys.iter().filter_map(|k| keycode(k)).any(is_key_down) || ph || th;
+            let pressed = keys.iter().filter_map(|k| keycode(k)).any(is_key_pressed) || pp || tp;
             self.state.set(a, held, pressed);
         }
     }

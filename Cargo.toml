@@ -1,9 +1,10 @@
 [workspace]
 members = [".", "core", "server"]
+exclude = ["third_party"]
 
 [package]
 name = "galebound"
-version = "0.9.1"
+version = "0.10.0"
 edition = "2021"
 description = "Galebound Online - a side-scrolling action MMO prototype"
 
@@ -19,3 +20,25 @@ opt-level = 3
 
 [profile.release]
 lto = "thin"
+
+# The window / input library with a small Galebound patch: Android gamepad
+# buttons, sticks and triggers reach the game (see third_party/README.md).
+[patch.crates-io]
+miniquad = { path = "third_party/miniquad" }
+
+# Android package (built with cargo-quad-apk; see build-android.sh).
+[package.metadata.android]
+package_name = "com.galebound.online"
+label = "Galebound Online"
+version_code = 1000
+version_name = "0.10.0"
+min_sdk_version = 21
+target_sdk_version = 33
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
+fullscreen = true
+
+[package.metadata.android.activity_attributes]
+"android:screenOrientation" = "userLandscape"
+
+[[package.metadata.android.permission]]
+name = "android.permission.INTERNET"

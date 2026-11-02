@@ -294,7 +294,9 @@ impl Windows {
             layout.key_label(Action::Character),
             layout.key_label(Action::Abilities)
         );
-        gfx::text_outlined(&hint, x0 + BAR_STEP * HOTBAR_SLOTS as f32 + 16.0, BAR_Y + 14.0, 13.0, rgb(200, 210, 230));
+        if !crate::touch::active() {
+            gfx::text_outlined(&hint, x0 + BAR_STEP * HOTBAR_SLOTS as f32 + 16.0, BAR_Y + 14.0, 13.0, rgb(200, 210, 230));
+        }
     }
 
     // ------------------------------------------------------------------ inventory

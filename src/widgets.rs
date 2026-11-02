@@ -181,6 +181,9 @@ impl TextField {
 
     /// Draw the field; returns true if it was clicked (to take focus).
     pub fn draw(&self, ui: &Ui, x: f32, y: f32, w: f32, h: f32, label: &str, focused: bool, time: f64) -> bool {
+        if focused {
+            crate::touch::want_keyboard();
+        }
         gfx::text(label, x, y - 24.0, 18.0, ink_soft());
         let border = if focused { accent() } else { shade(wood(), 1.3) };
         gfx::rrect(x - 2.0, y - 2.0, w + 4.0, h + 4.0, 9.0, border);

@@ -5,7 +5,7 @@ look and progression, with platform-fighter style combat (directional light /
 heavy attacks, dodges with invulnerability, double jumps, air recoveries,
 knockback and hit-stop).
 
-**Version 0.9.1 – friends, parties & guilds.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
+**Version 0.10.0 – Android, touch & controllers.** Every update is listed in [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Running it
 
@@ -369,6 +369,22 @@ scrolling and text) while the pixel art stays crisp. In a window, the window
 resizes to match; in fullscreen the picture is scaled to your screen. Display
 mode: Windowed, Windowed Fullscreen or Fullscreen. Both are remembered on
 your computer.
+
+**Controllers.** Xbox-style pads on Windows and Linux, and Bluetooth / USB
+pads on Android:
+- Left stick / D-pad move, A jump, X attack, Y heavy, B dodge.
+- RB talk, LB pick up, L3 potion, R3 quest log, Start menu, Back bag.
+- Hold LT + A/B/X/Y for hotbar 1-4, or RT + A/B/X/Y for 5-8.
+
+**Android & touch.** `./build-android.sh` builds `Galebound.apk` (Linux +
+Docker). Phones get a floating joystick and action buttons (Jump, Attack,
+Heavy, Dodge, Talk, Loot) plus Menu / Bag / Chat / Quest buttons. Windows,
+the hotbar and menus work by tapping; tap a player for their menu. Android
+players join the same servers as PC players.
+
+**Linux.** `cargo run --release` builds and runs it like on Windows (install
+`libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev` first); release
+packages include ready-made `Galebound` and `GaleboundServer` programs.
 
 ## Project layout
 

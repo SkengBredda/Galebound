@@ -35,6 +35,9 @@ enum MenuItem {
     Character,
     Abilities,
     Pets,
+    Friends,
+    Guild,
+    Achievements,
     Settings,
     Graphics,
     Select,
@@ -302,7 +305,8 @@ impl PlayScreen {
         if is_key_pressed(KeyCode::Backspace) {
             self.chat_text.pop();
         }
-        if is_key_pressed(KeyCode::Escape) {
+        crate::touch::want_keyboard();
+        if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back) {
             self.chat_open = false;
             self.chat_text.clear();
             self.input.consumed();
@@ -451,6 +455,9 @@ impl PlayScreen {
             return go;
         }
         let typed = self.chat_input(app);
+        // on-screen controls hide while windows and menus are open
+        let controls = self.menu == Menu::Closed && !self.chat_open && !self.windows.any_open(&self.sim) && !self.social.any_open(&self.sim);
+        crate::touch::update(controls);
         self.input.poll(layout);
         if let Some(t) = self.social.start_chat.take() {
             self.chat_open = true;
@@ -505,7 +512,8 @@ impl PlayScreen {
             }
         }
         // Pause menu toggling (only when no dialog is open; Esc closes dialogs and windows first).
-        if self.menu == Menu::Closed && self.input.pressed(Action::Menu) && self.sim.dialog.is_none() {
+        let back_key = is_key_pressed(KeyCode::Back) && !self.chat_open;
+        if self.menu == Menu::Closed && (self.input.pressed(Action::Menu) || back_key) && self.sim.dialog.is_none() {
             if self.sim.quest_log_open {
                 self.sim.quest_log_open = false;
             } else if self.social.close_one(&mut self.sim) || self.windows.close_one(&mut self.sim) {
@@ -588,7 +596,7 @@ impl PlayScreen {
         render::drop_labels(&self.sim, &cam);
         render::pet_label(&self.sim, &cam, time);
         render::other_labels(&self.sim, &cam);
-        hud::draw(&self.sim, self.show_controls && !self.chat_open && !self.windows.any_open(&self.sim) && !self.social.any_open(&self.sim), time);
+        hud::draw(&self.sim, self.show_controls && !crate::touch::active() && !self.chat_open && !self.windows.any_open(&self.sim) && !self.social.any_open(&self.sim), time);
         self.draw_chat();
         // one input snapshot (typed characters, clicks) for every window this frame
         let ui = Ui { enabled: self.menu == Menu::Closed, ..Ui::begin() };
@@ -603,6 +611,7 @@ impl PlayScreen {
             self.social.right_click(&self.sim, self.cam.x, self.cam.y);
             self.social.frame(&mut self.sim, &ui, dt);
         }
+        crate::touch::draw();
         if self.sim.player.state == PState::Dead && self.sim.player.state_t > TOMB_DELAY && self.menu == Menu::Closed {
             self.death_panel();
         }
@@ -652,13 +661,16 @@ impl PlayScreen {
         gfx::text_outlined("GALEBOUND", x + 34.0, 40.0, 26.0, rgb(255, 236, 170));
         gfx::text(&format!("{}  -  Lv.{} {}", self.sim.save.name, self.sim.save.level, self.sim.player.info.name), x + 36.0, 80.0, 14.0, rgb(190, 200, 225));
         gfx::rect(x + 34.0, 106.0, w - 68.0, 1.0, rgba(255, 255, 255, 50));
-        let items: [(&str, MenuItem); 11] = [
+        let items: [(&str, MenuItem); 14] = [
             ("Resume", MenuItem::Resume),
             ("World Map", MenuItem::Map),
             ("Inventory", MenuItem::Inventory),
             ("Character", MenuItem::Character),
             ("Abilities", MenuItem::Abilities),
             ("Pets", MenuItem::Pets),
+            ("Friends & Party", MenuItem::Friends),
+            ("Guild", MenuItem::Guild),
+            ("Achievements", MenuItem::Achievements),
             ("Controls & Settings", MenuItem::Settings),
             ("Graphics", MenuItem::Graphics),
             ("Character Select", MenuItem::Select),
@@ -666,23 +678,23 @@ impl PlayScreen {
             ("Quit Game", MenuItem::Quit),
         ];
         // keyboard navigation
-        if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
+        if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) || crate::pad::nav_down() {
             self.menu_sel = (self.menu_sel + 1) % items.len();
         }
-        if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
+        if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) || crate::pad::nav_up() {
             self.menu_sel = (self.menu_sel + items.len() - 1) % items.len();
         }
         let mut chosen: Option<MenuItem> = None;
-        if is_key_pressed(KeyCode::Enter) {
+        if is_key_pressed(KeyCode::Enter) || crate::pad::nav_ok() {
             chosen = Some(items[self.menu_sel].1);
         }
-        let mut y = 130.0;
+        let mut y = 122.0;
         for (i, (label, item)) in items.iter().enumerate() {
-            if i == 8 {
-                y += 18.0;
-                gfx::rect(x + 34.0, y - 10.0, w - 68.0, 1.0, rgba(255, 255, 255, 40));
+            if i == 11 {
+                y += 12.0;
+                gfx::rect(x + 34.0, y - 7.0, w - 68.0, 1.0, rgba(255, 255, 255, 40));
             }
-            let h = 38.0;
+            let h = 33.0;
             let hover = gfx::mouse_in(x, y, w, h);
             if hover {
                 self.menu_sel = i;
@@ -697,14 +709,14 @@ impl PlayScreen {
                 _ if sel => rgb(255, 255, 255),
                 _ => rgb(196, 204, 226),
             };
-            gfx::text(label, x + 40.0 + if sel { 6.0 } else { 0.0 }, y + 9.0, 18.0, col);
+            gfx::text(label, x + 40.0 + if sel { 6.0 } else { 0.0 }, y + 7.0, 18.0, col);
             if hover && ui.clicked {
                 chosen = Some(*item);
             }
-            y += h + 4.0;
+            y += h + 3.0;
         }
-        gfx::text_wrapped("The world keeps moving while this menu is open.", x + 36.0, gfx::VH - 70.0, w - 72.0, 12.0, rgb(150, 160, 190));
-        let esc = is_key_pressed(KeyCode::Escape) && !self.menu_just_opened;
+        gfx::text_wrapped("The world keeps moving while this menu is open.", x + 36.0, gfx::VH - 46.0, w - 72.0, 12.0, rgb(150, 160, 190));
+        let esc = (is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back) || crate::pad::nav_back()) && !self.menu_just_opened;
         self.menu_just_opened = false;
         if esc {
             chosen = Some(MenuItem::Resume);
@@ -731,6 +743,18 @@ impl PlayScreen {
                 self.menu = Menu::Closed;
                 self.windows.toggle_pets(&self.sim);
                 self.windows.pets = true;
+            }
+            Some(MenuItem::Friends) => {
+                self.menu = Menu::Closed;
+                self.social.toggle_social(&mut self.sim);
+            }
+            Some(MenuItem::Guild) => {
+                self.menu = Menu::Closed;
+                self.social.toggle_guild(&mut self.sim);
+            }
+            Some(MenuItem::Achievements) => {
+                self.menu = Menu::Closed;
+                self.social.toggle_achievements();
             }
             Some(MenuItem::Settings) => self.menu = Menu::Settings,
             Some(MenuItem::Graphics) => self.menu = Menu::Graphics,
@@ -817,7 +841,7 @@ impl PlayScreen {
         };
         gfx::text_wrapped(tip, x + 40.0, y + h - 82.0, w - 200.0, 14.0, widgets::ink_soft());
         let back = widgets::button(&ui, x + w - 150.0, y + h - 70.0, 110.0, 40.0, "Back", widgets::ButtonStyle::Secondary, true);
-        if back || is_key_pressed(KeyCode::Escape) {
+        if back || is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back) || crate::pad::nav_back() {
             self.menu = Menu::Pause;
             self.menu_anim = 1.0;
         }
@@ -849,6 +873,7 @@ impl PlayScreen {
         let scroll = widgets::button(&ui, x + w - 30.0 - bw, by, bw, 46.0, &label, widgets::ButtonStyle::Secondary, scrolls > 0);
         gfx::text_centered("Respawn: back to the last checkpoint.", x + w * 0.5, y + h - 50.0, 12.0, rgb(190, 180, 200));
         gfx::text_centered("Other players can also revive you.", x + w * 0.5, y + h - 30.0, 12.0, rgb(190, 180, 200));
+        let respawn = respawn || crate::pad::nav_ok();
         if respawn {
             self.sim.respawn();
         } else if scroll {

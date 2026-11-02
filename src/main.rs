@@ -16,6 +16,7 @@ mod keys;
 mod lootart;
 mod minimap;
 mod online;
+mod pad;
 mod petart;
 mod pixel;
 mod render;
@@ -23,6 +24,7 @@ mod screens;
 mod settings_panel;
 mod social_ui;
 mod sprites;
+mod touch;
 mod townart;
 mod icons;
 mod widgets;
@@ -35,7 +37,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.9.1";
+pub const VERSION: &str = "0.10.0";
 
 /// How long to wait for the server to answer a menu action.
 pub const REPLY_WAIT: Duration = Duration::from_secs(8);
@@ -99,7 +101,7 @@ fn window_conf() -> Conf {
         window_title: GAME_TITLE.to_owned(),
         window_width: w as i32,
         window_height: h as i32,
-        fullscreen: mode != galebound_core::save::DisplayMode::Windowed,
+        fullscreen: cfg!(target_os = "android") || mode != galebound_core::save::DisplayMode::Windowed,
         window_resizable: true,
         high_dpi: true,
         sample_count: 4,
@@ -140,6 +142,7 @@ async fn main() {
         if let Go::To(next) = go {
             screen = next;
         }
+        touch::sync_keyboard();
         gfx::end_frame();
         next_frame().await;
     }
