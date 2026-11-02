@@ -381,6 +381,10 @@ fn friends_party_guild_and_trade() {
     system_text(&mut b, "members can't kick the leader", "can't remove");
 
     // --- trade: request, offers (bound items refused), lock, confirm
+    // (stand together: trading needs you to be close)
+    a.send(&pos("dawnwind_glade", 3700.0, 700.0, false));
+    b.send(&pos("dawnwind_glade", 3720.0, 700.0, false));
+    std::thread::sleep(Duration::from_millis(80));
     soc(&a, SocialCmd::TradeRequest { name: "Beta".into() });
     wait(&mut b, "trade request", |m| matches!(m, ServerMsg::Invite { kind, .. } if *kind == INV_TRADE));
     soc(&b, SocialCmd::TradeAnswer { from: "Alpha".into(), accept: true });
