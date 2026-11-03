@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "galebound"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "galebound-core",
  "macroquad",
@@ -89,11 +89,11 @@ dependencies = [
 
 [[package]]
 name = "galebound-core"
-version = "0.10.0"
+version = "0.10.1"
 
 [[package]]
 name = "galebound-server"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "galebound-core",
 ]

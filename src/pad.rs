@@ -130,6 +130,7 @@ pub fn action(a: Action) -> (bool, bool) {
 // ------------------------------------------------------------------ backends
 
 /// Analog stick -> D-pad directions (with a dead zone).
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn stick_dirs(now: &mut [bool; N], x: f32, y: f32) {
     now[Btn::Left as usize] |= x < -0.45;
     now[Btn::Right as usize] |= x > 0.45;

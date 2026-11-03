@@ -7,6 +7,18 @@ so the whole history is in one place.
 
 ---
 
+## 0.10.2 – Android controller fix
+*3 November 2026*
+
+**Fixed**
+- **Controllers on Android:** the first Windows APK build used the standard
+  miniquad library instead of Galebound's patched copy, so gamepad buttons
+  and sticks would not have worked on phones. macroquad is now pinned to the
+  version the patch is made for (0.4.14), so every build uses the patch.
+- Removed two harmless compiler warnings from the Android build.
+
+---
+
 ## 0.10.1 – Build the APK on Windows
 *2 November 2026*
 

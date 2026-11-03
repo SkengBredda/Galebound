@@ -4,13 +4,13 @@ exclude = ["third_party"]
 
 [package]
 name = "galebound"
-version = "0.10.1"
+version = "0.10.2"
 edition = "2021"
 description = "Galebound Online - a side-scrolling action MMO prototype"
 
 [dependencies]
 galebound-core = { path = "core" }
-macroquad = "0.4"
+macroquad = "=0.4.14" # must match third_party/miniquad (0.4.8)
 
 [profile.dev]
 opt-level = 1

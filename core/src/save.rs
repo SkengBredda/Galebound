@@ -619,7 +619,7 @@ pub fn data_dir() -> PathBuf {
             return PathBuf::from(h).join("Library/Application Support/Galebound");
         }
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
     {
         if let Ok(p) = std::env::var("XDG_DATA_HOME") {
             return PathBuf::from(p).join("galebound");
