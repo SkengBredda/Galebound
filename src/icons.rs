@@ -21,7 +21,10 @@ pub fn tier_color(tier: u8) -> Px {
         0 => rgb(170, 160, 150),
         1 => rgb(110, 190, 110),
         2 => rgb(90, 150, 240),
-        _ => rgb(200, 120, 240),
+        3 => rgb(200, 120, 240),
+        // Gold and Red tiers (co-op dungeon gear)
+        4 => rgb(250, 196, 50),
+        _ => rgb(236, 56, 56),
     }
 }
 
@@ -119,6 +122,29 @@ pub fn item(def: &ItemDef) -> Canvas {
             c.set(6, 7, arrow);
             c.set(5, 7, arrow);
         }),
+        ItemKind::Consumable(Effect::Food { .. }) => outlined(|c| food_icon(c, def.id)),
+        ItemKind::Special(items::Special::HouseDeed) => outlined(|c| {
+            // a deed with a little house stamped on it
+            let paper = rgb(240, 228, 196);
+            c.rect(3, 2, 12, 15, paper);
+            c.rect(3, 2, 12, 1, shadow(paper, 0.2));
+            c.poly(&[(5.0, 9.0), (9.0, 5.0), (13.0, 9.0)], rgb(190, 70, 60));
+            c.rect(6, 9, 6, 4, rgb(200, 160, 110));
+            c.rect(8, 10, 2, 3, rgb(120, 80, 50));
+            c.disc(12.5, 14.5, 2.0, rgb(200, 50, 60));
+        }),
+        ItemKind::Special(items::Special::Cache) => outlined(|c| {
+            // a storm-blue chest with gold bands
+            let wood = rgb(70, 90, 160);
+            c.rect(2, 7, 14, 9, wood);
+            c.rect(2, 4, 14, 4, light(wood, 0.2));
+            c.rect(2, 8, 14, 1, rgb(240, 200, 70));
+            c.rect(8, 6, 2, 5, rgb(240, 200, 70));
+            c.set(9, 8, rgb(255, 255, 220));
+            c.rect(4, 2, 1, 2, rgb(150, 230, 255));
+            c.rect(13, 1, 1, 2, rgb(150, 230, 255));
+        }),
+        ItemKind::Furniture(f) => outlined(|c| furniture_icon(c, f)),
         ItemKind::Equip(GearKind::Weapon) => weapon_icon(items::weapon_art(def.id).unwrap_or(Weapon::Club), accent),
         ItemKind::Equip(GearKind::Torso) => outlined(|c| {
             let body = match def.look {
@@ -409,8 +435,235 @@ pub fn skill(s: &SkillDef) -> Canvas {
     c
 }
 
+fn food_icon(c: &mut Canvas, id: &str) {
+    let plate = rgb(236, 236, 244);
+    match id {
+        "herb_flatbread" => {
+            c.ellipse(9.0, 10.0, 7.0, 4.0, rgb(222, 180, 110));
+            c.disc(7.0, 9.0, 1.4, rgb(90, 160, 70));
+            c.disc(11.0, 10.0, 1.4, rgb(90, 160, 70));
+        }
+        "glade_omelette" => {
+            c.ellipse(9.0, 12.0, 8.0, 3.0, plate);
+            c.ellipse(9.0, 10.0, 6.0, 3.0, rgb(250, 214, 90));
+            c.set(7, 9, rgb(90, 160, 70));
+        }
+        "hearty_stew" | "wayfarers_pie" => {
+            let fill = if id == "hearty_stew" { rgb(160, 90, 50) } else { rgb(214, 160, 90) };
+            c.rect(3, 9, 12, 6, rgb(150, 100, 70));
+            c.ellipse(9.0, 9.0, 6.5, 2.5, fill);
+            c.disc(7.0, 8.5, 1.2, rgb(230, 140, 60));
+            c.disc(11.0, 9.0, 1.2, rgb(120, 180, 80));
+        }
+        "glowcap_skewers" => {
+            c.line(3, 15, 15, 3, rgb(170, 130, 80));
+            for (x, y) in [(6.0, 12.0), (9.0, 9.0), (12.0, 6.0)] {
+                c.disc(x, y, 2.2, rgb(150, 120, 210));
+                c.set(x as i32 - 1, y as i32 - 1, rgb(220, 200, 255));
+            }
+        }
+        "honey_roast" => {
+            c.ellipse(9.0, 12.0, 8.0, 3.0, plate);
+            c.ellipse(9.0, 9.0, 6.0, 4.0, rgb(170, 90, 50));
+            c.rect(5, 7, 8, 1, rgb(250, 190, 60));
+        }
+        "crab_cakes" => {
+            c.ellipse(9.0, 12.0, 8.0, 3.0, plate);
+            c.disc(6.0, 10.0, 3.0, rgb(214, 150, 70));
+            c.disc(12.0, 10.0, 3.0, rgb(214, 150, 70));
+        }
+        "aether_tea" => {
+            c.rect(4, 7, 9, 8, rgb(240, 236, 226));
+            c.rect(12, 9, 3, 4, rgb(240, 236, 226));
+            c.rect(5, 7, 7, 2, rgb(170, 140, 230));
+            c.set(8, 4, rgb(220, 220, 255));
+            c.set(9, 3, rgb(220, 220, 255));
+        }
+        "stormberry_tart" => {
+            c.ellipse(9.0, 11.0, 7.0, 3.5, rgb(214, 170, 100));
+            for (x, y) in [(6.0, 9.0), (9.0, 8.0), (12.0, 9.0), (8.0, 11.0), (11.0, 11.0)] {
+                c.disc(x, y, 1.4, rgb(90, 90, 220));
+            }
+            c.set(9, 5, rgb(250, 230, 90));
+        }
+        _ => {
+            // a feast platter with a glowing shard
+            c.ellipse(9.0, 12.0, 8.0, 3.5, rgb(240, 200, 80));
+            c.ellipse(7.0, 9.0, 4.0, 3.0, rgb(170, 90, 50));
+            c.disc(12.0, 9.0, 2.5, rgb(214, 150, 70));
+            c.disc(10.0, 5.0, 1.6, rgb(150, 230, 255));
+        }
+    }
+}
+
+fn furniture_icon(c: &mut Canvas, f: items::Furniture) {
+    use items::Furniture as F;
+    let wood = rgb(160, 106, 62);
+    match f {
+        F::Bed => {
+            c.rect(2, 9, 14, 5, wood);
+            c.rect(3, 7, 12, 3, rgb(240, 240, 250));
+            c.rect(3, 7, 4, 2, rgb(250, 250, 255));
+            c.rect(8, 7, 7, 3, rgb(90, 130, 210));
+            c.rect(2, 14, 2, 2, shadow(wood, 0.3));
+            c.rect(14, 14, 2, 2, shadow(wood, 0.3));
+        }
+        F::Chest => {
+            c.rect(2, 7, 14, 9, wood);
+            c.rect(2, 4, 14, 4, light(wood, 0.2));
+            c.rect(2, 8, 14, 1, rgb(110, 110, 120));
+            c.rect(8, 7, 2, 3, rgb(230, 190, 80));
+        }
+        F::Stove => {
+            c.rect(3, 5, 12, 11, rgb(80, 80, 92));
+            c.rect(5, 10, 8, 4, rgb(40, 30, 30));
+            c.rect(6, 11, 6, 2, rgb(255, 150, 60));
+            c.rect(11, 2, 2, 4, rgb(100, 100, 110));
+        }
+        F::Workbench => {
+            c.rect(1, 7, 16, 3, wood);
+            c.rect(2, 10, 2, 6, shadow(wood, 0.2));
+            c.rect(14, 10, 2, 6, shadow(wood, 0.2));
+            c.rect(5, 4, 6, 3, rgb(150, 150, 165));
+            c.rect(11, 3, 1, 4, rgb(130, 90, 60));
+        }
+        F::Table => {
+            c.rect(1, 7, 16, 3, wood);
+            c.rect(3, 10, 2, 6, shadow(wood, 0.2));
+            c.rect(13, 10, 2, 6, shadow(wood, 0.2));
+        }
+        F::Bookshelf => {
+            c.rect(3, 1, 12, 16, wood);
+            for (y, col) in [(3, rgb(200, 70, 70)), (8, rgb(70, 110, 200)), (13, rgb(90, 170, 90))] {
+                c.rect(5, y, 8, 3, col);
+            }
+        }
+        F::Plant => {
+            c.rect(6, 11, 6, 5, rgb(190, 100, 70));
+            for (x, y) in [(9.0, 6.0), (6.0, 8.0), (12.0, 8.0), (9.0, 3.0)] {
+                c.disc(x, y, 2.4, rgb(80, 170, 80));
+            }
+        }
+        F::Rug => {
+            c.rect(1, 8, 16, 5, rgb(160, 54, 64));
+            c.rect(2, 9, 14, 1, rgb(230, 190, 90));
+            c.rect(2, 11, 14, 1, rgb(230, 190, 90));
+        }
+        F::Fireplace => {
+            c.rect(2, 3, 14, 13, rgb(150, 140, 136));
+            c.rect(5, 8, 8, 8, rgb(40, 28, 30));
+            c.disc(9.0, 13.0, 2.5, rgb(255, 150, 60));
+        }
+        F::WeaponRack => {
+            c.rect(2, 4, 14, 2, wood);
+            c.rect(5, 2, 2, 14, rgb(210, 220, 236));
+            c.rect(11, 2, 2, 14, rgb(210, 220, 236));
+        }
+        F::ArmorStand => {
+            c.rect(8, 6, 2, 10, wood);
+            c.rect(4, 5, 10, 6, rgb(170, 178, 196));
+            c.disc(9.0, 3.0, 2.5, rgb(170, 178, 196));
+        }
+        F::Barrel => {
+            c.ellipse(9.0, 10.0, 6.0, 7.0, wood);
+            c.rect(3, 6, 12, 1, rgb(100, 100, 110));
+            c.rect(3, 13, 12, 1, rgb(100, 100, 110));
+        }
+        F::Banner => {
+            c.rect(4, 2, 10, 1, wood);
+            c.rect(5, 3, 8, 11, rgb(70, 130, 200));
+            c.poly(&[(5.0, 14.0), (9.0, 11.0), (13.0, 14.0)], rgb(0, 0, 0));
+            c.disc(9.0, 7.0, 2.0, rgb(240, 240, 250));
+        }
+        F::Lamp => {
+            c.rect(8, 6, 2, 10, rgb(80, 80, 90));
+            c.disc(9.0, 4.0, 3.5, rgb(255, 220, 130));
+        }
+        F::Trophy => {
+            c.rect(6, 13, 6, 3, rgb(120, 80, 50));
+            c.rect(8, 9, 2, 4, rgb(240, 200, 70));
+            c.disc(9.0, 6.0, 4.0, rgb(240, 200, 70));
+            c.disc(9.0, 6.0, 1.8, rgb(236, 60, 60));
+        }
+    }
+}
+
 fn material(c: &mut Canvas, id: &str) {
     match id {
+        "sturdy_branch" => {
+            c.taper((3.0, 15.0), (15.0, 3.0), 1.8, 1.2, rgb(140, 96, 56));
+            c.line(9, 9, 12, 12, rgb(140, 96, 56));
+            c.disc(13.0, 12.5, 1.4, rgb(100, 170, 80));
+        }
+        "seasoned_plank" => {
+            c.rect(2, 6, 14, 6, rgb(190, 140, 90));
+            c.line(3, 8, 14, 8, rgb(150, 104, 62));
+            c.line(4, 10, 12, 10, rgb(150, 104, 62));
+        }
+        "iron_ingot" | "storm_alloy" => {
+            let col = if id == "iron_ingot" { rgb(170, 176, 190) } else { rgb(120, 150, 220) };
+            c.poly(&[(2.0, 13.0), (5.0, 7.0), (15.0, 7.0), (16.0, 13.0)], col);
+            c.rect(5, 7, 10, 2, light(col, 0.35));
+            if id == "storm_alloy" {
+                c.line(7, 10, 11, 10, rgb(250, 230, 90));
+            }
+        }
+        "wool_cloth" | "silk_bolt" => {
+            let col = if id == "wool_cloth" { rgb(236, 228, 214) } else { rgb(90, 66, 140) };
+            c.rect(3, 4, 12, 10, col);
+            c.rect(3, 6, 12, 1, shadow(col, 0.2));
+            c.rect(3, 9, 12, 1, shadow(col, 0.2));
+            c.rect(3, 12, 12, 1, shadow(col, 0.2));
+        }
+        "gale_shard" | "crimson_core" => {
+            let col = if id == "gale_shard" { rgb(250, 210, 80) } else { rgb(236, 56, 56) };
+            c.poly(&[(9.0, 1.0), (14.0, 9.0), (9.0, 17.0), (4.0, 9.0)], col);
+            c.poly(&[(9.0, 3.0), (11.0, 9.0), (9.0, 14.0)], light(col, 0.5));
+        }
+        "wild_herbs" => {
+            for (x, y) in [(6.0, 8.0), (9.0, 6.0), (12.0, 8.0), (9.0, 10.0)] {
+                c.disc(x, y, 2.6, rgb(90, 170, 80));
+            }
+            c.line(9, 10, 9, 16, rgb(70, 120, 60));
+        }
+        "game_meat" => {
+            c.ellipse(8.0, 9.0, 6.0, 4.5, rgb(200, 90, 90));
+            c.ellipse(8.0, 9.0, 3.0, 2.0, rgb(240, 160, 160));
+            c.rect(13, 11, 4, 2, rgb(240, 236, 226));
+        }
+        "speckled_egg" => {
+            c.ellipse(9.0, 10.0, 4.5, 6.0, rgb(240, 232, 214));
+            c.set(7, 8, rgb(160, 120, 90));
+            c.set(10, 11, rgb(160, 120, 90));
+            c.set(8, 13, rgb(160, 120, 90));
+        }
+        "glowcap" => {
+            c.ellipse(9.0, 7.0, 6.0, 3.5, rgb(120, 220, 200));
+            c.rect(8, 8, 3, 7, rgb(230, 220, 200));
+            c.set(7, 6, rgb(220, 255, 250));
+        }
+        "crab_meat" => {
+            c.taper((4.0, 14.0), (13.0, 5.0), 3.0, 2.0, rgb(240, 150, 120));
+            c.disc(13.0, 5.0, 2.0, rgb(250, 240, 230));
+        }
+        "sky_honey" => {
+            c.rect(5, 6, 8, 10, rgb(240, 180, 50));
+            c.rect(5, 4, 8, 2, rgb(150, 100, 60));
+            c.rect(6, 8, 2, 5, rgb(255, 230, 140));
+        }
+        "flour" => {
+            c.ellipse(9.0, 11.0, 6.0, 5.5, rgb(236, 226, 200));
+            c.rect(7, 4, 4, 3, rgb(200, 180, 140));
+        }
+        "fresh_milk" => {
+            c.rect(5, 6, 8, 10, rgb(250, 250, 250));
+            c.rect(6, 3, 6, 3, rgb(80, 130, 210));
+        }
+        "spice_pouch" => {
+            c.ellipse(9.0, 11.0, 5.5, 5.0, rgb(190, 90, 60));
+            c.rect(7, 4, 4, 3, rgb(150, 70, 50));
+            c.set(9, 11, rgb(250, 210, 120));
+        }
         "moss_clump" => {
             c.ellipse(9.0, 11.0, 6.0, 4.5, rgb(90, 170, 80));
             c.disc(7.0, 9.0, 2.0, rgb(130, 210, 110));

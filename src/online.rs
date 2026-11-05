@@ -51,7 +51,8 @@ pub fn forget() {
     let _ = std::fs::remove_file(remember_path());
 }
 
-const MOTIONS: [Motion; 13] = [
+// New motions go at the END so older clients keep the same numbers.
+const MOTIONS: [Motion; 14] = [
     Motion::Jab,
     Motion::Thrust,
     Motion::Sweep,
@@ -65,6 +66,7 @@ const MOTIONS: [Motion; 13] = [
     Motion::Dive,
     Motion::Rise,
     Motion::Throw,
+    Motion::Stomp,
 ];
 
 /// Animation -> number, for telling other players what we're doing.
@@ -79,6 +81,7 @@ pub fn anim_code(a: Anim) -> u32 {
         Anim::Dead => 6,
         Anim::Talk => 7,
         Anim::Climb => 8,
+        Anim::Battle => 9,
         Anim::Attack(m) => 16 + MOTIONS.iter().position(|x| *x == m).unwrap_or(0) as u32,
     }
 }
@@ -93,6 +96,7 @@ pub fn anim_from_code(c: u32) -> Anim {
         6 => Anim::Dead,
         7 => Anim::Talk,
         8 => Anim::Climb,
+        9 => Anim::Battle,
         c if c >= 16 => Anim::Attack(MOTIONS.get((c - 16) as usize).copied().unwrap_or(Motion::Jab)),
         _ => Anim::Idle,
     }
@@ -103,7 +107,7 @@ mod tests {
     use super::*;
     #[test]
     fn anim_codes_roundtrip() {
-        let mut all = vec![Anim::Idle, Anim::Run, Anim::JumpUp, Anim::Fall, Anim::Dodge, Anim::Hurt, Anim::Dead, Anim::Talk, Anim::Climb];
+        let mut all = vec![Anim::Idle, Anim::Run, Anim::JumpUp, Anim::Fall, Anim::Dodge, Anim::Hurt, Anim::Dead, Anim::Talk, Anim::Climb, Anim::Battle];
         all.extend(MOTIONS.iter().map(|m| Anim::Attack(*m)));
         for a in all {
             assert_eq!(anim_from_code(anim_code(a)), a);

@@ -14,7 +14,7 @@ use crate::pets::{PetSave, PetSpecies};
 use std::path::PathBuf;
 
 pub const MAX_CHARACTERS: usize = 3;
-pub const SAVE_VERSION: u32 = 5;
+pub const SAVE_VERSION: u32 = 6;
 
 /// How the game window is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +133,22 @@ pub struct CharacterSave {
     pub cos_hat: u8,
     pub cos_back: u8,
     pub attendance: crate::achievements::Attendance,
+    /// Crafting level and EXP, indexed by `Craft::index()`.
+    pub crafts: [crate::crafting::CraftSkill; 3],
+    /// The meal you've eaten and its seconds left.
+    pub food: Option<(String, f32)>,
+    /// Seconds of Well Rested left (from sleeping in your house).
+    pub rested: f32,
+    /// Furniture placed in your house: (spot, item id).
+    pub house: Vec<(usize, String)>,
+    /// Your house storage chest.
+    pub storage: Vec<items::Stack>,
+    /// Quests hidden from the on-screen tracker.
+    pub untracked: Vec<String>,
+    /// Quest log option: hide completed quests.
+    pub hide_done_quests: bool,
+    /// Tempest Vault clears.
+    pub vault_clears: u32,
 }
 
 impl CharacterSave {
@@ -176,7 +192,23 @@ impl CharacterSave {
             cos_hat: 0,
             cos_back: 0,
             attendance: Default::default(),
+            crafts: Default::default(),
+            food: None,
+            rested: 0.0,
+            house: Vec::new(),
+            storage: Vec::new(),
+            untracked: Vec::new(),
+            hide_done_quests: false,
+            vault_clears: 0,
         }
+    }
+    /// The level of one craft.
+    pub fn craft_level(&self, c: crate::crafting::Craft) -> u32 {
+        self.crafts[c.index()].level
+    }
+    /// Is this quest shown in the on-screen tracker?
+    pub fn tracked(&self, quest: &str) -> bool {
+        !self.untracked.iter().any(|q| q == quest)
     }
     pub fn has_flag(&self, f: &str) -> bool {
         self.flags.iter().any(|x| x == f)
@@ -376,6 +408,31 @@ pub fn encode_character(c: &CharacterSave) -> String {
     }
     kv("cos_worn", format!("{},{}", c.cos_hat, c.cos_back));
     kv("attendance", format!("{},{}", c.attendance.last_day, c.attendance.count));
+    for cr in crate::crafting::CRAFTS {
+        let k = c.crafts[cr.index()];
+        kv("craft", format!("{},{},{}", cr.key(), k.level, k.exp));
+    }
+    if let Some((id, left)) = &c.food {
+        kv("food", format!("{},{:.0}", id, left));
+    }
+    if c.rested > 0.0 {
+        kv("rested", format!("{:.0}", c.rested));
+    }
+    for (spot, id) in &c.house {
+        kv("house", format!("{},{}", spot, id));
+    }
+    for st in &c.storage {
+        kv("store", format!("{},{}", st.id, st.count));
+    }
+    if !c.untracked.is_empty() {
+        kv("untracked", c.untracked.join(","));
+    }
+    if c.hide_done_quests {
+        kv("hide_done", "true".into());
+    }
+    if c.vault_clears > 0 {
+        kv("vault_clears", c.vault_clears.to_string());
+    }
     for q in &c.quests {
         kv("quest", format!("{},{},{}", q.id, qstate_str(q.state), q.progress));
     }
@@ -577,6 +634,38 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                     }
                 }
                 "flag" => c.set_flag(&v),
+                "craft" => {
+                    let p: Vec<&str> = v.split(',').collect();
+                    if p.len() == 3 {
+                        if let Some(cr) = crate::crafting::Craft::from_key(p[0]) {
+                            c.crafts[cr.index()] = crate::crafting::CraftSkill { level: pu(p[1]).clamp(1, crate::crafting::MAX_CRAFT_LEVEL), exp: pu(p[2]) };
+                        }
+                    }
+                }
+                "food" => {
+                    if let Some((id, left)) = v.split_once(',') {
+                        if items::item(id).is_some() && pf(left) > 0.0 {
+                            c.food = Some((id.to_string(), pf(left)));
+                        }
+                    }
+                }
+                "rested" => c.rested = pf(&v).clamp(0.0, crate::housing::WELL_RESTED_SECS),
+                "house" => {
+                    if let Some((spot, id)) = v.split_once(',') {
+                        let spot = pu(spot) as usize;
+                        if spot < crate::housing::SPOTS.len() && crate::housing::furniture_of(id).is_some() && !c.house.iter().any(|h| h.0 == spot) {
+                            c.house.push((spot, id.to_string()));
+                        }
+                    }
+                }
+                "store" => {
+                    if let Some((id, n)) = v.split_once(',') {
+                        crate::housing::storage_add(&mut c.storage, id, pu(n));
+                    }
+                }
+                "untracked" => c.untracked = v.split(',').filter(|x| !x.is_empty()).map(String::from).collect(),
+                "hide_done" => c.hide_done_quests = pb(&v),
+                "vault_clears" => c.vault_clears = pu(&v),
                 _ => {}
             },
         }

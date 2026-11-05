@@ -48,6 +48,19 @@ pub const DEATH_PENALTY_LEVEL: u32 = 10;
 pub const DEATH_EXP_LOSS: f32 = 0.03;
 /// Seconds of the defeat animation before the tombstone drops.
 pub const TOMB_DELAY: f32 = 0.7;
+/// Seconds after the last hit given or taken that you count as "in combat"
+/// (matches the client's battle stance).
+pub const COMBAT_SECS: f32 = 5.0;
+/// In combat, passive Mana regeneration runs at this fraction (0.13.0:
+/// fights should need Mana potions).
+pub const COMBAT_MP_REGEN: f32 = 0.25;
+/// Mana a basic melee hit gives back (was 1.5).
+const MP_PER_HIT: f32 = 0.5;
+/// Mana a basic projectile hit gives back (was 1.0).
+const MP_PER_SHOT: f32 = 0.35;
+
+#[path = "sim_life.rs"]
+mod life;
 
 /// A climbable the player can grab right now (`up` = pressing Up, else Down).
 fn find_climb(climbs: &[world::Climb], body: &Body, up: bool) -> Option<usize> {
@@ -140,6 +153,9 @@ pub struct Player {
     pub invuln: f32,
     pub hurt_flash: f32,
     pub since_hurt: f32,
+    /// Seconds since this player last attacked or was hit (drives the
+    /// battle stance in the client).
+    pub since_combat: f32,
     pub potion_cd: f32,
     pub anim_t: f32,
     pub land_squash: f32,
@@ -423,7 +439,14 @@ impl ActiveDialog {
         }
         match self.dialog.action {
             DialogAction::OfferQuest(_) => Some(["Accept", "Not now"]),
+            DialogAction::Shop(_) if crate::crafting::station_for_npc(self.dialog.npc_id).is_some() => Some([
+                "Browse wares",
+                if crate::crafting::station_for_npc(self.dialog.npc_id) == Some(crate::crafting::Station::Kitchen) { "Cook" } else { "Craft" },
+            ]),
             DialogAction::Shop(_) => Some(["Browse wares", "Goodbye"]),
+            DialogAction::Craft(_) => Some(["Cook a meal", "Just rest"]),
+            DialogAction::House => Some(["Arrange furniture", "Goodbye"]),
+            DialogAction::EnterVault => Some(["Enter the Tempest Vault", "Not yet"]),
             DialogAction::Waystone => Some(["Travel", "Cancel"]),
             DialogAction::SummonBoss(_) => Some(["Summon it (100 gold)", "Not now"]),
             DialogAction::ClassChange(c) => Some([
@@ -504,6 +527,15 @@ pub struct Sim {
     /// Achievements just earned (the HUD shows a banner).
     pub new_achievements: Vec<&'static crate::achievements::AchievementDef>,
     achievement_timer: f32,
+    /// Crafting window the host should show (talked to a station, or used one at home).
+    pub craft_open: Option<crate::crafting::Station>,
+    /// House furnishing window (talked to Hobb).
+    pub house_open: bool,
+    /// House storage window (opened the Storage Chest).
+    pub storage_open: bool,
+    /// Online: the private copy of this map we're in ("#owner"), for houses
+    /// and dungeon runs. Empty for shared maps.
+    pub instance: String,
 }
 
 fn derive_stats(save: &CharacterSave, buffs: &[Buff]) -> Derived {
@@ -579,6 +611,7 @@ impl Sim {
             invuln: 1.0,
             hurt_flash: 0.0,
             since_hurt: 99.0,
+            since_combat: 99.0,
             potion_cd: 0.0,
             anim_t: 0.0,
             land_squash: 0.0,
@@ -633,7 +666,12 @@ impl Sim {
             invites: Vec::new(),
             new_achievements: Vec::new(),
             achievement_timer: 1.0,
+            craft_open: None,
+            house_open: false,
+            storage_open: false,
+            instance: String::new(),
         };
+        sim.on_load();
         // Logged out as a tombstone? Still one.
         if sim.save.tomb.is_some() {
             sim.player.state = PState::Dead;
@@ -692,7 +730,7 @@ impl Sim {
             let active = self.save.quest(b.quest).map(|q| q.state == QuestState::Active).unwrap_or(false);
             if active && !self.enemies.iter().any(|e| e.kind == b.kind) {
                 if self.online {
-                    self.outbox.push(ClientMsg::Boss { kind: b.kind.index(), map: self.map.key.to_string() });
+                    self.outbox.push(ClientMsg::Boss { kind: b.kind.index(), map: self.net_map() });
                 } else {
                     self.spawn_enemy(b.kind, b.x, b.y, None);
                 }
@@ -713,7 +751,7 @@ impl Sim {
         }
         self.save.gold -= quests::BOSS_SUMMON_COST;
         if self.online {
-            self.outbox.push(ClientMsg::Boss { kind: kind.index(), map: self.map.key.to_string() });
+            self.outbox.push(ClientMsg::Boss { kind: kind.index(), map: self.net_map() });
         } else {
             self.spawn_enemy(b.kind, b.x, b.y, None);
         }
@@ -881,6 +919,29 @@ impl Sim {
                     DialogAction::Shop(shop) => {
                         if choice == 0 {
                             self.shop_open = Some(shop);
+                        } else if let Some(st) = self.dialog.as_ref().and_then(|d| crate::crafting::station_for_npc(d.dialog.npc_id)) {
+                            self.craft_open = Some(st);
+                        }
+                        close = true;
+                    }
+                    DialogAction::Craft(st) => {
+                        self.heal_full();
+                        if choice == 0 {
+                            self.craft_open = Some(st);
+                        }
+                        close = true;
+                    }
+                    DialogAction::House => {
+                        if choice == 0 {
+                            self.house_open = true;
+                        }
+                        close = true;
+                    }
+                    DialogAction::EnterVault => {
+                        if choice == 0 {
+                            if let Err(e) = self.enter_vault() {
+                                self.info_float(&e);
+                            }
                         }
                         close = true;
                     }
@@ -948,6 +1009,7 @@ impl Sim {
         p.potion_cd = (p.potion_cd - dt).max(0.0);
         p.land_squash = (p.land_squash - dt * 6.0).max(0.0);
         p.since_hurt += dt;
+        p.since_combat += dt;
 
         // Ability cooldowns, buffs and regen run on real seconds (they're
         // shown as seconds), not the slowed-down world clock.
@@ -963,13 +1025,22 @@ impl Sim {
         p.buffs.retain(|b| b.left > 0.0);
         let buffs_expired = p.buffs.len() != before;
 
-        // Regen: MP always, HP out of combat (never while defeated).
+        // Regen: MP always (slowed right down in combat), HP out of combat
+        // (never while defeated). A meal adds its own regen.
+        let in_combat = p.since_combat < COMBAT_SECS;
+        let mp_mult = if in_combat { COMBAT_MP_REGEN } else { 1.0 };
+        let (food_hp, food_mp) = life::food_regen(&p.buffs);
         if p.state != PState::Dead {
-            p.mp = (p.mp + p.stats.mp_regen * real).min(p.max_mp);
+            p.mp = (p.mp + (p.stats.mp_regen + food_mp) * mp_mult * real).min(p.max_mp);
+            p.hp = (p.hp + food_hp * real).min(p.max_hp);
         }
         if p.since_hurt > 6.0 && p.state != PState::Dead {
             p.hp = (p.hp + p.max_hp * 0.015 * real).min(p.max_hp);
         }
+        if self.save.rested > 0.0 {
+            self.save.rested = (self.save.rested - real).max(0.0);
+        }
+        let p = &mut self.player;
 
         if buffs_expired {
             let d = derive_stats(&self.save, &p.buffs);
@@ -1214,6 +1285,7 @@ impl Sim {
                 p.state = PState::Attack;
                 p.state_t = 0.0;
                 p.attack = Some(AttackState { kind, def, t: 0.0, fired: false, hit_ids: Vec::new(), skill: None, wave: 0 });
+                p.since_combat = 0.0;
             }
         }
 
@@ -1379,7 +1451,7 @@ impl Sim {
                 self.player.attack.as_mut().unwrap().hit_ids.push(id);
                 self.damage_enemy_crit(i, def.damage * mult, V2::new(def.kbx * dir, def.kby), def.hitstun, kind.is_heavy() || from_skill, crit_bonus);
                 if !from_skill {
-                    self.player.mp = (self.player.mp + 1.5).min(self.player.max_mp);
+                    self.player.mp = (self.player.mp + MP_PER_HIT).min(self.player.max_mp);
                 }
             }
         }
@@ -1560,6 +1632,7 @@ impl Sim {
         if def.boss {
             self.save.tally.bosses += 1;
         }
+        let exp = ((exp as f32) * self.kill_exp_mult()).round() as u32;
         self.burst(c, FxKind::Spark, 20, 260.0);
         self.float(V2::new(c.x, c.y - 50.0), format!("+{} EXP", exp), FloatKind::Exp);
         // Gold and loot spill onto the ground: pick them up with the Pickup key.
@@ -1576,7 +1649,9 @@ impl Sim {
         self.gain_exp(exp);
         self.quest_event(QuestEvent::Killed(kind));
         if def.boss {
-            self.toast(&format!("{} defeated!", def.name), "Return to turn in your quest.");
+            if !life::is_vault_boss(kind) {
+                self.toast(&format!("{} defeated!", def.name), "Return to turn in your quest.");
+            }
             self.shake = 10.0;
             self.wants_save = true;
         }
@@ -1613,6 +1688,9 @@ impl Sim {
     }
 
     fn quest_event(&mut self, ev: QuestEvent) {
+        if let QuestEvent::Killed(k) = ev {
+            self.on_killed(k);
+        }
         let ready = quests::on_event(&mut self.save, ev);
         for name in ready {
             self.toast("Objective complete", &format!("{} - return to turn it in.", name));
@@ -1849,6 +1927,7 @@ impl Sim {
                 p.state_t = 0.0;
                 p.attack_buffer = None;
                 p.attack = Some(AttackState { kind: anim, def, t: 0.0, fired: false, hit_ids: Vec::new(), skill: Some(s), wave: 0 });
+                p.since_combat = 0.0;
             }
             SkillEffect::Buff { mods, secs } => {
                 let p = &mut self.player;
@@ -1929,6 +2008,14 @@ impl Sim {
                 self.burst(c, FxKind::LevelUp, 16, 200.0);
                 self.float(V2::new(c.x, c.y - 50.0), def.name.to_string(), FloatKind::Heal);
             }
+            Effect::Food { .. } => {
+                self.eat(def, None);
+                self.burst(c, FxKind::Heal, 16, 180.0);
+                self.float(V2::new(c.x, c.y - 50.0), format!("Ate {}", def.name), FloatKind::Heal);
+                self.save.inventory.remove(id, 1);
+                self.wants_save = true;
+                return true;
+            }
         }
         self.save.inventory.remove(id, 1);
         self.player.potion_cd = POTION_COOLDOWN;
@@ -1946,6 +2033,8 @@ impl Sim {
             Special::SkillReset => self.reset_ability_points().map(|_| ()),
             Special::Pet(species) => self.adopt_pet(species),
             Special::PetFood => self.feed_pet().map(|_| ()),
+            Special::HouseDeed => self.use_house_deed(),
+            Special::Cache => self.open_cache(),
         };
         match r {
             Ok(()) => true,
@@ -1984,7 +2073,12 @@ impl Sim {
                     self.info_float(&e);
                 }
             }
-            Some(ItemKind::Material) => self.info_float("Sell it to any shop"),
+            Some(ItemKind::Material) => self.info_float(if crate::crafting::RECIPES.iter().any(|r| r.inputs.iter().any(|i| i.0 == id)) {
+                "A crafting material - or sell it to any shop"
+            } else {
+                "Sell it to any shop"
+            }),
+            Some(ItemKind::Furniture(_)) => self.info_float("Furniture: ask Hobb in your house to place it"),
             Some(ItemKind::Special(_)) => {
                 self.use_item(&id);
             }
@@ -2180,6 +2274,9 @@ impl Sim {
                 return;
             }
         }
+        if interact_key && self.use_furniture() {
+            return;
+        }
         if let Some(pi) = self.nearby_portal() {
             let portal = self.map.portals[pi].clone();
             if portal.min_level > self.save.level {
@@ -2215,6 +2312,11 @@ impl Sim {
         self.save.map = self.map.key.to_string();
         self.shop_open = None;
         self.teleport_open = false;
+        self.craft_open = None;
+        self.house_open = false;
+        self.storage_open = false;
+        self.set_instance();
+        self.furnish();
         // Attune to this map's waystone.
         let key = self.map.key;
         if world::WAYSTONES.contains(&key) {
@@ -2343,6 +2445,7 @@ impl Sim {
     pub fn go_online(&mut self, my_id: u32) {
         self.online = true;
         self.my_id = my_id;
+        self.set_instance();
         self.enemies.clear();
         self.drops.clear();
         self.others.clear();
@@ -2376,7 +2479,7 @@ impl Sim {
 
     /// The server says we (and anyone else who helped) beat a monster.
     fn net_kill(&mut self, enemy: u32, kind: EnemyKind, exp: u32) {
-        let exp = ((exp as f32) * (1.0 + self.guild_exp_bonus())).round() as u32;
+        let exp = ((exp as f32) * (self.kill_exp_mult() + self.guild_exp_bonus())).round() as u32;
         self.save.tally.kills += 1;
         if kind.def().boss {
             self.save.tally.bosses += 1;
@@ -2389,7 +2492,9 @@ impl Sim {
         self.quest_event(QuestEvent::Killed(kind));
         let def = kind.def();
         if def.boss {
-            self.toast(&format!("{} defeated!", def.name), "Return to turn in your quest.");
+            if !life::is_vault_boss(kind) {
+                self.toast(&format!("{} defeated!", def.name), "Return to turn in your quest.");
+            }
             self.shake = 10.0;
         }
         self.wants_save = true;
@@ -2959,8 +3064,9 @@ impl Sim {
         let (hr, mr) = pet.regen();
         if alive && (hr > 0.0 || mr > 0.0) {
             let p = &mut self.player;
+            let mp_mult = if p.since_combat < COMBAT_SECS { COMBAT_MP_REGEN } else { 1.0 };
             p.hp = (p.hp + p.max_hp * hr * dt).min(p.max_hp);
-            p.mp = (p.mp + p.max_mp * mr * dt).min(p.max_mp);
+            p.mp = (p.mp + p.max_mp * mr * mp_mult * dt).min(p.max_mp);
         }
 
         // Pick something to fetch: the nearest loot within range of its owner.
@@ -3245,6 +3351,7 @@ impl Sim {
         let p = &mut self.player;
         p.hp -= dmg;
         p.since_hurt = 0.0;
+        p.since_combat = 0.0;
         p.hurt_flash = 0.25;
         p.invuln = HURT_IFRAMES;
         let dir = (p.body.center().x - from_x).signum();
@@ -3465,7 +3572,7 @@ impl Sim {
             if ei < self.enemies.len() && self.enemies[ei].state != EState::Dying {
                 self.damage_enemy_crit(ei, dmg, kb, hs, heavy, crit_bonus);
                 if crit_bonus == 0.0 {
-                    self.player.mp = (self.player.mp + 1.0).min(self.player.max_mp);
+                    self.player.mp = (self.player.mp + MP_PER_SHOT).min(self.player.max_mp);
                 }
             }
         }
@@ -3491,6 +3598,7 @@ impl Sim {
 
     /// Copy runtime state into the save before writing it to disk.
     pub fn snapshot(&mut self) -> CharacterSave {
+        self.save.food = life::food_left(&self.player.buffs);
         let p = &self.player;
         self.save.hp = if p.state == PState::Dead { p.max_hp } else { p.hp };
         self.save.mp = p.mp;
@@ -3555,6 +3663,18 @@ mod tests {
             save.inventory.equip[0] = Some(items::starter_weapon(class).to_string());
         }
         Sim::new(save, Settings::default(), 7)
+    }
+
+    /// Attacking starts the combat timer (battle stance); it then counts up.
+    #[test]
+    fn attacking_starts_the_combat_timer() {
+        let mut s = new_sim(ClassId::Novice);
+        run(&mut s, 1.0, InputState::default());
+        assert!(s.player.since_combat > 50.0);
+        run(&mut s, 0.1, press(&[Action::Light], &[]));
+        assert!(s.player.since_combat < 0.2, "{}", s.player.since_combat);
+        run(&mut s, 2.0, InputState::default());
+        assert!(s.player.since_combat > 1.5 && s.player.since_combat < 2.3, "{}", s.player.since_combat);
     }
 
     #[test]
@@ -4228,14 +4348,15 @@ mod tests {
     fn shops_buy_sell_and_equip() {
         let mut s = new_sim(ClassId::Novice);
         s.save.level = 6;
-        s.save.gold = 500;
+        // prices are 9x their base (0.13.0): a 90g jerkin costs 810g
+        s.save.gold = 4500;
         s.recompute_stats();
         s.change_map("ironhold", 400.0);
         take_portal(&mut s, "ironhold_armor_in");
         talk_and_accept(&mut s, "ironhold_armor");
         assert_eq!(s.shop_open, Some("ironhold_armor"));
         assert!(s.buy("leather_vest", 1).is_ok());
-        assert_eq!(s.save.gold, 410);
+        assert_eq!(s.save.gold, 3690);
         assert!(s.buy("plate_armor", 1).is_err(), "can't afford");
         assert!(s.buy("hp_potion", 1).is_err(), "not sold here");
         let pdef = s.player.stats.pdef;
@@ -4426,7 +4547,7 @@ mod tests {
         run(&mut s, 0.02, press(&[Action::Pickup], &[Action::Pickup]));
         run(&mut s, 0.3, InputState::default());
         assert_eq!(s.drops.len(), n0 - 1, "one press picks up one drop");
-        for _ in 0..60 {
+        for _ in 0..140 {
             s.player.invuln = 9.0;
             // keep collecting what's in reach; walk to the rest
             if let Some(d) = s.drops.iter().find(|d| d.taken.is_none()) {
@@ -4486,16 +4607,16 @@ mod tests {
     #[test]
     fn tutorial_vendor_discounts_bound_potions_and_buys_loot() {
         let mut s = new_sim(ClassId::Novice);
-        s.save.gold = 1000;
+        s.save.gold = 9000;
         s.change_map("dawnwind_glade", 3300.0);
         talk_and_accept(&mut s, "quartermaster_hesper");
         assert_eq!(s.shop_open, Some(items::GLADE_SHOP));
-        // First 10 trainee potions are 40% off (15 -> 9 gold).
-        assert_eq!(s.unit_price("trainee_hp_potion"), 9);
-        assert_eq!(s.buy("trainee_hp_potion", 6).unwrap(), 54);
-        assert_eq!(s.buy("trainee_mp_potion", 6).unwrap(), 4 * 11 + 2 * 18, "4 discounted left, then full price");
+        // First 10 trainee potions are 40% off (135 -> 81 gold).
+        assert_eq!(s.unit_price("trainee_hp_potion"), 81);
+        assert_eq!(s.buy("trainee_hp_potion", 6).unwrap(), 6 * 81);
+        assert_eq!(s.buy("trainee_mp_potion", 6).unwrap(), 4 * 97 + 2 * 162, "4 discounted left, then full price");
         assert_eq!(s.trainee_discounts_left(), 0);
-        assert_eq!(s.unit_price("trainee_hp_potion"), 15);
+        assert_eq!(s.unit_price("trainee_hp_potion"), 135);
         // Level 8 gear is on sale.
         assert!(s.buy("ironwood_blade", 1).is_ok());
         assert!(s.equip_problem("ironwood_blade").is_some(), "needs level 8");
@@ -4571,14 +4692,14 @@ mod tests {
     #[test]
     fn buying_and_adopting_a_pet_that_loots_for_you() {
         let mut s = new_sim(ClassId::Vanguard);
-        s.save.gold = 9_999;
+        s.save.gold = 89_999;
         s.change_map("breezehollow", 2500.0);
         talk_and_accept(&mut s, "pet_keeper_breezehollow");
         assert_eq!(s.shop_open, Some(items::PET_SHOP));
-        assert!(s.buy("pet_breeze_fox", 1).is_err(), "10,000 gold");
-        s.save.gold = 10_300;
-        assert_eq!(s.buy("pet_breeze_fox", 1).unwrap(), 10_000);
-        assert_eq!(s.buy("pet_food", 3).unwrap(), 300);
+        assert!(s.buy("pet_breeze_fox", 1).is_err(), "90,000 gold");
+        s.save.gold = 92_700;
+        assert_eq!(s.buy("pet_breeze_fox", 1).unwrap(), 90_000);
+        assert_eq!(s.buy("pet_food", 3).unwrap(), 2_700);
         assert_eq!(s.save.gold, 0);
         // Use it from the bag to adopt: it comes out straight away.
         let i = s.save.inventory.slots.iter().position(|x| x.id == "pet_breeze_fox").unwrap();

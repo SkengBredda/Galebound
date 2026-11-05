@@ -558,3 +558,175 @@ pub fn waystone(frame: i32) -> Canvas {
     out.draw(&cr, 0, 0);
     out
 }
+
+// =================================================================== house furniture (0.13.0)
+
+pub fn bed() -> Canvas {
+    outlined(130, 60, |c| {
+        let wood = rgb(150, 98, 58);
+        c.rect(0, 10, 10, 50, wood);
+        c.rect(120, 26, 10, 34, wood);
+        c.rect(6, 30, 118, 18, shadow(wood, 0.1));
+        c.rect(8, 22, 116, 12, rgb(242, 240, 248));
+        c.rect(12, 16, 30, 12, rgb(252, 252, 255));
+        c.rect(44, 20, 78, 16, rgb(84, 124, 206));
+        c.rect(44, 20, 78, 3, light(rgb(84, 124, 206), 0.3));
+        c.rect(4, 48, 6, 12, shadow(wood, 0.3));
+        c.rect(118, 48, 6, 12, shadow(wood, 0.3));
+    })
+}
+
+pub fn chest() -> Canvas {
+    outlined(70, 50, |c| {
+        let wood = rgb(160, 104, 60);
+        c.rect(2, 18, 66, 30, wood);
+        c.rect(0, 6, 70, 14, light(wood, 0.18));
+        c.rect(0, 18, 70, 3, rgb(100, 100, 112));
+        c.rect(6, 6, 4, 42, rgb(100, 100, 112));
+        c.rect(60, 6, 4, 42, rgb(100, 100, 112));
+        c.rect(31, 16, 8, 10, rgb(232, 192, 80));
+        c.rect(34, 21, 2, 3, rgb(60, 40, 30));
+    })
+}
+
+pub fn stove(frame: i32) -> Canvas {
+    let mut out = outlined(80, 96, |c| {
+        let iron = rgb(76, 76, 88);
+        c.rect(4, 30, 72, 66, iron);
+        c.rect(0, 24, 80, 8, light(iron, 0.2));
+        c.rect(58, 0, 12, 26, shadow(iron, 0.1));
+        c.rect(14, 56, 52, 30, rgb(36, 26, 26));
+        c.ellipse(26.0, 22.0, 12.0, 3.0, rgb(120, 120, 130));
+        c.rect(16, 12, 22, 10, rgb(150, 150, 160));
+    });
+    let k = (frame % 4) as f32;
+    for i in 0..4 {
+        let x = 22.0 + i as f32 * 12.0;
+        let h = 8.0 + ((k + i as f32) * 1.3).sin().abs() * 8.0;
+        out.taper((x, 84.0), (x, 84.0 - h), 4.0, 1.0, rgb(255, 150, 60));
+    }
+    out
+}
+
+pub fn workbench() -> Canvas {
+    outlined(130, 70, |c| {
+        let wood = rgb(160, 110, 66);
+        c.rect(0, 22, 130, 10, wood);
+        c.rect(6, 32, 10, 38, shadow(wood, 0.2));
+        c.rect(114, 32, 10, 38, shadow(wood, 0.2));
+        c.rect(14, 52, 102, 6, shadow(wood, 0.15));
+        // anvil, hammer and a plank
+        c.rect(20, 8, 34, 10, rgb(110, 112, 124));
+        c.rect(28, 16, 18, 6, rgb(90, 92, 104));
+        c.rect(70, 10, 4, 12, rgb(130, 90, 60));
+        c.rect(64, 6, 16, 6, rgb(150, 150, 165));
+        c.rect(88, 16, 34, 6, rgb(200, 150, 96));
+    })
+}
+
+pub fn table() -> Canvas {
+    outlined(110, 52, |c| {
+        let wood = rgb(166, 112, 66);
+        c.rect(0, 10, 110, 10, wood);
+        c.rect(8, 20, 8, 32, shadow(wood, 0.2));
+        c.rect(94, 20, 8, 32, shadow(wood, 0.2));
+        c.rect(40, 2, 14, 8, rgb(236, 230, 214));
+        c.disc(76.0, 6.0, 5.0, rgb(220, 80, 80));
+    })
+}
+
+pub fn bookshelf() -> Canvas {
+    let mut out = outlined(80, 120, |c| {
+        let wood = rgb(130, 84, 50);
+        c.rect(2, 2, 76, 116, shadow(wood, 0.25));
+        c.rect(0, 0, 80, 6, wood);
+        for y in [38, 76, 114] {
+            c.rect(0, y, 80, 6, wood);
+        }
+        c.rect(0, 0, 6, 120, wood);
+        c.rect(74, 0, 6, 120, wood);
+    });
+    let cols = [rgb(200, 70, 70), rgb(70, 110, 200), rgb(90, 170, 90), rgb(220, 180, 70), rgb(150, 90, 190)];
+    for (row, &y) in [36i32, 74, 112].iter().enumerate() {
+        for k in 0..8usize {
+            let x = 9 + k as i32 * 8;
+            let h = 22 + ((k + row) % 3) as i32 * 4;
+            out.rect(x, y - h, 6, h, INK);
+            out.rect(x + 1, y - h + 1, 4, h - 1, cols[(k + row) % cols.len()]);
+        }
+    }
+    out
+}
+
+pub fn plant() -> Canvas {
+    outlined(44, 70, |c| {
+        c.rect(10, 46, 24, 24, rgb(190, 100, 70));
+        c.rect(8, 44, 28, 6, rgb(210, 120, 86));
+        for (x, y, r) in [(22.0, 30.0, 10.0), (12.0, 36.0, 8.0), (32.0, 36.0, 8.0), (22.0, 16.0, 8.0)] {
+            c.disc(x, y, r, rgb(80, 168, 80));
+        }
+        c.disc(18.0, 24.0, 3.0, light(rgb(80, 168, 80), 0.3));
+    })
+}
+
+pub fn trophy() -> Canvas {
+    outlined(60, 90, |c| {
+        c.rect(14, 74, 32, 16, rgb(110, 76, 50));
+        c.rect(26, 50, 8, 24, rgb(236, 196, 70));
+        c.disc(30.0, 34.0, 20.0, rgb(236, 196, 70));
+        c.disc(30.0, 34.0, 12.0, rgb(200, 150, 50));
+        c.disc(30.0, 34.0, 7.0, rgb(236, 60, 60));
+        c.disc(27.0, 31.0, 2.0, rgb(255, 200, 200));
+    })
+}
+
+/// A rune-carved stone door with a glowing seal (the Tempest Vault).
+pub fn vault_door(frame: i32) -> Canvas {
+    let mut out = outlined(140, 190, |c| {
+        let stone = rgb(96, 92, 120);
+        c.rect(0, 30, 140, 160, stone);
+        c.disc(70.0, 50.0, 50.0, stone);
+        c.rect(26, 60, 88, 130, rgb(40, 36, 60));
+        c.disc(70.0, 60.0, 44.0, rgb(40, 36, 60));
+        for y in (40..190).step_by(22) {
+            c.line(0, y, 20, y, shadow(stone, 0.25));
+            c.line(120, y, 139, y, shadow(stone, 0.25));
+        }
+    });
+    let glow = 0.5 + 0.5 * ((frame as f32) * 0.8).sin();
+    let col = rgb(120, (190.0 + 60.0 * glow) as u8, 255);
+    out.disc(70.0, 96.0, 16.0, col);
+    out.disc(70.0, 96.0, 9.0, rgb(240, 250, 255));
+    for (x, y) in [(46, 140), (94, 140), (70, 160), (70, 70)] {
+        out.rect(x - 3, y - 3, 6, 6, col);
+    }
+    out
+}
+
+#[cfg(test)]
+mod preview_0_13 {
+    use super::*;
+
+    /// Draws the 0.13.0 furniture, vault door and item icons into
+    /// `art_preview.png` (run with `--ignored`).
+    #[test]
+    #[ignore]
+    fn art_preview() {
+        let arts = [bed(), chest(), stove(1), workbench(), table(), bookshelf(), plant(), trophy(), vault_door(2)];
+        let mut out = Canvas::new(1100, 520);
+        out.rect(0, 0, 1100, 520, rgb(214, 200, 176));
+        let mut x = 10;
+        for a in &arts {
+            out.draw(a, x, 200 - a.h);
+            x += a.w + 12;
+        }
+        let ids: Vec<&str> = galebound_core::items::ITEMS.iter().skip_while(|d| d.id != "sturdy_branch").map(|d| d.id).collect();
+        for (i, id) in ids.iter().enumerate() {
+            let d = galebound_core::items::item(id).unwrap();
+            let ic = crate::icons::item(d);
+            out.draw(&ic, 10 + (i as i32 % 40) * 26, 230 + (i as i32 / 40) * 26);
+        }
+        let png = crate::pixel::png_rgba(out.w as u32, out.h as u32, &out.bytes());
+        std::fs::write(std::env::var("GB_ART").unwrap_or("art_preview.png".into()), png).unwrap();
+    }
+}

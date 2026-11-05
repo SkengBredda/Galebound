@@ -20,11 +20,16 @@ pub struct Tally {
     pub most_gold: u32,
     pub best_pet: u32,
     pub waystones: u32,
+    /// Items crafted.
+    pub crafts: u32,
+    /// Houses bought.
+    pub houses: u32,
 }
 
 impl Tally {
-    pub const KEYS: [&'static str; 14] = [
-        "kills", "bosses", "quests", "deaths", "revives", "looted", "trades", "parties", "friends", "guild", "class", "gold", "pet", "waystones",
+    pub const KEYS: [&'static str; 16] = [
+        "kills", "bosses", "quests", "deaths", "revives", "looted", "trades", "parties", "friends", "guild", "class", "gold", "pet", "waystones", "crafts",
+        "houses",
     ];
     fn slot(&mut self, k: &str) -> Option<&mut u32> {
         Some(match k {
@@ -40,6 +45,8 @@ impl Tally {
             "gold" => &mut self.most_gold,
             "pet" => &mut self.best_pet,
             "waystones" => &mut self.waystones,
+            "crafts" => &mut self.crafts,
+            "houses" => &mut self.houses,
             _ => return None,
         })
     }
@@ -144,6 +151,13 @@ pub const ACHIEVEMENTS: &[AchievementDef] = &[
     ach!("level_20", "Veteran", "Reach level 20.", 25, |s| s.level >= 20),
     ach!("level_30", "Hero of the Gale", "Reach level 30.", 50, |s| s.level >= 30),
     ach!("path_chosen", "A Path Chosen", "Change class.", 10, |s| s.tally.class_changed),
+    ach!("first_craft", "Handmade", "Craft your first item.", 5, |s| s.tally.crafts >= 1),
+    ach!("crafts_250", "Artisan", "Craft 250 items.", 25, |s| s.tally.crafts >= 250),
+    ach!("master_smith", "Master Smith", "Reach Weaponsmithing or Armoursmithing level 20.", 25, |s| s.crafts[0].level >= 20 || s.crafts[1].level >= 20),
+    ach!("master_chef", "Master Chef", "Reach Cooking level 20.", 25, |s| s.crafts[2].level >= 20),
+    ach!("homeowner", "Home Sweet Home", "Buy a house in Breezehollow.", 15, |s| s.tally.houses >= 1),
+    ach!("vault_clear", "Vault Breaker", "Defeat the Stormwarden in the Tempest Vault.", 25, |s| s.vault_clears >= 1),
+    ach!("vault_10", "Storm Chaser", "Clear the Tempest Vault 10 times.", 50, |s| s.vault_clears >= 10),
     ach!("quests_5", "Helping Hand", "Complete 5 quests.", 5, |s| s.tally.quests >= 5),
     ach!("quests_20", "Hero for Hire", "Complete 20 quests.", 20, |s| s.tally.quests >= 20),
     ach!("pocket_change", "Pocket Change", "Hold 10,000 gold at once.", 10, |s| s.tally.most_gold >= 10_000),

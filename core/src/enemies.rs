@@ -45,6 +45,14 @@ pub enum EnemyKind {
     Starwool,
     Voidgust,
     AstralCrab,
+    // The Tempest Vault (co-op dungeon, 0.13.0)
+    Cryptling,
+    Vaultbeak,
+    Galewraith,
+    Ruinstump,
+    Vaultcrab,
+    Gatekeeper,
+    Stormwarden,
 }
 
 pub const ALL_KINDS: &[EnemyKind] = &[
@@ -75,6 +83,13 @@ pub const ALL_KINDS: &[EnemyKind] = &[
     EnemyKind::Starwool,
     EnemyKind::Voidgust,
     EnemyKind::AstralCrab,
+    EnemyKind::Cryptling,
+    EnemyKind::Vaultbeak,
+    EnemyKind::Galewraith,
+    EnemyKind::Ruinstump,
+    EnemyKind::Vaultcrab,
+    EnemyKind::Gatekeeper,
+    EnemyKind::Stormwarden,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -200,6 +215,22 @@ impl EnemyKind {
             Barkstump => EnemyDef { name: "Barkstump", w: 46.0, h: 54.0, hp: 640.0, contact: 36.0, attack: 50.0, exp: 150, gold: 26, level: 18, weight: 2.0, ai: Ai::Lunger, speed: 85.0, burst: 450.0, aggro: 460.0, telegraph: 0.7, ..BASE },
             Starwool => EnemyDef { name: "Starwool", w: 40.0, h: 34.0, hp: 330.0, contact: 28.0, exp: 90, gold: 15, level: 13, weight: 1.2, speed: 140.0, burst: 420.0, aggro: 380.0, ..BASE },
             Voidgust => EnemyDef { name: "Voidgust", w: 34.0, h: 34.0, hp: 560.0, contact: 34.0, exp: 180, gold: 30, level: 22, weight: 0.8, ai: Ai::Floater { diver: false }, speed: 100.0, aggro: 560.0, telegraph: 0.5, fire_every: 2.0, proj_speed: 320.0, proj_damage: 46.0, proj_style: ProjStyle::Bolt, hover: 125.0, ..BASE },
+            Cryptling => EnemyDef { name: "Cryptling", w: 38.0, h: 30.0, hp: 1100.0, contact: 44.0, exp: 260, gold: 30, level: 22, weight: 1.3, speed: 190.0, burst: 500.0, aggro: 520.0, ..BASE },
+            Vaultbeak => EnemyDef { name: "Vaultbeak", w: 34.0, h: 44.0, hp: 1400.0, contact: 46.0, attack: 66.0, exp: 300, gold: 34, level: 23, ai: Ai::Lunger, speed: 130.0, burst: 600.0, aggro: 560.0, telegraph: 0.5, ..BASE },
+            Galewraith => EnemyDef {
+                name: "Galewraith", w: 32.0, h: 42.0, hp: 1000.0, contact: 40.0, exp: 290, gold: 32, level: 23, weight: 0.8, ai: Ai::Floater { diver: false }, speed: 95.0, aggro: 600.0,
+                telegraph: 0.5, fire_every: 1.9, proj_speed: 330.0, proj_damage: 52.0, proj_style: ProjStyle::Bolt, hover: 120.0, ..BASE
+            },
+            Ruinstump => EnemyDef { name: "Ruinstump", w: 48.0, h: 56.0, hp: 2000.0, contact: 52.0, attack: 72.0, exp: 360, gold: 40, level: 24, weight: 2.4, ai: Ai::Lunger, speed: 90.0, burst: 470.0, aggro: 500.0, telegraph: 0.65, ..BASE },
+            Vaultcrab => EnemyDef { name: "Vaultcrab", w: 52.0, h: 38.0, hp: 2200.0, contact: 54.0, attack: 74.0, exp: 380, gold: 42, level: 24, weight: 2.6, ai: Ai::Lunger, speed: 125.0, burst: 620.0, aggro: 520.0, telegraph: 0.55, ..BASE },
+            Gatekeeper => EnemyDef {
+                name: "The Gatekeeper", w: 100.0, h: 80.0, hp: 9000.0, contact: 50.0, attack: 70.0, exp: 1800, gold: 300, level: 24, weight: 3.6, ai: Ai::Boss, speed: 100.0, burst: 650.0,
+                aggro: 900.0, telegraph: 0.7, proj_damage: 40.0, proj_style: ProjStyle::Caltrop, boss: true, ..BASE
+            },
+            Stormwarden => EnemyDef {
+                name: "The Stormwarden", w: 112.0, h: 88.0, hp: 20000.0, contact: 58.0, attack: 82.0, exp: 5000, gold: 800, level: 25, weight: 4.0, ai: Ai::Boss, speed: 115.0, burst: 720.0,
+                aggro: 1100.0, telegraph: 0.6, proj_damage: 50.0, proj_style: ProjStyle::Bolt, boss: true, ..BASE
+            },
             AstralCrab => EnemyDef { name: "Astral Crab", w: 50.0, h: 36.0, hp: 820.0, contact: 42.0, attack: 58.0, exp: 210, gold: 34, level: 23, weight: 2.4, ai: Ai::Lunger, speed: 120.0, burst: 600.0, aggro: 500.0, telegraph: 0.55, ..BASE },
         }
     }
@@ -236,6 +267,13 @@ impl EnemyKind {
             Starwool => "starwool",
             Voidgust => "voidgust",
             AstralCrab => "astralcrab",
+            Cryptling => "cryptling",
+            Vaultbeak => "vaultbeak",
+            Galewraith => "galewraith",
+            Ruinstump => "ruinstump",
+            Vaultcrab => "vaultcrab",
+            Gatekeeper => "gatekeeper",
+            Stormwarden => "stormwarden",
         }
     }
     /// Which monster's art (and behaviour family) this one is a variant of.
@@ -257,6 +295,13 @@ impl EnemyKind {
             Starwool => Puffwool,
             Voidgust => Gustling,
             AstralCrab => CragCrab,
+            Cryptling => Mossling,
+            Vaultbeak => Burrowbeak,
+            Galewraith => Lanternwisp,
+            Ruinstump => Rotstump,
+            Vaultcrab => CragCrab,
+            Gatekeeper => Bramblehorn,
+            Stormwarden => Thunderhorn,
             other => other,
         }
     }
@@ -279,6 +324,13 @@ impl EnemyKind {
             Starwool => [0.78, 0.66, 1.0],
             Voidgust => [0.58, 0.45, 0.95],
             AstralCrab => [0.72, 0.58, 1.0],
+            Cryptling => [0.55, 0.85, 1.0],
+            Vaultbeak => [0.75, 0.7, 1.0],
+            Galewraith => [0.5, 0.95, 1.0],
+            Ruinstump => [0.6, 0.6, 0.85],
+            Vaultcrab => [0.55, 0.8, 1.0],
+            Gatekeeper => [1.0, 0.85, 0.4],
+            Stormwarden => [1.0, 0.45, 0.42],
             _ => [1.0, 1.0, 1.0],
         }
     }
@@ -287,27 +339,31 @@ impl EnemyKind {
         use EnemyKind::*;
         match self {
             TrainingDummy => &[],
-            Mossling => &[("moss_clump", 0.5), ("hp_potion", 0.06)],
-            Burrowbeak => &[("beak_shard", 0.45), ("hp_potion", 0.08), ("sandals", 0.02), ("leather_cap", 0.01)],
-            Bramblehorn => &[("bramble_thorn", 1.0), ("wood_sword", 0.5), ("copper_ring", 0.5)],
-            Puffwool => &[("wool_tuft", 0.5), ("mp_potion", 0.08), ("cloth_tunic", 0.02), ("leather_breeches", 0.015)],
-            Gustling => &[("gust_wisp", 0.45), ("mp_potion", 0.1), ("travel_cloak", 0.01)],
-            Gravecap => &[("cap_spore", 0.45), ("hp_potion", 0.08), ("leather_boots", 0.015), ("fang_necklace", 0.008)],
+            Mossling => &[("moss_clump", 0.5), ("sturdy_branch", 0.35), ("wild_herbs", 0.25), ("hp_potion", 0.06)],
+            Burrowbeak => &[("beak_shard", 0.45), ("speckled_egg", 0.3), ("game_meat", 0.15), ("hp_potion", 0.08), ("sandals", 0.02), ("leather_cap", 0.01)],
+            Bramblehorn => &[("bramble_thorn", 1.0), ("iron_ore", 1.0), ("wood_sword", 0.5), ("copper_ring", 0.5)],
+            Puffwool => &[("wool_tuft", 0.5), ("game_meat", 0.35), ("mp_potion", 0.08), ("cloth_tunic", 0.02), ("leather_breeches", 0.015)],
+            Gustling => &[("gust_wisp", 0.45), ("sky_honey", 0.15), ("mp_potion", 0.1), ("travel_cloak", 0.01)],
+            Gravecap => &[("cap_spore", 0.45), ("glowcap", 0.3), ("hp_potion", 0.08), ("leather_boots", 0.015), ("fang_necklace", 0.008)],
             Lanternwisp => &[("wisp_ember", 0.45), ("mp_potion", 0.1), ("sage_pendant", 0.01), ("brass_hoops", 0.008)],
-            Rotstump => &[("rotten_bark", 0.45), ("hp_potion_big", 0.05), ("leather_vest", 0.015), ("silver_ring", 0.008)],
-            CragCrab => &[("crab_shell", 0.45), ("hp_potion_big", 0.06), ("power_band", 0.01), ("iron_helm", 0.006)],
-            Galehawk => &[("hawk_feather", 0.45), ("mp_potion_big", 0.05), ("windstep_boots", 0.01), ("gale_cape", 0.006)],
+            Rotstump => &[("rotten_bark", 0.45), ("sturdy_branch", 0.5), ("hp_potion_big", 0.05), ("leather_vest", 0.015), ("silver_ring", 0.008)],
+            CragCrab => &[("crab_shell", 0.45), ("crab_meat", 0.35), ("iron_ore", 0.15), ("hp_potion_big", 0.06), ("power_band", 0.01), ("iron_helm", 0.006)],
+            Galehawk => &[("hawk_feather", 0.45), ("speckled_egg", 0.25), ("mp_potion_big", 0.05), ("windstep_boots", 0.01), ("gale_cape", 0.006)],
             Thunderhorn => &[("storm_horn", 1.0), ("storm_amulet", 0.25), ("elixir", 1.0), ("gale_ring", 0.15), ("gale_circlet", 0.1)],
-            Rockmoss | Thornling => &[("moss_clump", 0.6), ("iron_ore", 0.15), ("hp_potion", 0.1)],
-            Ironbeak | Briarbeak => &[("beak_shard", 0.6), ("iron_ore", 0.2), ("hp_potion_big", 0.04), ("chain_shirt", 0.008)],
-            Shadecap => &[("cap_spore", 0.6), ("shadow_silk", 0.15), ("hp_potion", 0.1), ("ranger_hood", 0.006)],
-            Gloomwisp => &[("wisp_ember", 0.6), ("shadow_silk", 0.2), ("mp_potion_big", 0.05), ("shadow_garb", 0.008), ("shadow_leggings", 0.008)],
-            Stormwool | Starwool => &[("wool_tuft", 0.6), ("star_dust", 0.12), ("mp_potion", 0.1), ("sage_robe", 0.006), ("sage_hat", 0.006)],
-            Squallsprite => &[("gust_wisp", 0.6), ("thunder_core", 0.1), ("mp_potion_big", 0.05), ("sage_ring", 0.006)],
-            QuarryCrab => &[("crab_shell", 0.6), ("iron_ore", 0.4), ("hp_potion_big", 0.06), ("iron_greaves", 0.01), ("plate_armor", 0.004)],
-            MireStump | Barkstump => &[("rotten_bark", 0.6), ("shadow_silk", 0.15), ("elixir", 0.02), ("monk_gi", 0.004)],
-            Thunderhawk => &[("hawk_feather", 0.6), ("thunder_core", 0.3), ("mp_potion_big", 0.06), ("storm_amulet", 0.004), ("feather_wings", 0.003)],
-            Voidgust | AstralCrab => &[("star_dust", 0.5), ("thunder_core", 0.15), ("elixir", 0.03), ("rogue_coin", 0.01), ("star_drop", 0.006), ("gale_greaves", 0.004)],
+            Rockmoss | Thornling => &[("moss_clump", 0.6), ("sturdy_branch", 0.3), ("wild_herbs", 0.3), ("iron_ore", 0.15), ("hp_potion", 0.1)],
+            Ironbeak | Briarbeak => &[("beak_shard", 0.6), ("speckled_egg", 0.3), ("game_meat", 0.15), ("iron_ore", 0.2), ("hp_potion_big", 0.04), ("chain_shirt", 0.008)],
+            Shadecap => &[("cap_spore", 0.6), ("glowcap", 0.35), ("shadow_silk", 0.15), ("hp_potion", 0.1), ("ranger_hood", 0.006)],
+            Gloomwisp => &[("wisp_ember", 0.6), ("sky_honey", 0.1), ("shadow_silk", 0.2), ("mp_potion_big", 0.05), ("shadow_garb", 0.008), ("shadow_leggings", 0.008)],
+            Stormwool | Starwool => &[("wool_tuft", 0.6), ("game_meat", 0.35), ("star_dust", 0.12), ("mp_potion", 0.1), ("sage_robe", 0.006), ("sage_hat", 0.006)],
+            Squallsprite => &[("gust_wisp", 0.6), ("sky_honey", 0.25), ("thunder_core", 0.1), ("mp_potion_big", 0.05), ("sage_ring", 0.006)],
+            QuarryCrab => &[("crab_shell", 0.6), ("crab_meat", 0.35), ("iron_ore", 0.4), ("hp_potion_big", 0.06), ("iron_greaves", 0.01), ("plate_armor", 0.004)],
+            MireStump | Barkstump => &[("rotten_bark", 0.6), ("sturdy_branch", 0.5), ("glowcap", 0.15), ("shadow_silk", 0.15), ("elixir", 0.02), ("monk_gi", 0.004)],
+            Thunderhawk => &[("hawk_feather", 0.6), ("speckled_egg", 0.2), ("sky_honey", 0.15), ("thunder_core", 0.3), ("mp_potion_big", 0.06), ("storm_amulet", 0.004), ("feather_wings", 0.003)],
+            Voidgust | AstralCrab => &[("star_dust", 0.5), ("crab_meat", 0.2), ("sky_honey", 0.15), ("thunder_core", 0.15), ("elixir", 0.03), ("rogue_coin", 0.01), ("star_drop", 0.006), ("gale_greaves", 0.004)],
+            Cryptling | Vaultbeak | Galewraith => &[("gale_shard", 0.25), ("thunder_core", 0.2), ("elixir", 0.05), ("galeheart_ring", 0.004), ("galeheart_earring", 0.004)],
+            Ruinstump | Vaultcrab => &[("gale_shard", 0.35), ("iron_ore", 0.5), ("crab_meat", 0.3), ("elixir", 0.06), ("galeheart_treads", 0.004), ("galeheart_helm", 0.004)],
+            Gatekeeper => &[("gale_shard", 1.0), ("gale_shard", 1.0), ("gale_shard", 0.5), ("storm_horn", 0.5), ("elixir", 1.0)],
+            Stormwarden => &[("gale_shard", 1.0), ("gale_shard", 1.0), ("gale_shard", 1.0), ("crimson_core", 0.35), ("storm_horn", 1.0), ("elixir", 1.0)],
         }
     }
     pub fn is_boss(self) -> bool {

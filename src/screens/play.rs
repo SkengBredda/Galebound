@@ -64,6 +64,8 @@ pub struct PlayScreen {
     menu: Menu,
     settings_panel: Option<SettingsPanel>,
     show_controls: bool,
+    /// F3: draw hitboxes over the game (for lining poses up).
+    show_hitboxes: bool,
     saved_flash: f32,
     /// Ignore the Esc press that opened the pause menu.
     menu_just_opened: bool,
@@ -136,6 +138,7 @@ impl PlayScreen {
             menu: Menu::Closed,
             settings_panel: None,
             show_controls: true,
+            show_hitboxes: false,
             saved_flash: 0.0,
             menu_just_opened: false,
             windows: Windows::default(),
@@ -281,7 +284,7 @@ impl PlayScreen {
                 pos.pet_facing = if a.facing < 0.0 { -1 } else { 1 };
                 pos.pet_frame = if a.moving { ((a.anim_t * 10.0) as u32) % 2 } else { 0 };
             }
-            n.send(&ClientMsg::Pos { map: self.sim.map.key.to_string(), pos });
+            n.send(&ClientMsg::Pos { map: self.sim.net_map(), pos });
         }
         self.ping_t -= dt;
         if self.ping_t <= 0.0 {
@@ -486,6 +489,9 @@ impl PlayScreen {
         if is_key_pressed(KeyCode::F1) {
             self.show_controls = !self.show_controls;
         }
+        if is_key_pressed(KeyCode::F3) {
+            self.show_hitboxes = !self.show_hitboxes;
+        }
 
         // Window toggles
         if self.menu == Menu::Closed && self.sim.dialog.is_none() {
@@ -551,9 +557,21 @@ impl PlayScreen {
                 self.sim.look_changed = false;
                 self.look = windows::gear_look(&self.sim.save.look, &self.sim);
             }
-            // Walking away from the shopkeeper closes the shop.
+            // Walking away from the shopkeeper closes the shop (and crafting
+            // stations, the housekeeper and the storage chest likewise).
             if self.sim.shop_open.is_some() && self.sim.nearest_npc().is_none() {
                 self.sim.shop_open = None;
+            }
+            let at_furniture = self.sim.nearby_spot().map(|s| s.1.is_some()).unwrap_or(false);
+            if self.sim.craft_open.is_some() && self.sim.nearest_npc().is_none() && !at_furniture {
+                self.sim.craft_open = None;
+            }
+            if self.sim.house_open && self.sim.nearest_npc().is_none() {
+                self.sim.house_open = false;
+            }
+            if self.sim.storage_open && !at_furniture {
+                self.sim.storage_open = false;
+                self.windows.inventory = false;
             }
             self.cam.follow(&self.sim, dt);
             self.autosave -= dt;
@@ -589,6 +607,9 @@ impl PlayScreen {
         render::player(&self.sim, &cam, &self.look);
         render::tufts(&self.sim, &cam);
         render::swings(&self.sim, &cam);
+        if self.show_hitboxes {
+            render::hitboxes(&self.sim, &cam);
+        }
         render::projectiles(&self.sim, &cam);
         render::particles(&self.sim, &cam);
         render::decos(&self.sim, &cam, 2, time);

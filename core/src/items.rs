@@ -6,8 +6,11 @@ use crate::stats::{MainStats, StatMods};
 
 pub const INVENTORY_SLOTS: usize = 24;
 pub const STACK_MAX: u32 = 99;
-/// Shops buy items back for this fraction of their price.
+/// Shops buy items back for this fraction of their base price.
 pub const SELL_RATE: f32 = 0.4;
+/// Everything costs this many times its base price to buy from a shop
+/// (0.13.0: prices went up by 800%). What shops pay you is unchanged.
+pub const PRICE_MULT: u32 = 5;
 /// The tutorial outfitter's potions: this many purchases are discounted...
 pub const TRAINEE_DISCOUNT_BUYS: u32 = 10;
 /// ...by this fraction (40% off).
@@ -158,6 +161,9 @@ pub enum Effect {
     Restore { hp: f32, mp: f32 },
     /// Temporary stat boost (seconds).
     Buff { mods: StatMods, secs: f32 },
+    /// A meal: a long food buff (one at a time; a new meal replaces the
+    /// old one). `hp_regen` / `mp_regen` are per second.
+    Food { mods: StatMods, secs: f32, hp_regen: f32, mp_regen: f32 },
 }
 
 /// Items with a one-off use that isn't a potion or a buff.
@@ -171,6 +177,34 @@ pub enum Special {
     Pet(crate::pets::PetSpecies),
     /// Feeds your active pet (hunger and pet EXP).
     PetFood,
+    /// Unlocks your own house in Breezehollow.
+    HouseDeed,
+    /// A dungeon reward cache: open it for gear and materials.
+    Cache,
+}
+
+/// Furniture for your house (see `housing`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Furniture {
+    /// Sleep for a full heal and the Well Rested bonus.
+    Bed,
+    /// Opens your house storage.
+    Chest,
+    /// Cook at home.
+    Stove,
+    /// Forge weapons and armour at home.
+    Workbench,
+    Table,
+    Bookshelf,
+    Plant,
+    Rug,
+    Fireplace,
+    WeaponRack,
+    ArmorStand,
+    Barrel,
+    Banner,
+    Lamp,
+    Trophy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -180,6 +214,8 @@ pub enum ItemKind {
     /// Monster loot: stacks, sells to any shop.
     Material,
     Special(Special),
+    /// Furniture: place it in your house.
+    Furniture(Furniture),
 }
 
 /// What a piece of gear looks like on the character (art hint, used by the client).
@@ -210,7 +246,8 @@ pub struct ItemDef {
     pub class: Option<ClassId>,
     pub mods: StatMods,
     pub look: Look,
-    /// Icon tier / colour accent 0-3 for the client.
+    /// Rarity: 0 common, 1 uncommon, 2 rare, 3 epic, 4 Gold, 5 Red
+    /// (Gold and Red come from co-op dungeons).
     pub tier: u8,
     /// Bound to the character: can't be sold, traded or dropped.
     pub bound: bool,
@@ -218,10 +255,18 @@ pub struct ItemDef {
 
 impl ItemDef {
     pub fn stackable(&self) -> bool {
-        matches!(self.kind, ItemKind::Consumable(_) | ItemKind::Material | ItemKind::Special(_))
+        matches!(self.kind, ItemKind::Consumable(_) | ItemKind::Material | ItemKind::Special(_) | ItemKind::Furniture(_))
     }
     pub fn can_sell(&self) -> bool {
         self.price > 0 && !self.bound
+    }
+    /// What a shop charges for one (see [`PRICE_MULT`]).
+    pub fn buy_price(&self) -> u32 {
+        self.price.saturating_mul(PRICE_MULT)
+    }
+    /// The rarity's name.
+    pub fn tier_name(&self) -> &'static str {
+        tier_name(self.tier)
     }
     /// Trading between players will check this.
     pub fn can_trade(&self) -> bool {
@@ -242,7 +287,11 @@ impl ItemDef {
     }
     /// Short stat lines for tooltips, e.g. ["+12 P.ATK", "+4 LUK"].
     pub fn stat_lines(&self) -> Vec<String> {
-        let m = &self.mods;
+        let food = match self.kind {
+            ItemKind::Consumable(Effect::Food { mods, .. }) => Some(mods),
+            _ => None,
+        };
+        let m = food.as_ref().unwrap_or(&self.mods);
         let flat = [
             (m.patk, "P.ATK"),
             (m.matk, "M.ATK"),
@@ -266,6 +315,15 @@ impl ItemDef {
             if x != 0.0 {
                 v.push(format!("{:+}% {}", (x * 100.0).round() as i32, l));
             }
+        }
+        if let ItemKind::Consumable(Effect::Food { secs, hp_regen, mp_regen, .. }) = self.kind {
+            if hp_regen > 0.0 {
+                v.push(format!("+{} HP per second", hp_regen));
+            }
+            if mp_regen > 0.0 {
+                v.push(format!("+{} Mana per second", mp_regen));
+            }
+            v.push(format!("Lasts {} minutes", (secs / 60.0).round() as i32));
         }
         v
     }
@@ -328,6 +386,41 @@ const fn matk(v: f32, mp: f32) -> StatMods {
 const fn def(p: f32, m: f32, hp: f32) -> StatMods {
     StatMods { pdef: p, mdef: m, hp, ..Z }
 }
+
+
+#[allow(clippy::too_many_arguments)]
+const fn food(id: &'static str, name: &'static str, desc: &'static str, price: u32, mods: StatMods, mins: f32, hp_regen: f32, mp_regen: f32, tier: u8) -> ItemDef {
+    ItemDef { id, name, desc, kind: ItemKind::Consumable(Effect::Food { mods, secs: mins * 60.0, hp_regen, mp_regen }), price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+}
+
+const fn furn(id: &'static str, name: &'static str, desc: &'static str, price: u32, f: Furniture, tier: u8) -> ItemDef {
+    ItemDef { id, name, desc, kind: ItemKind::Furniture(f), price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+}
+
+/// The name of a rarity tier.
+pub fn tier_name(tier: u8) -> &'static str {
+    match tier {
+        0 => "Common",
+        1 => "Uncommon",
+        2 => "Rare",
+        3 => "Epic",
+        4 => "Gold",
+        _ => "Red",
+    }
+}
+
+/// Gold-tier gear a dungeon cache can hold.
+pub const GOLD_LOOT: &[&str] = &[
+    "galeheart_blade", "galeheart_fangs", "galeheart_knuckles", "galeheart_longbow", "galeheart_staff",
+    "galeheart_helm", "galeheart_cuirass", "galeheart_tassets", "galeheart_treads", "galeheart_mantle",
+    "galeheart_ring", "galeheart_earring", "galeheart_amulet",
+];
+/// Red-tier gear: only from the Tempest Vault's caches.
+pub const RED_LOOT: &[&str] = &[
+    "crimson_tempest_blade", "crimson_tempest_fangs", "crimson_tempest_knuckles", "crimson_tempest_bow", "crimson_tempest_staff",
+    "crimson_tempest_helm", "crimson_tempest_cuirass", "crimson_tempest_greaves", "crimson_tempest_sabatons", "crimson_tempest_cloak",
+    "crimson_tempest_ring", "crimson_tempest_earring", "crimson_tempest_amulet",
+];
 
 use ClassId::*;
 use GearKind::*;
@@ -448,6 +541,91 @@ pub const ITEMS: &[ItemDef] = &[
     gear("trail_pack", "Trailblazer's Pack", "Bedroll, rope, snacks. Mostly snacks.", Back, 140, 8, StatMods { pdef: 3.0, hp: 25.0, ..Z }, Look::Back(4), 1),
     gear("gale_cape", "Galeborne Cape", "Billows even when there's no wind.", Back, 260, 10, StatMods { pdef: 4.0, mdef: 6.0, speed_pct: 0.03, ..Z }, Look::Back(2), 2),
     gear("feather_wings", "Featherdown Wings", "Too small to fly. Not too small to look amazing.", Back, 560, 15, StatMods { mdef: 8.0, speed_pct: 0.05, main: ms(0, 2, 2, 0), ..Z }, Look::Back(3), 3),
+    // ---------------------------------------------------------------- 0.13.0: crafting materials
+    material("sturdy_branch", "Sturdy Branch", "Straight and seasoned by the wind. Woodworkers turn these into planks.", 4, 0),
+    material("seasoned_plank", "Seasoned Plank", "Crafted from Sturdy Branches. Used for wooden weapons and furniture.", 30, 1),
+    material("iron_ingot", "Iron Ingot", "Smelted from Iron Ore at any forge.", 40, 1),
+    material("storm_alloy", "Storm Alloy", "Iron folded around a Thunder Core. Hums faintly.", 120, 2),
+    material("wool_cloth", "Wool Cloth", "Woven from Wool Tufts. The base of most clothing.", 14, 0),
+    material("silk_bolt", "Shadowsilk Bolt", "A bolt of cloth spun from Shadow Silk.", 60, 2),
+    material("gale_shard", "Gale Shard", "A splinter of bottled storm from the Tempest Vault. Forges Gold-tier gear.", 90, 4),
+    material("crimson_core", "Crimson Core", "The Stormwarden's still-beating heart of lightning.", 400, 5),
+    // ---------------------------------------------------------------- 0.13.0: cooking ingredients
+    material("wild_herbs", "Wild Herbs", "Fragrant leaves from the roadside. A cook's best friend.", 3, 0),
+    material("game_meat", "Wild Game", "Fresh meat from the fields. Cook it before eating!", 6, 0),
+    material("speckled_egg", "Speckled Egg", "Laid by a very annoyed bird.", 5, 0),
+    material("glowcap", "Glowcap Mushroom", "Glows in the pot as well as in the woods.", 8, 1),
+    material("crab_meat", "Crab Meat", "Sweet and tender, once you get past the shell.", 12, 1),
+    material("sky_honey", "Sky Honey", "Honey from hives that drift on the wind.", 14, 1),
+    material("flour", "Flour", "A sack of milled wheat. Sold by cooks and general stores.", 4, 0),
+    material("fresh_milk", "Fresh Milk", "From Breezehollow's dairy. Sold by cooks and general stores.", 4, 0),
+    material("spice_pouch", "Spice Pouch", "Salt, pepper and a secret. Sold by cooks and general stores.", 6, 0),
+    // ---------------------------------------------------------------- 0.13.0: meals (food buffs, one at a time)
+    food("herb_flatbread", "Herb Flatbread", "Warm bread folded around wild herbs.", 12, StatMods { hp: 40.0, ..Z }, 15.0, 2.0, 0.0, 0),
+    food("glade_omelette", "Glade Omelette", "Fluffy eggs with milk and herbs.", 18, StatMods { main: ms(3, 3, 0, 0), ..Z }, 15.0, 0.0, 0.0, 0),
+    food("hearty_stew", "Hearty Stew", "Slow-cooked game with herbs and spice.", 30, StatMods { hp: 80.0, pdef: 6.0, ..Z }, 20.0, 3.0, 0.0, 1),
+    food("glowcap_skewers", "Glowcap Skewers", "Grilled mushrooms that tingle on the tongue.", 34, StatMods { matk: 10.0, mp: 30.0, ..Z }, 20.0, 0.0, 0.6, 1),
+    food("honey_roast", "Honey-Glazed Roast", "Sticky, sweet and very filling.", 45, StatMods { atk_pct: 0.06, ..Z }, 20.0, 0.0, 0.0, 1),
+    food("crab_cakes", "Crab Cakes", "Golden-fried and crunchy.", 50, StatMods { pdef: 12.0, mdef: 12.0, hp: 40.0, ..Z }, 25.0, 0.0, 0.0, 2),
+    food("wayfarers_pie", "Wayfarer's Pie", "A whole meal in a crust. Keeps you going for miles.", 60, StatMods { hp: 120.0, ..Z }, 25.0, 4.0, 0.0, 2),
+    food("aether_tea", "Aether Tea", "Herbal tea sweetened with Sky Honey and a pinch of Star Dust.", 70, StatMods { main: ms(0, 0, 4, 0), mp: 40.0, ..Z }, 30.0, 0.0, 1.0, 2),
+    food("stormberry_tart", "Stormberry Tart", "Crackles when you bite it.", 70, StatMods { crit: 5.0, crit_dmg: 10.0, ..Z }, 30.0, 0.0, 0.0, 2),
+    food("gale_feast", "Gale Feast", "A banquet seasoned with a Gale Shard. Fit for vault delvers.", 160, StatMods { atk_pct: 0.08, hp: 80.0, speed_pct: 0.03, ..Z }, 30.0, 2.0, 0.0, 4),
+    // ---------------------------------------------------------------- 0.13.0: crafted weapons (Lv 16, Epic)
+    weapon("stormguard_saber", "Stormguard Saber", "Forged from Storm Alloy, with a crab-shell guard.", Vanguard, 520, 16, StatMods { patk: 27.0, pdef: 9.0, hp: 30.0, ..Z }, 3),
+    weapon("nightglass_kris", "Nightglass Kris", "Twin wavy blades wrapped in shadowsilk.", Duskblade, 520, 16, StatMods { patk: 24.0, crit: 6.0, crit_dmg: 12.0, ..Z }, 3),
+    weapon("thunderclap_cestus", "Thunderclap Cestus", "Storm Alloy knuckles that clap like thunder.", Stormfist, 520, 16, StatMods { patk: 26.0, crit: 3.0, speed_pct: 0.03, ..Z }, 3),
+    weapon("hawkwing_recurve", "Hawkwing Recurve", "Fletched with Galehawk feathers.", Windrunner, 520, 16, StatMods { patk: 26.0, crit: 4.0, main: ms(0, 3, 0, 0), ..Z }, 3),
+    weapon("wisplight_rod", "Wisplight Rod", "A wisp ember burns in its tip.", Aethermancer, 520, 16, StatMods { matk: 30.0, mp: 35.0, main: ms(0, 0, 3, 0), ..Z }, 3),
+    // ---------------------------------------------------------------- 0.13.0: Gold tier (Lv 22; dungeon caches or crafted with Gale Shards)
+    weapon("galeheart_blade", "Galeheart Blade", "Gold tier. A storm sings inside the steel.", Vanguard, 1400, 22, StatMods { patk: 44.0, pdef: 14.0, hp: 70.0, ..Z }, 4),
+    weapon("galeheart_fangs", "Galeheart Fangs", "Gold tier. They strike twice before you hear the first.", Duskblade, 1400, 22, StatMods { patk: 40.0, crit: 9.0, crit_dmg: 28.0, ..Z }, 4),
+    weapon("galeheart_knuckles", "Galeheart Knuckles", "Gold tier. Every punch carries a gale.", Stormfist, 1400, 22, StatMods { patk: 42.0, crit: 5.0, speed_pct: 0.07, ..Z }, 4),
+    weapon("galeheart_longbow", "Galeheart Longbow", "Gold tier. The string is a captured wind.", Windrunner, 1400, 22, StatMods { patk: 42.0, crit: 7.0, main: ms(0, 6, 0, 0), ..Z }, 4),
+    weapon("galeheart_staff", "Galeheart Staff", "Gold tier. A Gale Shard crowns its head.", Aethermancer, 1400, 22, StatMods { matk: 48.0, mp: 60.0, main: ms(0, 0, 6, 0), ..Z }, 4),
+    gear("galeheart_helm", "Galeheart Circlet", "Gold tier. Set with a Gale Shard.", Helmet, 1200, 22, StatMods { pdef: 16.0, mdef: 14.0, hp: 50.0, main: ms(2, 2, 2, 2), ..Z }, Look::Hat(7), 4),
+    gear("galeheart_cuirass", "Galeheart Cuirass", "Gold tier. Plate that never weighs you down.", Torso, 1200, 22, StatMods { pdef: 32.0, mdef: 24.0, hp: 90.0, ..Z }, Look::Top(5, 3), 4),
+    gear("galeheart_tassets", "Galeheart Hakama", "Gold tier. Pleated cloth woven with gold thread.", Legs, 1200, 22, StatMods { pdef: 20.0, mdef: 14.0, hp: 55.0, ..Z }, Look::Bottom(5, 3), 4),
+    gear("galeheart_treads", "Galeheart Treads", "Gold tier. Your feet barely touch the ground.", Boots, 1200, 22, StatMods { pdef: 12.0, mdef: 8.0, speed_pct: 0.07, ..Z }, Look::Shoes(3), 4),
+    gear("galeheart_mantle", "Galeheart Mantle", "Gold tier. Billows in a wind only you can feel.", Back, 1200, 22, StatMods { pdef: 6.0, mdef: 12.0, speed_pct: 0.05, main: ms(0, 3, 3, 0), ..Z }, Look::Back(2), 4),
+    gear("galeheart_ring", "Galeheart Ring", "Gold tier.", Ring, 1200, 22, StatMods { main: ms(3, 3, 3, 3), crit: 3.0, ..Z }, Look::None, 4),
+    gear("galeheart_earring", "Galeheart Earring", "Gold tier.", Earring, 1200, 22, StatMods { main: ms(0, 2, 2, 4), crit_dmg: 15.0, mp: 30.0, ..Z }, Look::None, 4),
+    gear("galeheart_amulet", "Galeheart Amulet", "Gold tier.", Necklace, 1200, 22, StatMods { main: ms(3, 3, 3, 3), atk_pct: 0.06, crit: 3.0, ..Z }, Look::None, 4),
+    // ---------------------------------------------------------------- 0.13.0: Red tier (Lv 24; Tempest Vault caches only)
+    weapon("crimson_tempest_blade", "Crimson Tempest Blade", "Red tier. Forged in the Stormwarden's own lightning.", Vanguard, 3000, 24, StatMods { patk: 58.0, pdef: 20.0, hp: 110.0, atk_pct: 0.05, ..Z }, 5),
+    weapon("crimson_tempest_fangs", "Crimson Tempest Fangs", "Red tier. Red lightning trails every cut.", Duskblade, 3000, 24, StatMods { patk: 52.0, crit: 12.0, crit_dmg: 40.0, ..Z }, 5),
+    weapon("crimson_tempest_knuckles", "Crimson Tempest Knuckles", "Red tier. The storm answers every blow.", Stormfist, 3000, 24, StatMods { patk: 55.0, crit: 7.0, speed_pct: 0.1, ..Z }, 5),
+    weapon("crimson_tempest_bow", "Crimson Tempest Bow", "Red tier. Its arrows are bolts of red lightning.", Windrunner, 3000, 24, StatMods { patk: 55.0, crit: 10.0, main: ms(0, 9, 0, 0), ..Z }, 5),
+    weapon("crimson_tempest_staff", "Crimson Tempest Staff", "Red tier. A Crimson Core pulses at its tip.", Aethermancer, 3000, 24, StatMods { matk: 62.0, mp: 90.0, main: ms(0, 0, 9, 0), ..Z }, 5),
+    gear("crimson_tempest_helm", "Crimson Tempest Helm", "Red tier.", Helmet, 2600, 24, StatMods { pdef: 22.0, mdef: 20.0, hp: 80.0, main: ms(3, 3, 3, 3), ..Z }, Look::Hat(4), 5),
+    gear("crimson_tempest_cuirass", "Crimson Tempest Cuirass", "Red tier. Scorched red by the Stormwarden's breath.", Torso, 2600, 24, StatMods { pdef: 44.0, mdef: 32.0, hp: 140.0, atk_pct: 0.03, ..Z }, Look::Top(5, 2), 5),
+    gear("crimson_tempest_greaves", "Crimson Tempest Legguards", "Red tier.", Legs, 2600, 24, StatMods { pdef: 28.0, mdef: 20.0, hp: 90.0, ..Z }, Look::Bottom(1, 2), 5),
+    gear("crimson_tempest_sabatons", "Crimson Tempest Sabatons", "Red tier.", Boots, 2600, 24, StatMods { pdef: 16.0, mdef: 12.0, speed_pct: 0.09, ..Z }, Look::Shoes(3), 5),
+    gear("crimson_tempest_cloak", "Crimson Tempest Cloak", "Red tier. It crackles in the dark.", Back, 2600, 24, StatMods { pdef: 10.0, mdef: 16.0, speed_pct: 0.06, main: ms(0, 4, 4, 0), ..Z }, Look::Back(2), 5),
+    gear("crimson_tempest_ring", "Crimson Tempest Ring", "Red tier.", Ring, 2600, 24, StatMods { main: ms(4, 4, 4, 4), crit: 5.0, ..Z }, Look::None, 5),
+    gear("crimson_tempest_earring", "Crimson Tempest Earring", "Red tier.", Earring, 2600, 24, StatMods { main: ms(0, 3, 3, 5), crit_dmg: 22.0, mp: 40.0, ..Z }, Look::None, 5),
+    gear("crimson_tempest_amulet", "Crimson Tempest Amulet", "Red tier.", Necklace, 2600, 24, StatMods { main: ms(4, 4, 4, 4), atk_pct: 0.08, crit: 4.0, ..Z }, Look::None, 5),
+    // ---------------------------------------------------------------- 0.13.0: crafted accessories (Lv 16)
+    gear("stormglass_pendant", "Stormglass Pendant", "Storm Alloy set around a sphere of star dust.", Necklace, 420, 16, StatMods { main: ms(1, 1, 1, 1), mp: 20.0, crit: 2.0, ..Z }, Look::None, 3),
+    gear("crabshell_band", "Crabshell Band", "A ring carved from a Quarry Crab's shell.", Ring, 420, 16, StatMods { main: ms(2, 0, 0, 0), pdef: 6.0, hp: 40.0, ..Z }, Look::None, 3),
+    // ---------------------------------------------------------------- 0.13.0: housing and dungeons
+    special("house_deed", "Breezehollow House Deed", "Use it to become the owner of a cosy house in Breezehollow. Enter it from the door by the estate office.", 6000, Special::HouseDeed, 3),
+    special("vault_cache", "Tempest Vault Cache", "Your share of the Stormwarden's hoard. Use it to open: Gale Shards and a chance of Gold or Red gear.", 0, Special::Cache, 4),
+    furn("furn_bed", "Feather Bed", "Furniture. Sleep in it for a full heal and the Well Rested bonus (+10% EXP from monsters for 30 minutes).", 220, Furniture::Bed, 2),
+    furn("furn_chest", "Storage Chest", "Furniture. Opens your house storage (48 extra slots).", 260, Furniture::Chest, 2),
+    furn("furn_stove", "Cooking Stove", "Furniture. Cook meals at home.", 300, Furniture::Stove, 2),
+    furn("furn_workbench", "Workbench", "Furniture. Craft weapons and armour at home.", 300, Furniture::Workbench, 2),
+    furn("furn_table", "Oak Table", "Furniture.", 90, Furniture::Table, 1),
+    furn("furn_bookshelf", "Bookshelf", "Furniture. Full of adventure stories.", 140, Furniture::Bookshelf, 1),
+    furn("furn_plant", "Potted Fern", "Furniture.", 40, Furniture::Plant, 0),
+    furn("furn_rug", "Woven Rug", "Furniture.", 60, Furniture::Rug, 0),
+    furn("furn_fireplace", "Stone Fireplace", "Furniture. Crackles cosily.", 280, Furniture::Fireplace, 2),
+    furn("furn_weaponrack", "Weapon Rack", "Furniture. Show off your arsenal.", 150, Furniture::WeaponRack, 1),
+    furn("furn_armorstand", "Armour Stand", "Furniture.", 150, Furniture::ArmorStand, 1),
+    furn("furn_barrel", "Barrel", "Furniture.", 30, Furniture::Barrel, 0),
+    furn("furn_banner", "Gale Banner", "Furniture. Flaps in a breeze that isn't there.", 80, Furniture::Banner, 1),
+    furn("furn_lamp", "Standing Lamp", "Furniture.", 50, Furniture::Lamp, 0),
+    furn("furn_trophy", "Stormwarden Trophy", "Furniture. Proof you beat the Stormwarden. Rarely found in Tempest Vault caches.", 500, Furniture::Trophy, 5),
 ];
 
 /// What a weapon looks like in the character's hand.
@@ -585,6 +763,8 @@ pub enum ShopKind {
     Weapons,
     Armor,
     Pets,
+    Housing,
+    Pantry,
 }
 
 impl ShopKind {
@@ -594,6 +774,8 @@ impl ShopKind {
             ShopKind::Weapons => "Weapons",
             ShopKind::Armor => "Armor",
             ShopKind::Pets => "Pets & pet food",
+            ShopKind::Housing => "Houses & furniture",
+            ShopKind::Pantry => "Cooking ingredients",
         }
     }
 }
@@ -606,7 +788,11 @@ pub struct ShopDef {
     pub stock: &'static [&'static str],
 }
 
-const GENERAL_STOCK: &[&str] = &["hp_potion", "hp_potion_big", "mp_potion", "mp_potion_big", "elixir", "might_tonic", "iron_tonic", "lucky_clover", "revive_scroll"];
+const GENERAL_STOCK: &[&str] = &["hp_potion", "hp_potion_big", "mp_potion", "mp_potion_big", "elixir", "might_tonic", "iron_tonic", "lucky_clover", "revive_scroll", "flour", "fresh_milk", "spice_pouch"];
+/// Breezehollow's estate office: the house deed and furniture.
+pub const ESTATE_SHOP: &str = "breezehollow_estate";
+/// The cook's pantry in Breezehollow.
+pub const PANTRY_SHOP: &str = "breezehollow_pantry";
 /// Every main town's pet shop.
 pub const PET_SHOP: &str = "pet_shop";
 /// The tutorial outfitter by the training dummies.
@@ -633,6 +819,16 @@ pub const SHOPS: &[ShopDef] = &[
         ],
     },
     ShopDef { id: PET_SHOP, name: "Whisker & Wing Pet Shop", kind: ShopKind::Pets, stock: &["pet_breeze_fox", "pet_puffling", "pet_sparkwing", "pet_food"] },
+    ShopDef {
+        id: ESTATE_SHOP,
+        name: "Hollowhome Estates",
+        kind: ShopKind::Housing,
+        stock: &[
+            "house_deed", "furn_bed", "furn_chest", "furn_stove", "furn_workbench", "furn_table", "furn_bookshelf", "furn_plant", "furn_rug", "furn_fireplace",
+            "furn_weaponrack", "furn_armorstand", "furn_barrel", "furn_banner", "furn_lamp",
+        ],
+    },
+    ShopDef { id: PANTRY_SHOP, name: "Bramwell's Pantry", kind: ShopKind::Pantry, stock: &["flour", "fresh_milk", "spice_pouch", "wild_herbs", "herb_flatbread", "hearty_stew"] },
     ShopDef { id: "breezehollow_general", name: "Mira's Remedies", kind: ShopKind::General, stock: &["hp_potion", "mp_potion", "might_tonic", "iron_tonic", "revive_scroll"] },
     ShopDef { id: "breezehollow_smith", name: "Garrick's Forge", kind: ShopKind::Weapons, stock: &["wood_sword", "wood_club", "oak_club", "leather_cap", "cloth_tunic", "leather_vest", "leather_breeches", "sandals", "leather_boots", "copper_ring", "travel_cloak"] },
     ShopDef { id: "ironhold_general", name: "The Iron Kettle", kind: ShopKind::General, stock: GENERAL_STOCK },
@@ -658,15 +854,15 @@ pub fn purchase_cost(id: &str, n: u32, discounts_left: u32) -> Option<(u32, u32)
     let def = item(id)?;
     if TRAINEE_POTIONS.contains(&id) {
         let k = n.min(discounts_left);
-        Some((k * discounted_price(def) + (n - k) * def.price, k))
+        Some((k * discounted_price(def) + (n - k) * def.buy_price(), k))
     } else {
-        Some((n * def.price, 0))
+        Some((n.saturating_mul(def.buy_price()), 0))
     }
 }
 
 /// A trainee potion's price while the 40% discount lasts.
 pub fn discounted_price(def: &ItemDef) -> u32 {
-    ((def.price as f32) * (1.0 - TRAINEE_DISCOUNT)).round() as u32
+    ((def.buy_price() as f32) * (1.0 - TRAINEE_DISCOUNT)).round() as u32
 }
 
 pub fn shop(id: &str) -> Option<&'static ShopDef> {
@@ -713,11 +909,15 @@ mod tests {
     #[test]
     fn trainee_discount() {
         let red = item("trainee_hp_potion").unwrap();
-        assert_eq!(discounted_price(red), 9);
-        assert_eq!(purchase_cost("trainee_hp_potion", 3, 10), Some((27, 3)));
+        // 15g base, x9 = 135g, 40% off = 81g
+        assert_eq!(red.buy_price(), 135);
+        assert_eq!(discounted_price(red), 81);
+        assert_eq!(purchase_cost("trainee_hp_potion", 3, 10), Some((243, 3)));
         // 2 discounted + 3 full price
-        assert_eq!(purchase_cost("trainee_hp_potion", 5, 2), Some((2 * 9 + 3 * 15, 2)));
-        assert_eq!(purchase_cost("hp_potion", 5, 10), Some((75, 0)));
+        assert_eq!(purchase_cost("trainee_hp_potion", 5, 2), Some((2 * 81 + 3 * 135, 2)));
+        assert_eq!(purchase_cost("hp_potion", 5, 10), Some((675, 0)));
+        // selling back still pays 40% of the base price
+        assert_eq!(item("hp_potion").unwrap().sell_price(), 6);
     }
 
     #[test]

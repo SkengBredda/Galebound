@@ -50,6 +50,8 @@ const PET_PICKUP_RANGE: f32 = 900.0;
 /// Everyone who helped beat a monster gets at least this share of its EXP;
 /// the rest is split by damage dealt.
 pub const MIN_EXP_SHARE: f32 = 0.2;
+/// Extra dungeon monster HP for each party member after the first.
+pub const DUNGEON_HP_PER_MEMBER: f32 = 0.6;
 const MAX_CONNECTIONS: usize = 64;
 /// Invitations (party, guild, trade) expire after this long.
 const INVITE_LIFE: Duration = Duration::from_secs(60);
@@ -692,9 +694,14 @@ impl Server {
     fn new_zone(&mut self, key: &str) -> Zone {
         let map = world::load_map(key).expect("map exists");
         let mut z = Zone { enemies: Vec::new(), timers: vec![0.0; map.spawns.len()], drops: Vec::new(), contrib: HashMap::new(), empty_for: 0.0, map };
+        // A dungeon run ("map#leader") gets tougher monsters for a bigger party.
+        let hp_mult = self.instance_hp_mult(key);
         for (k, x, y) in z.map.fixed_enemies.clone() {
             let id = self.new_id();
-            z.enemies.push(Enemy::new(id, k, x, y, None, &mut self.rng));
+            let mut e = Enemy::new(id, k, x, y, None, &mut self.rng);
+            e.max_hp *= hp_mult;
+            e.hp = e.max_hp;
+            z.enemies.push(e);
         }
         for zi in 0..z.map.spawns.len() {
             let sp = z.map.spawns[zi].clone();
@@ -705,6 +712,16 @@ impl Server {
             }
         }
         z
+    }
+
+    /// Monster HP multiplier for a private map copy: +60% per extra party member.
+    fn instance_hp_mult(&self, key: &str) -> f32 {
+        let Some((base, owner)) = key.split_once('#') else { return 1.0 };
+        if base != world::VAULT_MAP {
+            return 1.0;
+        }
+        let n = self.party_of(owner).map(|p| self.parties[p].members.len()).unwrap_or(1).max(1);
+        1.0 + DUNGEON_HP_PER_MEMBER * (n - 1) as f32
     }
 
     fn update_zones(&mut self, dt: f32) {

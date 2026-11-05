@@ -666,6 +666,12 @@ pub enum DialogAction {
     Heal,
     /// Pay [`BOSS_SUMMON_COST`] to call this quest boss into its arena.
     SummonBoss(EnemyKind),
+    /// Open the crafting window for this station (innkeepers also heal).
+    Craft(crate::crafting::Station),
+    /// Open the house furnishing window.
+    House,
+    /// Enter the Tempest Vault (co-op dungeon).
+    EnterVault,
 }
 
 /// Gold a quest NPC charges to call their boss back for another fight.
@@ -730,9 +736,25 @@ fn idle_lines(npc: &str, save: &CharacterSave) -> Vec<String> {
         "mira" => &["Potions! Fresh potions! I'll patch you up for free, too - just ask."],
         id if id.starts_with("pet_keeper_") => &[
             "Looking for a companion? Every pet here will follow you, pick up loot for you and learn new tricks as it grows.",
-            "Pets are 10,000 gold, Pet Food is 100. Keep your pet fed - a hungry pet won't lift a paw to help.",
+            "Pets are 90,000 gold, Pet Food is 900. Keep your pet fed - a hungry pet won't lift a paw to help.",
         ],
-        "garrick" => &["Need something sturdier than a stick? Take a look at what's on the rack."],
+        "garrick" => &[
+            "Need something sturdier than a stick? Take a look at what's on the rack.",
+            "Or use my forge yourself - bring materials and I'll show you how to make weapons and armour.",
+        ],
+        "estate_rosalind" => &[
+            "A house of your own, right here in Breezehollow! Buy the deed and the door by my office is yours.",
+            "Furniture makes it a home: a bed to rest in, a chest for storage, a stove and a workbench for crafting.",
+        ],
+        "cook_bramwell" => &[
+            "Hungry? A good meal keeps you going far longer than any potion - one meal at a time, mind.",
+            "Buy flour, milk and spice here, bring me meat, eggs and herbs from the wild, and cook at my stove.",
+        ],
+        "housekeeper_hobb" => &["Welcome home! Shall we move some furniture about?"],
+        crate::world::VAULT_NPC => &[
+            "Beyond this door lies the Tempest Vault. Its halls are full of storm-touched horrors - and Gold and Red tier treasure.",
+            "Bring your party: everyone in your party who enters goes to the same vault. Defeat the Gatekeeper to open the inner gate, then the Stormwarden.",
+        ],
         "mentor_aurel" => {
             if save.class == ClassId::Novice {
                 &[
@@ -781,6 +803,8 @@ fn talk_many_line(npc: &str) -> &'static str {
 /// Figure out what an NPC says right now, and what happens when the dialog ends.
 /// May update TalkTo/TalkMany progress immediately.
 pub fn talk(npc_id: &'static str, speaker: &'static str, save: &mut CharacterSave) -> Dialog {
+    // A class taken before (or without) "Choose Your Path" counts for it.
+    sync_class_quests(save);
     // 1) Quests ready to hand in here.
     for q in &save.quests {
         if q.state == QuestState::ReadyToTurnIn {
@@ -845,6 +869,18 @@ pub fn talk(npc_id: &'static str, speaker: &'static str, save: &mut CharacterSav
                 .map(|r| save.quest(r).map(|q| q.state == QuestState::Done).unwrap_or(false))
                 .unwrap_or(true);
         if prereq_ok {
+            if def.objective == Objective::ChangeClass && save.class != ClassId::Novice {
+                // Already chose a class: skip straight to the next step.
+                accept(save, def.id);
+                return Dialog {
+                    npc_id,
+                    speaker,
+                    lines: std::iter::once(format!("A {} already! You found your path without me.", save.class.info().name))
+                        .chain(def.complete.iter().map(|s| s.to_string()))
+                        .collect(),
+                    action: DialogAction::CompleteQuest(def.id),
+                };
+            }
             return Dialog {
                 npc_id,
                 speaker,
@@ -879,6 +915,23 @@ pub fn talk(npc_id: &'static str, speaker: &'static str, save: &mut CharacterSav
     if let Some(class) = instructor_class(npc_id) {
         return instructor_dialog(npc_id, speaker, class, save);
     }
+    // 7) House, vault and kitchens.
+    if npc_id == "housekeeper_hobb" {
+        return Dialog { npc_id, speaker, lines: idle_lines(npc_id, save), action: DialogAction::House };
+    }
+    if npc_id == crate::world::VAULT_NPC {
+        let mut lines = idle_lines(npc_id, save);
+        if save.level < crate::world::VAULT_LEVEL {
+            lines.push(format!("Come back at level {}. The vault doesn't forgive the unready.", crate::world::VAULT_LEVEL));
+            return Dialog { npc_id, speaker, lines, action: DialogAction::None };
+        }
+        return Dialog { npc_id, speaker, lines, action: DialogAction::EnterVault };
+    }
+    if npc_id.starts_with("inn_") {
+        let mut lines = idle_lines(npc_id, save);
+        lines.push("Hungry? You're welcome to cook in my kitchen.".into());
+        return Dialog { npc_id, speaker, lines, action: DialogAction::Craft(crate::crafting::Station::Kitchen) };
+    }
     if let Some(d) = summon_dialog(npc_id, speaker, save, idle_lines(npc_id, save).into_iter().next()) {
         return d;
     }
@@ -902,6 +955,72 @@ pub fn accept(save: &mut CharacterSave, id: &str) {
             save.set_flag(f);
         }
     }
+    sync_class_quests(save);
+}
+
+/// "Change class" objectives are already met by anyone who has a class:
+/// such quests move straight to "return to turn in". Returns how many moved.
+pub fn sync_class_quests(save: &mut CharacterSave) -> usize {
+    if save.class == ClassId::Novice {
+        return 0;
+    }
+    let mut n = 0;
+    for q in save.quests.iter_mut() {
+        if q.state == QuestState::Active && quest_def(&q.id).map(|d| d.objective == Objective::ChangeClass).unwrap_or(false) {
+            q.progress = 1;
+            q.state = QuestState::ReadyToTurnIn;
+            n += 1;
+        }
+    }
+    n
+}
+
+/// A quest you could pick up now, or soon.
+#[derive(Clone, Debug)]
+pub struct Available {
+    pub def: &'static QuestDef,
+    /// Where the quest giver stands (map display name).
+    pub map: &'static str,
+    /// Level still needed (0 = ready to take now).
+    pub need_level: u32,
+}
+
+/// Quests offered by an NPC that you haven't taken: ready ones first, then
+/// those waiting on your level (prerequisite quests must be done).
+pub fn available_quests(save: &CharacterSave) -> Vec<Available> {
+    let mut v = Vec::new();
+    for def in QUESTS {
+        if def.offer.is_empty() || save.quest(def.id).is_some() {
+            continue;
+        }
+        let prereq = def.requires.map(|r| save.quest(r).map(|q| q.state == QuestState::Done).unwrap_or(false)).unwrap_or(true);
+        if !prereq {
+            continue;
+        }
+        let need_level = if save.level >= def.min_level { 0 } else { def.min_level };
+        v.push(Available { def, map: npc_map_name(def.giver), need_level });
+    }
+    v.sort_by_key(|a| a.need_level);
+    v
+}
+
+/// The name of the map an NPC stands on.
+pub fn npc_map_name(npc: &str) -> &'static str {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static WHERE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    let m = WHERE.get_or_init(|| {
+        let mut h = HashMap::new();
+        for key in crate::world::all_map_keys() {
+            if let Some(m) = crate::world::load_map(key) {
+                for n in &m.npcs {
+                    h.entry(n.id).or_insert(m.name);
+                }
+            }
+        }
+        h
+    });
+    m.get(npc).copied().unwrap_or("somewhere")
 }
 
 pub struct Reward {
@@ -968,10 +1087,23 @@ pub fn complete(save: &mut CharacterSave, id: &str) -> Option<Reward> {
 }
 
 /// Quest that the tracker HUD should show, with progress text.
+/// The current objective of a quest you have, as shown in the tracker.
+pub fn progress_text(q: &QuestEntry) -> String {
+    let Some(def) = quest_def(&q.id) else { return String::new() };
+    match q.state {
+        QuestState::Done => "Completed".into(),
+        QuestState::ReadyToTurnIn => format!("Return to {}", npc_display_name(def.turn_in)),
+        QuestState::Active => match def.objective {
+            Objective::Reach(_) | Objective::TalkTo(_) => def.summary.to_string(),
+            _ => format!("{} ({}/{})", def.summary, q.progress, def.objective.target()),
+        },
+    }
+}
+
 pub fn tracker_lines(save: &CharacterSave) -> Vec<(String, String, bool)> {
     let mut v = Vec::new();
     for q in &save.quests {
-        if q.state == QuestState::Done {
+        if q.state == QuestState::Done || !save.tracked(&q.id) {
             continue;
         }
         if let Some(def) = quest_def(&q.id) {
@@ -1009,6 +1141,10 @@ pub fn npc_display_name(id: &str) -> &'static str {
         "ranger_sela" => "Sela",
         "stormwatcher_kael" => "Kael",
         "wayfarer_jory" => "Jory",
+        "estate_rosalind" => "Rosalind",
+        "cook_bramwell" => "Bramwell",
+        "housekeeper_hobb" => "Hobb",
+        "delver_maren" => "Maren",
         other => TOWN_NPCS.iter().find(|(id, _)| *id == other).map(|(_, n)| *n).unwrap_or("someone"),
     }
 }
@@ -1067,6 +1203,8 @@ pub fn npc_shop(npc_id: &str) -> Option<&'static str> {
         "quartermaster_hesper" => Some(crate::items::GLADE_SHOP),
         id if id.starts_with("pet_keeper_") => Some(crate::items::PET_SHOP),
         "garrick" => Some("breezehollow_smith"),
+        "estate_rosalind" => Some(crate::items::ESTATE_SHOP),
+        "cook_bramwell" => Some(crate::items::PANTRY_SHOP),
         other => crate::items::shop(other).map(|s| s.id),
     }
 }
@@ -1182,6 +1320,41 @@ mod tests {
         assert_eq!(s.inventory.count("novice_charm"), 1, "item reward handed over");
         let d = talk("scout_tamsin", "Tamsin", &mut s);
         assert_eq!(d.action, DialogAction::OfferQuest("gust_dodger"));
+    }
+
+    #[test]
+    fn choose_your_path_skips_ahead_if_you_already_have_a_class() {
+        // Took a class without the quest: Aurel completes it on the spot.
+        let mut s = CharacterSave::new("T", Appearance::default());
+        s.level = 12;
+        s.class = ClassId::Vanguard;
+        s.quests.push(QuestEntry { id: "meet_the_town".into(), state: QuestState::Done, progress: 3 });
+        let d = talk("mentor_aurel", "Aurel", &mut s);
+        assert_eq!(d.action, DialogAction::CompleteQuest("choose_your_path"));
+        assert!(complete(&mut s, "choose_your_path").is_some());
+        // Took the quest, then a class some other way (or an old save): it's ready to hand in.
+        let mut s = CharacterSave::new("T", Appearance::default());
+        s.level = 12;
+        s.quests.push(QuestEntry { id: "meet_the_town".into(), state: QuestState::Done, progress: 3 });
+        accept(&mut s, "choose_your_path");
+        assert_eq!(s.quest("choose_your_path").unwrap().state, QuestState::Active);
+        s.class = ClassId::Duskblade;
+        let d = talk("mentor_aurel", "Aurel", &mut s);
+        assert_eq!(d.action, DialogAction::CompleteQuest("choose_your_path"));
+    }
+
+    #[test]
+    fn available_quests_and_tracking() {
+        let mut s = CharacterSave::new("T", Appearance::default());
+        let a = available_quests(&s);
+        assert_eq!(a[0].def.id, "first_breeze");
+        assert_eq!(a[0].map, "Dawnwind Glade");
+        assert_eq!(a[0].need_level, 0);
+        accept(&mut s, "first_breeze");
+        assert!(available_quests(&s).iter().all(|q| q.def.id != "first_breeze"));
+        assert_eq!(tracker_lines(&s).len(), 1);
+        s.untracked.push("first_breeze".into());
+        assert!(tracker_lines(&s).is_empty());
     }
 
     #[test]

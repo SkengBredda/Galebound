@@ -423,3 +423,44 @@ fn friends_party_guild_and_trade() {
     wait(&mut b, "Alpha offline", |m| matches!(m, ServerMsg::Friends(s) if s.friends.iter().any(|f| f.name == "Alpha" && !f.online)));
     let _ = idb;
 }
+
+#[test]
+fn a_party_shares_a_private_vault_with_tougher_monsters() {
+    use galebound_core::enemies::EnemyKind;
+    let r = start("vault", 16);
+    let (mut a, mut b, mut c) = (connect(&r), connect(&r), connect(&r));
+    let ida = join(&mut a, "va@test.com", "Vaulta");
+    let _idb = join(&mut b, "vb@test.com", "Vaultb");
+    let idc = join(&mut c, "vc@test.com", "Vaultc");
+    soc(&a, SocialCmd::PartyInvite { name: "Vaultb".into() });
+    wait(&mut b, "party invite", |m| matches!(m, ServerMsg::Invite { kind, .. } if *kind == INV_PARTY));
+    soc(&b, SocialCmd::PartyAnswer { from: "Vaulta".into(), accept: true });
+    wait(&mut a, "party", |m| matches!(m, ServerMsg::Party(Some(p)) if p.members.len() == 2));
+    // The party goes into the leader's vault; a stranger runs their own.
+    for cl in [&a, &b, &c] {
+        cl.send(&ClientMsg::Info(PlayerInfo { level: 22, ..Default::default() }));
+    }
+    a.send(&pos("tempest_vault#Vaulta", 200.0, 640.0, false));
+    b.send(&pos("tempest_vault#Vaulta", 220.0, 640.0, false));
+    c.send(&pos("tempest_vault#Vaultc", 200.0, 640.0, false));
+    wait(&mut b, "leader in the vault", |m| matches!(m, ServerMsg::PlayerInfo(p) if p.id == ida));
+    let hp_of = |l: &[galebound_core::net::EnemyNet]| l.iter().find(|e| e.kind == EnemyKind::Stormwarden.index()).map(|e| e.max_hp);
+    let party = match wait(&mut a, "vault monsters", |m| matches!(m, ServerMsg::Enemies(l) if hp_of(l).is_some())) {
+        ServerMsg::Enemies(l) => hp_of(&l).unwrap(),
+        _ => unreachable!(),
+    };
+    let solo = match wait(&mut c, "solo vault monsters", |m| matches!(m, ServerMsg::Enemies(l) if hp_of(l).is_some())) {
+        ServerMsg::Enemies(l) => hp_of(&l).unwrap(),
+        _ => unreachable!(),
+    };
+    assert_eq!(solo, EnemyKind::Stormwarden.def().hp);
+    assert!((party - solo * 1.6).abs() < 1.0, "a party of two gets +60% HP ({} vs {})", party, solo);
+    // The stranger never shows up in the party's vault.
+    let end = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < end {
+        for m in a.poll() {
+            assert!(!matches!(m, ServerMsg::PlayerInfo(ref p) if p.id == idc), "a stranger appeared in our vault");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}

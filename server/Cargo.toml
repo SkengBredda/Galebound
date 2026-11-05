@@ -1,6 +1,6 @@
 [package]
 name = "galebound-server"
-version = "0.10.2"
+version = "0.13.0"
 edition = "2021"
 description = "Galebound Online dedicated server: accounts, saves, shared monsters, loot and chat for up to 16 players."
 

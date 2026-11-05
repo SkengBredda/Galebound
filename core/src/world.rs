@@ -124,6 +124,17 @@ pub enum DecoKind {
     WallTorch,
     Window,
     Barrel,
+    // House furniture (0.13.0)
+    Bed,
+    Chest,
+    Stove,
+    Workbench,
+    Table,
+    Bookshelf,
+    Plant,
+    Trophy,
+    /// A glowing rune door (the Tempest Vault).
+    VaultDoor,
 }
 
 #[derive(Clone, Debug)]
@@ -219,7 +230,13 @@ fn plat(x: f32, top: f32, w: f32) -> Aabb {
 pub const MAX_FLYERS: usize = 4;
 
 pub fn load_map(key: &str) -> Option<Map> {
-    load_map_raw(key).map(cap_flyers)
+    // "map#owner" is a private copy of a map (a house or a dungeon run).
+    load_map_raw(base_key(key)).map(cap_flyers)
+}
+
+/// A map key without its instance tag ("tempest_vault#Ana" -> "tempest_vault").
+pub fn base_key(key: &str) -> &str {
+    key.split('#').next().unwrap_or(key)
 }
 
 /// Trim flying monster spawns so a map never holds more than [`MAX_FLYERS`].
@@ -242,6 +259,8 @@ fn load_map_raw(key: &str) -> Option<Map> {
         "thornvale_woods" => Some(vertical(thornvale_woods())),
         "windcrag_cliffs" => Some(vertical(windcrag_cliffs())),
         "wayfarers_crossroads" => Some(crossroads()),
+        crate::housing::HOUSE_MAP => Some(player_house()),
+        VAULT_MAP => Some(tempest_vault()),
         other => {
             if let Some(w) = wild(other) {
                 return Some(wild_map(w));
@@ -263,7 +282,7 @@ fn load_map_raw(key: &str) -> Option<Map> {
 
 /// Every map key, for tests and tools.
 pub fn all_map_keys() -> Vec<&'static str> {
-    let mut v = vec!["dawnwind_glade", "breezehollow", "whistling_fields", "thornvale_woods", "windcrag_cliffs", "wayfarers_crossroads"];
+    let mut v = vec!["dawnwind_glade", "breezehollow", "whistling_fields", "thornvale_woods", "windcrag_cliffs", "wayfarers_crossroads", crate::housing::HOUSE_MAP, VAULT_MAP];
     v.extend(WILDS.iter().map(|w| w.key));
     for t in TOWNS {
         v.push(t.key);
@@ -445,9 +464,14 @@ fn breezehollow() -> Map {
     let mut npcs = npcs;
     npcs.push(npc(waystone_id("breezehollow"), "Waystone", "Fast travel", 1520.0, g, Appearance::default(), false));
     npcs.push(npc(pet_keeper_id("breezehollow"), "Pip", "Pet Shop", 2580.0, g, look(0, 2, 5, 2, 2, 8, 1, 6, 1, 1), false));
+    // 0.13.0: housing and cooking
+    npcs.push(npc("estate_rosalind", "Rosalind", "Estate Agent - houses & furniture", 600.0, g, look(1, 9, 1, 0, 0, 7, 3, 7, 4, 6), false));
+    npcs.push(npc("cook_bramwell", "Bramwell", "Cook - pantry & cooking", 1330.0, g, look(0, 4, 9, 4, 3, 5, 4, 5, 4, 2), false));
+    portals.push(portal(crate::housing::HOUSE_DOOR_X, g, crate::housing::HOUSE_MAP, 160.0, "Enter: Your House", Some(HOUSE_FLAG), "This house is for sale. Rosalind the estate agent sells the deed."));
     let signs = vec![
         Sign { x: 3620.0, y: g, text: "North Road: Wayfarer's Crossroads and the five class towns. Press {Up} at the road to travel." },
         Sign { x: 360.0, y: g, text: "Welcome to Breezehollow! Speak with Mayor Odessa in the town square." },
+        Sign { x: 960.0, y: g, text: "Hollowhome Estates: a house of your own. Buy the deed from Rosalind, then walk in with {Up}." },
         Sign { x: 3900.0, y: g, text: "East: Whistling Fields. Farmland - mind the Puffwools." },
     ];
     let mut decos = vec![
@@ -1069,7 +1093,10 @@ fn crossroads() -> Map {
     let w = 4600.0;
     let solids = vec![ground(0.0, w, g), Aabb::new(-40.0, 0.0, 40.0, 900.0), Aabb::new(w, 0.0, 40.0, 900.0)];
     let platforms = vec![plat(1250.0, g - 130.0, 180.0), plat(2780.0, g - 130.0, 180.0)];
-    let npcs = vec![npc("wayfarer_jory", "Jory", "Wayfarer", 480.0, g, look(0, 1, 5, 1, 0, 3, 0, 3, 5, 3), false)];
+    let npcs = vec![
+        npc("wayfarer_jory", "Jory", "Wayfarer", 480.0, g, look(0, 1, 5, 1, 0, 3, 0, 3, 5, 3), false),
+        npc(VAULT_NPC, "Maren", "Vault Delver - co-op dungeon", 4300.0, g, look(1, 0, 8, 3, 5, 2, 4, 2, 3, 4), true),
+    ];
     let mut portals = vec![portal(40.0, g, "breezehollow", 3745.0, "To Breezehollow", None, "")];
     let mut signs = vec![Sign { x: 300.0, y: g, text: "Wayfarer's Crossroads. Five roads lead to the five class towns - each has shops, an inn and a class instructor." }];
     let mut decos = vec![deco(Campfire, 640.0, g, 1.0, 1), deco(Tent, 760.0, g, 1.0, 0)];
@@ -1078,7 +1105,9 @@ fn crossroads() -> Map {
         decos.push(deco(Signpost, t.crossroads_x - 40.0, g, 1.0, 1));
         signs.push(Sign { x: t.crossroads_x + 160.0, y: g, text: road_sign(t.key) });
     }
-    let props = [(TreeRound, 1100.0), (Haystack, 1450.0), (Rock, 2000.0), (Pine, 2650.0), (Flowers, 2900.0), (TreeTall, 3500.0), (Crystal, 4250.0), (Bush, 4450.0)];
+    signs.push(Sign { x: 4120.0, y: g, text: "The Tempest Vault (Lv 20+): a co-op dungeon. Gather your party and speak with Maren. Gold and Red tier gear await." });
+    decos.push(deco(VaultDoor, 4470.0, g, 1.0, 0));
+    let props = [(TreeRound, 1100.0), (Haystack, 1450.0), (Rock, 2000.0), (Pine, 2650.0), (Flowers, 2900.0), (TreeTall, 3500.0), (Crystal, 4000.0), (Bush, 4200.0)];
     for (k, x) in props {
         decos.push(deco(k, x, g, 1.0, if matches!(k, Flowers | Bush) { 2 } else { 0 }));
     }
@@ -1343,6 +1372,7 @@ pub enum NodeKind {
     Town,
     Field,
     Hunting,
+    Dungeon,
 }
 
 /// A location on the world map. `pos` is in a 960x560 map space.
@@ -1360,6 +1390,7 @@ pub const WORLD: &[WorldNode] = &[
     WorldNode { key: "thornvale_woods", pos: (700.0, 500.0), levels: Some((9, 12)), kind: NodeKind::Field },
     WorldNode { key: "windcrag_cliffs", pos: (880.0, 500.0), levels: Some((12, 16)), kind: NodeKind::Field },
     WorldNode { key: "wayfarers_crossroads", pos: (500.0, 390.0), levels: None, kind: NodeKind::Town },
+    WorldNode { key: VAULT_MAP, pos: (690.0, 390.0), levels: Some((20, 25)), kind: NodeKind::Dungeon },
     WorldNode { key: "ironhold_road", pos: (130.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field },
     WorldNode { key: "ironhold", pos: (110.0, 180.0), levels: None, kind: NodeKind::Town },
     WorldNode { key: "old_quarry", pos: (110.0, 70.0), levels: Some((17, 20)), kind: NodeKind::Hunting },
@@ -1379,6 +1410,10 @@ pub const WORLD: &[WorldNode] = &[
 
 /// The world-map node for a map (shop interiors belong to their town).
 pub fn world_node_for(map: &str) -> Option<&'static WorldNode> {
+    let map = base_key(map);
+    if map == crate::housing::HOUSE_MAP {
+        return WORLD.iter().find(|n| n.key == "breezehollow");
+    }
     if let Some(n) = WORLD.iter().find(|n| n.key == map) {
         return Some(n);
     }
@@ -1468,5 +1503,162 @@ mod tests {
                 assert!(kinds.contains(&k), "{} is missing a {:?} store", town.key, k);
             }
         }
+    }
+}
+
+// ------------------------------------------------------------------ 0.13.0: house and dungeon
+
+/// Story flag set when you own a house.
+pub const HOUSE_FLAG: &str = "house_owned";
+/// The co-op dungeon.
+pub const VAULT_MAP: &str = "tempest_vault";
+/// The NPC at Wayfarer's Crossroads who sends you into the vault.
+pub const VAULT_NPC: &str = "delver_maren";
+/// Level needed to enter the Tempest Vault.
+pub const VAULT_LEVEL: u32 = 20;
+/// Set when the Gatekeeper falls: opens the inner vault (reset each run).
+pub const VAULT_GATE_FLAG: &str = "vault_gate";
+/// Where the inner gate stands.
+pub const VAULT_GATE_X: f32 = 3480.0;
+
+/// Your house: one long room with furniture spots (see `housing::SPOTS`).
+fn player_house() -> Map {
+    use DecoKind::*;
+    let g = GROUND;
+    let w = 1800.0;
+    let solids = vec![ground(0.0, w, g), Aabb::new(-40.0, 0.0, 40.0, 900.0), Aabb::new(w, 0.0, 40.0, 900.0)];
+    let npcs = vec![npc("housekeeper_hobb", "Hobb", "Housekeeper - furnishing", 1660.0, g, look(0, 8, 9, 0, 2, 6, 3, 6, 4, 3), true)];
+    let portals = vec![portal(40.0, g, "breezehollow", crate::housing::HOUSE_DOOR_X + 45.0, "Exit to Breezehollow", None, "")];
+    let decos = vec![
+        deco(Window, 380.0, g - 150.0, 1.0, 0),
+        deco(Window, 900.0, g - 150.0, 1.0, 0),
+        deco(Window, 1420.0, g - 150.0, 1.0, 0),
+        deco(WallTorch, 640.0, g - 170.0, 1.0, 0),
+        deco(WallTorch, 1160.0, g - 170.0, 1.0, 0),
+    ];
+    let signs = vec![Sign {
+        x: 180.0,
+        y: g,
+        text: "Home sweet home! Talk to Hobb to place furniture. Stand by a bed, chest, stove or workbench and press {Interact} to use it.",
+    }];
+    Map {
+        key: crate::housing::HOUSE_MAP,
+        name: "Your House",
+        theme: Theme::Interior,
+        width: w,
+        height: 900.0,
+        spawn: (160.0, g),
+        solids,
+        platforms: vec![],
+        gates: vec![],
+        npcs,
+        spawns: vec![],
+        fixed_enemies: vec![],
+        portals,
+        signs,
+        decos,
+        regions: vec![],
+        bosses: vec![],
+        checkpoints: vec![],
+        climbs: vec![],
+        kill_y: 1100.0,
+    }
+}
+
+/// The Tempest Vault: a co-op dungeon in three parts. The Hall of Wisps
+/// leads to the Gatekeeper, whose defeat opens the inner gate; the Vault
+/// leads to the Stormwarden. Monsters don't respawn, and each party gets
+/// its own copy of the vault.
+fn tempest_vault() -> Map {
+    use DecoKind::*;
+    let g = GROUND;
+    let w = 7000.0;
+    let solids = vec![
+        ground(0.0, 2400.0, g),
+        ground(2400.0, 2600.0, g - 60.0),
+        ground(2600.0, 3600.0, g),
+        ground(3600.0, 5600.0, g),
+        ground(5600.0, 7000.0, g),
+        Aabb::new(-40.0, 0.0, 40.0, 900.0),
+        Aabb::new(w, 0.0, 40.0, 900.0),
+    ];
+    let platforms = vec![
+        plat(700.0, g - 140.0, 200.0),
+        plat(1100.0, g - 220.0, 200.0),
+        plat(1500.0, g - 140.0, 200.0),
+        plat(1900.0, g - 200.0, 220.0),
+        plat(2800.0, g - 160.0, 200.0),
+        plat(3200.0, g - 160.0, 200.0),
+        plat(3900.0, g - 150.0, 200.0),
+        plat(4350.0, g - 230.0, 220.0),
+        plat(4800.0, g - 150.0, 200.0),
+        plat(5250.0, g - 220.0, 200.0),
+        plat(6000.0, g - 170.0, 200.0),
+        plat(6500.0, g - 170.0, 200.0),
+    ];
+    let gates = vec![Gate { solid: Aabb::new(VAULT_GATE_X, g - 400.0, 40.0, 400.0), open_flag: VAULT_GATE_FLAG }];
+    let fixed_enemies = vec![
+        // Hall of Wisps
+        (EnemyKind::Cryptling, 700.0, g),
+        (EnemyKind::Cryptling, 900.0, g),
+        (EnemyKind::Galewraith, 1150.0, g - 60.0),
+        (EnemyKind::Vaultbeak, 1400.0, g),
+        (EnemyKind::Cryptling, 1650.0, g),
+        (EnemyKind::Galewraith, 1900.0, g - 60.0),
+        (EnemyKind::Vaultbeak, 2150.0, g),
+        // the Gatekeeper's hall
+        (EnemyKind::Gatekeeper, 3100.0, g),
+        // the Vault
+        (EnemyKind::Ruinstump, 3850.0, g),
+        (EnemyKind::Vaultcrab, 4150.0, g),
+        (EnemyKind::Galewraith, 4400.0, g - 60.0),
+        (EnemyKind::Vaultbeak, 4650.0, g),
+        (EnemyKind::Ruinstump, 4950.0, g),
+        (EnemyKind::Vaultcrab, 5250.0, g),
+        (EnemyKind::Galewraith, 5450.0, g - 60.0),
+        // the Stormwarden's chamber
+        (EnemyKind::Stormwarden, 6350.0, g),
+    ];
+    let portals = vec![
+        portal(40.0, g, "wayfarers_crossroads", 4300.0, "Leave the Vault", None, ""),
+        portal(6860.0, g, "wayfarers_crossroads", 4300.0, "Leave the Vault (victory!)", None, ""),
+    ];
+    let signs = vec![
+        Sign { x: 260.0, y: g, text: "The Tempest Vault. Monsters here don't come back - clear the halls together. The Gatekeeper guards the inner gate." },
+        Sign { x: 3380.0, y: g, text: "The inner gate opens when the Gatekeeper falls." },
+        Sign { x: 5650.0, y: g, text: "The Stormwarden's chamber. Everyone who fights it takes home a Vault Cache." },
+    ];
+    let mut decos = vec![];
+    for i in 0..14 {
+        let x = 300.0 + i as f32 * 480.0;
+        decos.push(deco(if i % 2 == 0 { Crystal } else { LanternPost }, x, g, 1.0, 1));
+    }
+    decos.push(deco(VaultDoor, 120.0, g, 1.0, 0));
+    decos.push(deco(Banner, 2900.0, g, 1.2, 0));
+    decos.push(deco(Banner, 3300.0, g, 1.2, 0));
+    decos.push(deco(Banner, 6100.0, g, 1.3, 0));
+    decos.push(deco(Banner, 6600.0, g, 1.3, 0));
+    decos.push(deco(VaultDoor, 6900.0, g, 1.0, 0));
+    Map {
+        key: VAULT_MAP,
+        name: "Tempest Vault",
+        theme: Theme::Arcane,
+        width: w,
+        height: 900.0,
+        spawn: (200.0, g),
+        solids,
+        platforms,
+        gates,
+        npcs: vec![],
+        spawns: vec![],
+        fixed_enemies,
+        portals,
+        signs,
+        decos,
+        regions: vec![],
+        bosses: vec![],
+        checkpoints: vec![200.0, 2700.0, 3700.0, 5700.0],
+        climbs: vec![],
+        kill_y: 1100.0,
     }
 }

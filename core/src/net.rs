@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 /// Bumped whenever the messages change; client and server must match.
-pub const PROTOCOL: u32 = 3;
+pub const PROTOCOL: u32 = 4;
 pub const DEFAULT_PORT: u16 = 7777;
 /// Default player limit for a server.
 pub const MAX_PLAYERS: usize = 16;

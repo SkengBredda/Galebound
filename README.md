@@ -410,7 +410,8 @@ src/         the client (macroquad): rendering, UI, input
   online.rs    server address, "remember me" token, animation codes
   gfx.rs       640x360 pixel canvas, pixel-snapped shapes, pixel text
   pixel.rs     CPU pixel canvas: exact shapes, per-part outlines, shading
-  charsprite.rs anime pixel characters: rig, poses, animation frames
+  poses.rs     THE ANIMATION BOOK: every pose, in plain numbers (start here)
+  charsprite.rs draws characters from the poses: skeleton, body, clothes, hair
   art.rs       enemies, props, terrain tiles, parallax backgrounds
   font.rs      hand-made pixel font
   sprites.rs   texture cache
@@ -426,6 +427,13 @@ src/         the client (macroquad): rendering, UI, input
   screens/     login, character select, creation, game
 ```
 
+## Changing how characters move
+
+All poses live in `src/poses.rs`, and **CHARACTERS.md** explains how to
+edit them step by step. Double-click `preview-poses.bat` to see every class
+in every pose (with attack hitboxes) in `pose_preview.png`, and press **F3**
+in the game to see hitboxes live.
+
 ## Art style
 
 Everything is anime pixel art, generated in code (no image files needed):
@@ -435,8 +443,9 @@ Everything is anime pixel art, generated in code (no image files needed):
 - **Characters** (`charsprite.rs`) are built on a real skeleton (pelvis,
   spine, head; shoulder, elbow, fist; hip, knee, ankle, foot) with joint
   limits - knees only bend backward, elbows only forward - and feet that stay
-  planted on the ground. Poses are keyframed from the reference sprite sheets:
-  boxing-guard idle, 8-frame run with a real push-off, punch, high kick
+  planted on the ground. Every pose lives in `poses.rs` as plain numbers
+  (see **CHARACTERS.md** for how to edit them): a relaxed idle, a battle
+  stance after fighting, 8-frame run with a real push-off, punch, high kick
   (chamber, extend, re-chamber), jump tuck, fall, dodge, hurt, defeat and
   more. Bodies wear underwear (boxers, or briefs and a sports bra); every
   piece of clothing is drawn on the bone it covers, so sleeves, trouser legs

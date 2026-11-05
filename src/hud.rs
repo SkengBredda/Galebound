@@ -5,7 +5,6 @@ use crate::gfx::{self, alpha, rgb, rgba, shade};
 use crate::widgets;
 use galebound_core::input::{Action, Layout};
 use galebound_core::quests;
-use galebound_core::save::QuestState;
 use galebound_core::sim::{exp_to_next, PState, Sim};
 use macroquad::prelude::Color;
 
@@ -88,9 +87,10 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
         let frac = if b.total.is_finite() { (b.left / b.total).clamp(0.0, 1.0) } else { 1.0 };
         gfx::rrect(bx + 3.0, 149.0, 24.0, 24.0 * frac, 4.0, shade(col, 0.8));
         gfx::text_centered_outlined(&b.name[..1], bx + 15.0, 152.0, 16.0, rgb(255, 255, 255));
-        // lasting buffs (the guild's) have no countdown
+        // lasting buffs (the guild's) have no countdown; meals count minutes
         if b.left.is_finite() {
-            gfx::text_centered_outlined(&format!("{}", b.left.ceil() as i32), bx + 15.0, 178.0, 12.0, rgb(230, 230, 240));
+            let t = if b.left > 99.0 { format!("{}m", (b.left / 60.0).ceil() as i32) } else { format!("{}", b.left.ceil() as i32) };
+            gfx::text_centered_outlined(&t, bx + 15.0, 178.0, 12.0, rgb(230, 230, 240));
         }
         bx += 36.0;
     }
@@ -182,6 +182,12 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
                 gfx::text(l, x + 20.0, y + 18.0 + k as f32 * 22.0, 17.0, widgets::ink());
             }
         }
+        if let Some((_, Some(f))) = sim.nearby_spot() {
+            if let Some(h) = f.use_hint() {
+                let s = format!("[{}] {}", layout.key_label(Action::Interact), h);
+                gfx::text_centered_outlined(&s, gfx::VW * 0.5, gfx::VH - 160.0, 20.0, rgb(255, 230, 160));
+            }
+        }
         if let Some(pi) = sim.nearby_portal() {
             let portal = &sim.map.portals[pi];
             let s = format!("[{}] {}", layout.key_label(Action::Up), portal.label);
@@ -214,7 +220,7 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
             gfx::text(k, 26.0, yy, 14.0, rgb(255, 220, 120));
             gfx::text(d, 156.0, yy, 14.0, rgb(230, 234, 245));
         }
-        gfx::text("F1: hide   Esc: menu", 26.0, y0 + h - 26.0, 12.0, rgb(170, 180, 200));
+        gfx::text("F1: hide   F3: hitboxes   Esc: menu", 26.0, y0 + h - 26.0, 12.0, rgb(170, 180, 200));
     }
 
     // ---------------------------------------------- dialog
@@ -257,38 +263,6 @@ pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
             let bob = (time * 5.0).sin() * 3.0;
             gfx::text(&format!("[{}] next", layout.key_label(Action::Interact)), x + w - 130.0, y + h - 40.0 + bob, 15.0, widgets::ink_soft());
         }
-    }
-
-    // ---------------------------------------------- quest log
-    if sim.quest_log_open {
-        let (x, y, w, h) = (290.0, 90.0, 700.0, 520.0);
-        widgets::panel(x, y, w, h);
-        widgets::title("Quest Log", x + w * 0.5, y + 20.0, 28.0);
-        let mut yy = y + 70.0;
-        let mut any = false;
-        for q in sim.save.quests.iter().rev() {
-            let Some(def) = quests::quest_def(&q.id) else { continue };
-            any = true;
-            let (status, c) = match q.state {
-                QuestState::Active => ("In progress", rgb(200, 140, 40)),
-                QuestState::ReadyToTurnIn => ("Ready to turn in", widgets::accent()),
-                QuestState::Done => ("Completed", rgb(150, 140, 130)),
-            };
-            gfx::text(def.name, x + 40.0, yy, 19.0, if q.state == QuestState::Done { rgb(150, 140, 130) } else { widgets::ink() });
-            gfx::text(status, x + w - 220.0, yy + 2.0, 15.0, c);
-            yy += 24.0;
-            if q.state != QuestState::Done {
-                yy += gfx::text_wrapped(&fill_keys(def.summary, layout), x + 52.0, yy, w - 100.0, 15.0, widgets::ink_soft());
-            }
-            yy += 8.0;
-            if yy > y + h - 60.0 {
-                break;
-            }
-        }
-        if !any {
-            gfx::text_centered("No quests yet. Look for NPCs with a '!' above their heads.", x + w * 0.5, yy, 17.0, widgets::ink_soft());
-        }
-        gfx::text_centered(&format!("[{}] close", layout.key_label(Action::QuestLog)), x + w * 0.5, y + h - 40.0, 15.0, widgets::ink_soft());
     }
 
     // ---------------------------------------------- death overlay

@@ -7,6 +7,251 @@ so the whole history is in one place.
 
 ---
 
+## 0.13.0 – Crafting, cooking, housing & the Tempest Vault
+*4 November 2026*
+
+Main game (the chibi art trial is still 0.12.1-trial and doesn't have
+these yet).
+
+**Added: crafting**
+- Three crafts, each with its own **crafting level** (1–30) and EXP bar:
+  **Weaponsmithing**, **Armoursmithing** and **Cooking**. Recipes unlock as
+  your level rises; recipes far below your level give less EXP.
+- **Craft at the right NPC:** talk to any class town's weaponsmith
+  (Craft → weapons) or armourer (Craft → armour), Garrick's forge in
+  Breezehollow (both), Bramwell the cook in Breezehollow or any innkeeper
+  (Cook). Shopkeepers who craft now offer "Browse wares" or "Craft".
+- **Crafting window:** tabs per craft, a recipe list showing how many you
+  can make, and a detail panel with stats, materials (have / need), the
+  small gold fee and EXP. Craft 1, 5 or all at once.
+- **70 recipes:** intermediates (Iron Ingot, Seasoned Plank, Wool Cloth,
+  Shadowsilk Bolt, Storm Alloy), weapons for every class, armour and
+  accessories, furniture, and meals.
+- **New crafted gear:** Lv 16 Epic weapons for each class (Stormguard Saber,
+  Nightglass Kris, Thunderclap Cestus, Hawkwing Recurve, Wisplight Rod) and
+  two Lv 16 accessories.
+- **New materials from monsters:** Sturdy Branches, Wild Herbs, Wild Game,
+  Speckled Eggs, Glowcap Mushrooms, Crab Meat and Sky Honey; Flour, Milk and
+  Spice Pouches are sold by cooks and general stores. Loot tooltips now say
+  when something is a crafting material.
+
+**Added: cooking & food buffs**
+- **10 meals** (Herb Flatbread up to the Gale Feast) give long buffs of
+  15–30 minutes: HP, defence, attack %, crit, Mana, main stats, move speed,
+  and some heal HP or Mana every second.
+- **One meal at a time:** eating another replaces it. Meals survive logging
+  out, and the buff bar counts them down in minutes.
+
+**Added: player housing**
+- Buy the **Breezehollow House Deed** from **Rosalind** (Hollowhome Estates,
+  west Breezehollow) and use it: the house door next to her office is yours.
+- **Furniture:** 15 pieces, bought from Rosalind or crafted. Talk to **Hobb**
+  the housekeeper to place them in 8 spots or put them back in your bag.
+- **Useful furniture** (stand next to it and press Talk):
+  - Feather Bed: full heal and **Well Rested** (+10% EXP from monsters for
+    30 minutes);
+  - Storage Chest: **48 extra storage slots** (click to move items between
+    the chest and your bag; Shift moves one);
+  - Cooking Stove: cook at home; Workbench: forge weapons and armour at home.
+- Online, your house is private to you.
+
+**Added: co-op dungeon – the Tempest Vault (Lv 20+)**
+- Talk to **Maren** at the east end of Wayfarer's Crossroads. Everyone in
+  your party who enters goes into the **party leader's vault**; other
+  players get their own. Solo works too.
+- The Hall of Wisps leads to **the Gatekeeper**; beating it opens the inner
+  gate. The Vault leads to **the Stormwarden**. Five new storm-touched
+  monsters, and nothing respawns, so clear it together.
+- Vault monsters get **+60% HP for each extra party member**.
+- **Personal rewards:** everyone who helps beat the Stormwarden gets a
+  **Tempest Vault Cache**: 3–6 Gale Shards, a 45% chance of a **Gold** item
+  and a 6% chance of a **Red** item (and a rare Stormwarden Trophy).
+- **New rarity tiers:**
+  - **Gold** (Lv 22): Galeheart weapons for every class, a 5-piece armour set
+    and 3 accessories. From caches and rare drops, or crafted with Gale
+    Shards at crafting level 22.
+  - **Red** (Lv 24): Crimson Tempest weapons, armour and accessories. Vault
+    caches only.
+- The vault is on the world map; logging out inside puts you back at the
+  Crossroads.
+
+**Added: improved quest log** (Quest Log key)
+- Now a proper window with tabs:
+  - **My Quests:** in progress, ready to turn in and completed, each with
+    its current objective, plus a **Track** box per quest (untracked quests
+    leave the on-screen tracker) and a **Hide completed** option.
+  - **Available:** quests you can take now, and the next ones waiting on
+    your level, with the NPC, the map they're on and the rewards.
+- Your tracking choices are saved with your character.
+
+**Fixed**
+- **Choose Your Path:** if you already have a class, Aurel skips straight to
+  the reward instead of telling you to change class. Characters stuck on the
+  quest can turn it in right away.
+- **Prices up 800%:** everything bought from a shop costs 9 times as much
+  (a Red Potion is 135g, pets are 90,000g). Shops still pay the old prices
+  when you sell, so gold goes further from monsters than from flipping items.
+- **Mana in combat:** you could play the whole game without a Mana potion.
+  - While in combat (5 seconds after your last hit given or taken) passive
+    Mana regeneration runs at 25%.
+  - Basic hits give back 0.5 Mana (was 1.5); basic projectiles 0.35 (was 1).
+  - The Sparkwing's Mana Spark and Mana meals slow down in combat too.
+  - Out of combat, regeneration is as before.
+
+**Achievements:** 7 new ones (crafting, cooking, housing and the vault).
+
+**Tests**
+- 131 in total. New: crafting levels, recipes and stations, meals and
+  relogging, combat Mana regen, house deed / furniture / storage / bed,
+  the vault gate, bosses and caches, party vault sharing, the class quest
+  fix, available quests and tracking, prices, and a server test where a
+  party shares one vault (with tougher monsters) while a stranger gets their
+  own.
+- `cargo test -p galebound art_preview -- --ignored` draws the new furniture
+  and icons into `art_preview.png`.
+
+**Online:** the protocol changed, so the host and every friend need 0.13.0.
+Characters carry over; new save fields are added automatically.
+
+---
+
+## 0.12.1-trial – Hairstyles: afro-textured styles & restyle
+*4 November 2026*
+
+Chibi art trial only (the main game is still 0.11.0).
+
+**Added: 10 new hairstyles** (20 in total)
+- **Big Afro**: a round cloud of coily curls framing the face.
+- **Afro Puffs**: slicked back into a puff on top and one at the back, with
+  a hair tie.
+- **Cornrows**: neat braids from the hairline straight back, ending in two
+  short plaits with beads.
+- **Box Braids**: parted scalp and long braids down the back with gold and
+  shell beads, one braid falling over the shoulder.
+- **High-Top Fade**: a flat-top block over faded sides.
+- **Two-Strand Twists**: chunky twists all round the head.
+- **Locs Bun**: locs pulled up into a big bun, a few loose locs at the back.
+- **Bantu Knots**: neat parts and four coiled knots.
+- **360 Waves**: a close crop with rippling waves, crisp line-up and fade.
+- **Curly Top Fade**: springy curls on top, faded sides.
+
+**Changed: every existing style restyled**
+- A natural hairline that curves down at the temple into a small sideburn,
+  instead of a square cut. Short styles show the ear, with the hairline
+  curving round behind it.
+- Strand lines give straight hair flow; textured hair gets its own curl
+  texture; locs and twists have a twisted-rope look; braids have a plait
+  pattern.
+- Long Locs get gold loc cuffs; the Braided Crown is a real plait round the
+  head; the bob has a side-swept fringe and ends turning under; the
+  ponytail is pulled back to a tie; long hair has centre-parted curtains.
+- Saved characters keep their style: the first 10 styles keep their numbers.
+
+**Added: easier to edit**
+- All hairstyles live in their own file, `src/hair.rs`, with notes on the
+  coordinates and helpers (hairline cap, fade, curls, ropes, braids, beads).
+- `preview-hair.bat` draws every style in idle, running, jumping and hurt
+  poses into `hair_preview.png`.
+
+**Online:** run the server from the trial folder so the new styles are
+saved. A 0.11.0 server or player sees styles 11–20 as one of the first 10.
+
+---
+
+## 0.12.0-trial – Chibi art trial (separate build)
+*4 November 2026*
+
+A **trial build** kept apart from the main game: it builds to
+`GaleBound_Trial_Windows\GaleboundTrial.exe`, its window says "Chibi art
+trial", and it keeps its own saves and settings (`%APPDATA%\GaleboundTrial`),
+so your main characters are never touched. The main game stays on 0.11.0.
+
+The character art is redrawn in the style of the reference sprites in
+`Sprites\CharacterSpriteSheet` (original art, not copied from them):
+
+**Changed: proportions**
+- Chibi body: a big round head about half the character's height on a small
+  body with short, stubby arms and legs and round fists.
+- Characters are about the height of their hitbox (they were a bit taller).
+- Hair, hats and faces grow with the head; long hair (ponytails, locs,
+  braids) is shortened so it still ends around the hips.
+- New bigger face for the big head: tall near eye, narrow far eye, larger
+  highlights. All six faces, blinking, hurt and talking are redrawn.
+- The defeated pose is redrawn to match.
+
+**Changed: shading**
+- Outlines take a dark version of the colour they border (warm brown around
+  skin, dark red around a red shirt) instead of one flat ink colour.
+- Shading fades in softly over three pixels instead of hard cel bands.
+
+**Gameplay:** unchanged. Hitboxes, damage, timing and controls are the same
+as 0.11.0, and every melee strike still lands inside its hitbox:
+- the high kick steps forward into the kick so the shorter leg reaches;
+- the air down strike and diving attack angle the weapon so it stays
+  above the floor;
+- feet now rest on the heel or toe, whichever is lowest, so tilted feet
+  never sink into the ground.
+
+**Online:** same protocol, so the trial can join a 0.11.0 server and play
+with friends on the main build (they see their own art style).
+
+**Tuning it:** the proportions are a handful of numbers at the top of
+`src/charsprite.rs` (`THIGH`, `SHIN`, `UPPER`, `FORE`, `HEAD_RISE`,
+`TORSO_K`, `HAIR_LEN`, `HEAD_K` for head size) and `OUTLINE_DARK` for the
+outlines. See CHARACTERS.md.
+
+---
+
+## 0.11.0 – Idle, battle stance & hitbox-true attacks
+*3 November 2026*
+
+**Changed: standing around**
+- **Relaxed idle:** players and NPCs no longer stand with their fists up.
+  Out of combat everyone stands at ease with arms down and the weapon
+  lowered: blades and clubs held low, daggers pointing down, the bow upright
+  at the side and the staff held like a walking stick.
+- **Battle stance:** attack or get hit and your character drops into a
+  fighting stance (fists up for Stormfists and Duskblades, weapon ready for
+  everyone else). It relaxes again 5 seconds after the fighting stops.
+  Other players see your stance too.
+
+**Fixed: attacks line up with their hitboxes**
+- Melee strikes now visibly land where they actually hit. Hitbox sizes,
+  damage and timing are unchanged, so combos feel the same.
+  - Side thrusts and lunges were aimed at head height; they now strike
+    through the middle of the hitbox.
+  - The heavy uppercut swung straight up over the head; it now drives
+    forward and up into the hitbox in front of you.
+  - The air down attack pointed forward; it now strikes down at what's
+    below you.
+  - Stormfists and Windrunners now do a **heel drop** for their air down
+    attack (the leg stamps straight down), since their arms couldn't reach
+    the hitbox under them.
+  - Jabs and the air spin are aimed into their hitboxes.
+- The white swing crescent was drawn a quarter of the hitbox too far back;
+  it's now centred on the real hitbox.
+
+**Added: easier to edit**
+- All poses moved into one file, `src/poses.rs`, written as plain numbers
+  with readable names and comments. A new guide, `CHARACTERS.md`, explains
+  how to change a pose step by step.
+- `preview-poses.bat` draws every class in every pose into
+  `pose_preview.png`, with each attack's real hitbox shown in red, and checks
+  that every melee strike lands inside its hitbox. No need to start the game.
+- Press **F3** in the game to show hitboxes (you in green, monsters in blue,
+  your attack in red while it can hit).
+
+**Tests**
+- New tests: every class's melee strikes land inside their hitboxes, the
+  idle keeps hands low while the battle stance raises them, and attacking
+  starts the battle-stance timer.
+
+**Note:** no protocol change, so 0.10.x and 0.11.0 play together. Players
+on 0.10.x see 0.11.0 players' battle stance as the old idle, and the heel
+drop as a jab.
+
+---
+
 ## 0.10.2 – Android controller fix
 *3 November 2026*
 

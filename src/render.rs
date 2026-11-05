@@ -449,6 +449,26 @@ fn deco(d: &Deco, time: f32, theme: Theme) {
         }
         DecoKind::Window => sprites::get("inwindow", crate::townart::indoor_window),
         DecoKind::Barrel => sprites::get("barrel", crate::townart::barrel),
+        DecoKind::Bed => sprites::get("bed", crate::townart::bed),
+        DecoKind::Chest => sprites::get("chest", crate::townart::chest),
+        DecoKind::Stove => {
+            let f = anim(8.0, 4);
+            gfx::circle(d.x, d.y - 30.0, 40.0, rgba(255, 170, 80, 26));
+            sprites::get(&format!("stove{}", f), || crate::townart::stove(f))
+        }
+        DecoKind::Workbench => sprites::get("workbench", crate::townart::workbench),
+        DecoKind::Table => sprites::get("table", crate::townart::table),
+        DecoKind::Bookshelf => sprites::get("bookshelf", crate::townart::bookshelf),
+        DecoKind::Plant => sprites::get("plant", crate::townart::plant),
+        DecoKind::Trophy => {
+            gfx::circle(d.x, d.y - 40.0, 34.0, rgba(255, 90, 80, 24));
+            sprites::get("trophy", crate::townart::trophy)
+        }
+        DecoKind::VaultDoor => {
+            let f = anim(4.0, 8);
+            gfx::circle(d.x, d.y - 80.0, 70.0, rgba(140, 220, 255, 22));
+            sprites::get(&format!("vaultdoor{}", f), || crate::townart::vault_door(f))
+        }
     };
     sprite_at(&t, d.x, d.y + u(1.0), false, WHITE);
 }
@@ -627,6 +647,8 @@ pub fn player_anim(p: &Player) -> (Anim, u8) {
                 }
             } else if p.body.vel.x.abs() > 40.0 {
                 (Anim::Run, charsprite::frame_for_loop(Anim::Run, p.anim_t))
+            } else if p.since_combat < crate::poses::BATTLE_STANCE_SECONDS {
+                (Anim::Battle, charsprite::frame_for_loop(Anim::Battle, p.anim_t))
             } else {
                 (Anim::Idle, charsprite::frame_for_loop(Anim::Idle, p.anim_t))
             }
@@ -800,6 +822,30 @@ pub fn enemies(sim: &Sim, cam: &Camera) {
 
 // ---------------------------------------------------------------- projectiles & effects
 
+/// Hitbox view (F3): your body in green, monsters in blue, and the active
+/// part of your attack in red (yellow while winding up or recovering).
+/// Handy for checking that a pose in poses.rs lines up with its hitbox.
+pub fn hitboxes(sim: &Sim, cam: &Camera) {
+    gfx::set_cam(cam.x, cam.y);
+    let outline = |b: Aabb, c: macroquad::prelude::Color| gfx::rect_lines(b.x, b.y, b.w, b.h, 1.0, c);
+    let p = &sim.player;
+    outline(p.body.aabb(), rgba(80, 255, 120, 220));
+    for e in &sim.enemies {
+        outline(e.body.aabb(), rgba(110, 180, 255, 200));
+    }
+    if let Some(a) = &p.attack {
+        if a.def.hw > 0.0 && a.def.hh > 0.0 {
+            let b = galebound_core::sim::attack_hitbox(p, &a.def);
+            let live = a.phase() == AttackPhase::Active;
+            let c = if live { rgba(255, 60, 60, 230) } else { rgba(255, 220, 80, 140) };
+            if live {
+                gfx::rect(b.x, b.y, b.w, b.h, rgba(255, 60, 60, 50));
+            }
+            outline(b, c);
+        }
+    }
+}
+
 /// The sweep of melee attacks and abilities (yours and other players').
 pub fn swings(sim: &Sim, cam: &Camera) {
     use galebound_core::classes::AttackKind as K;
@@ -813,7 +859,8 @@ pub fn swings(sim: &Sim, cam: &Camera) {
             None => rgb(240, 246, 255),
         };
         let core = mix(col, rgb(255, 255, 255), 0.55);
-        let cx = s.pos.x + if s.both { 0.0 } else { s.hx * s.facing };
+        // centred on the real hitbox (see `attack_hitbox` in core/src/sim.rs)
+        let cx = s.pos.x + if s.both { s.hx * s.facing } else { (s.hx + s.hw * 0.25) * s.facing };
         let cy = s.pos.y + s.hy;
         let (rx, ry) = (s.hw * 0.5, s.hh * 0.5);
         if s.both && s.hits > 1 {

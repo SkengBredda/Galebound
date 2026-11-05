@@ -1,8 +1,11 @@
 //! Anime pixel-art character sprites, generated in code.
 //!
+//! **To change poses and animations, edit `poses.rs`** (and see
+//! CHARACTERS.md). This file draws whatever pose it is given.
+//!
 //! A 2D skeleton (pelvis -> spine -> neck -> head, shoulders -> upper arm ->
-//! forearm -> fist, hips -> thigh -> shin -> foot) is posed from hand-made
-//! keyframes modelled on the reference sprite sheets (idle, guard, run, jump,
+//! forearm -> fist, hips -> thigh -> shin -> foot) is posed from the
+//! keyframes in poses.rs, modelled on the reference sprite sheets (idle, guard, run, jump,
 //! punch, high kick ...). Joints have real limits: knees only bend backward,
 //! elbows only forward. Feet are planted on the ground automatically.
 //!
@@ -15,6 +18,7 @@
 
 use crate::pixel::{from3, light, mix, rgb, shadow, Canvas, Px, INK};
 use galebound_core::appearance::{Appearance, DYES, HAIR_COLORS, SKIN_TONES};
+use crate::poses::{pose_for, Limb, Plant, Pose, SwooshAt};
 use galebound_core::classes::{AttackKind, ClassId, Weapon};
 
 pub const SIZE: i32 = 96;
@@ -46,11 +50,16 @@ pub enum Motion {
     Dive,
     Rise,
     Throw,
+    /// Heel drop: the front leg stamps straight down (fist and bow classes).
+    Stomp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Anim {
+    /// Standing relaxed: arms down, weapon lowered (NPCs, and players out of combat).
     Idle,
+    /// Fighting stance, shown for a few seconds after attacking or being hit.
+    Battle,
     Run,
     JumpUp,
     Fall,
@@ -66,7 +75,7 @@ pub enum Anim {
 impl Anim {
     pub fn frames(self) -> u8 {
         match self {
-            Anim::Idle => 4,
+            Anim::Idle | Anim::Battle => 4,
             Anim::Run => 8,
             Anim::JumpUp | Anim::Fall => 2,
             Anim::Attack(_) => 4,
@@ -78,7 +87,8 @@ impl Anim {
     }
     pub fn fps(self) -> f32 {
         match self {
-            Anim::Idle => 4.0,
+            Anim::Idle => 3.0,
+            Anim::Battle => 4.0,
             Anim::Run => 12.0,
             Anim::Talk => 5.0,
             _ => 8.0,
@@ -98,7 +108,10 @@ pub fn motion_for(class: ClassId, kind: AttackKind) -> Motion {
         LightDown => Motion::Sweep,
         AirNeutral => Motion::Spin,
         AirSide => if ranged { ranged_motion } else { Motion::Thrust },
-        AirDown => Motion::Spike,
+        AirDown => match class {
+            ClassId::Stormfist | ClassId::Windrunner => Motion::Stomp,
+            _ => Motion::Spike,
+        },
         HeavyNeutral => match class {
             ClassId::Duskblade => Motion::Throw,
             ClassId::Vanguard | ClassId::Stormfist | ClassId::Novice => Motion::Uppercut,
@@ -118,358 +131,6 @@ pub fn motion_for(class: ClassId, kind: AttackKind) -> Motion {
         AirHeavyNeutral => Motion::Rise,
         AirHeavyDown => if ranged { Motion::Cast } else { Motion::Dive },
     }
-}
-
-// =================================================================== pose data
-
-/// Which foot (or none) holds the body up.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Plant {
-    /// Lowest foot touches the ground (standing, running).
-    Lowest,
-    /// Back foot is the standing leg (kicks, sweeps).
-    Back,
-    /// In the air: pelvis at a fixed height above the ground line.
-    Air,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum SwooshAt {
-    Shoulder,
-    Hip,
-}
-
-/// Angles in degrees. Limbs: 0 = pointing straight down, positive = rotated
-/// toward the facing direction. Legs are absolute; arms are relative to the
-/// torso lean. `knee`/`elbow` are bend amounts (always >= 0).
-#[derive(Clone, Copy, Debug)]
-struct Pose {
-    lean: f32,
-    lift: f32,
-    plant: Plant,
-    fl: (f32, f32),
-    bl: (f32, f32),
-    fa: (f32, f32),
-    ba: (f32, f32),
-    /// Weapon angle relative to the forearm.
-    w: f32,
-    /// Back-hand weapon angle relative to the back forearm.
-    bw: f32,
-    hair_trail: f32,
-    hair_lift: f32,
-    blink: bool,
-    mouth: bool,
-    hurt: bool,
-    swoosh: Option<(f32, f32, SwooshAt)>,
-    foot_front: Option<f32>,
-}
-
-impl Pose {
-    fn new() -> Pose {
-        Pose {
-            lean: 2.0,
-            lift: 0.0,
-            plant: Plant::Lowest,
-            fl: (6.0, 6.0),
-            bl: (-5.0, 4.0),
-            fa: (6.0, 14.0),
-            ba: (-4.0, 10.0),
-            w: 60.0,
-            bw: 60.0,
-            hair_trail: 0.0,
-            hair_lift: 0.0,
-            blink: false,
-            mouth: false,
-            hurt: false,
-            swoosh: None,
-            foot_front: None,
-        }
-    }
-    fn legs(mut self, fl: (f32, f32), bl: (f32, f32)) -> Pose {
-        self.fl = fl;
-        self.bl = bl;
-        self
-    }
-    fn arms(mut self, fa: (f32, f32), ba: (f32, f32)) -> Pose {
-        self.fa = fa;
-        self.ba = ba;
-        self
-    }
-    fn lean(mut self, l: f32) -> Pose {
-        self.lean = l;
-        self
-    }
-}
-
-fn guard_stance() -> Pose {
-    Pose::new().lean(5.0).legs((14.0, 10.0), (-14.0, 12.0)).arms((28.0, 132.0), (42.0, 128.0))
-}
-
-fn uses_guard(weapon: Option<Weapon>) -> bool {
-    matches!(weapon, Some(Weapon::Gauntlets) | Some(Weapon::TwinDaggers))
-}
-
-fn pose_for(anim: Anim, frame: u8, weapon: Option<Weapon>) -> Pose {
-    let f = frame as usize;
-    match anim {
-        Anim::Idle => {
-            let dip = if f == 1 || f == 2 { 6.0 } else { 0.0 };
-            let breathe = if f == 1 || f == 2 { 4.0 } else { 0.0 };
-            if uses_guard(weapon) {
-                let mut p = guard_stance();
-                p.fl.1 += dip;
-                p.bl.1 += dip;
-                p.fa.1 -= breathe;
-                p
-            } else {
-                // relaxed "ready" stance: feet apart, fists loosely up
-                let mut p = Pose::new().lean(4.0).legs((10.0, 9.0), (-9.0, 10.0)).arms((18.0, 112.0), (30.0, 104.0));
-                p.fl.1 += dip;
-                p.bl.1 += dip;
-                match weapon {
-                    Some(Weapon::SwordShield) | Some(Weapon::WoodSword) => {
-                        p.fa = (12.0, 38.0 + breathe);
-                        p.ba = (18.0, 60.0);
-                        p.w = 60.0;
-                    }
-                    Some(Weapon::Bow) => {
-                        p.fa = (8.0, 24.0 + breathe);
-                        p.w = 0.0;
-                    }
-                    Some(Weapon::Staff) => {
-                        p.fa = (14.0, 62.0 + breathe);
-                        p.w = 100.0;
-                    }
-                    _ => {
-                        p.fa.1 += breathe;
-                        p.ba.1 += breathe;
-                        p.fa.0 -= breathe * 0.5;
-                    }
-                }
-                p
-            }
-        }
-        Anim::Talk => {
-            let mut p = Pose::new();
-            p.fa = (24.0, 55.0 + (f % 2) as f32 * 25.0);
-            p.mouth = f % 2 == 0;
-            p
-        }
-        Anim::Run => {
-            // Run cycle keyed from the reference sheets: deep knee lift,
-            // straight push-off leg, fists up at chest height, forward lean.
-            const T: [f32; 8] = [35.0, 22.0, 5.0, -15.0, -32.0, -18.0, 15.0, 40.0];
-            const K: [f32; 8] = [12.0, 22.0, 25.0, 35.0, 55.0, 105.0, 100.0, 45.0];
-            let b = (f + 4) % 8;
-            let mut p = Pose::new().lean(14.0).legs((T[f], K[f]), (T[b], K[b]));
-            p.fa = (-T[f] * 0.9 + 12.0, 100.0);
-            p.ba = (-T[b] * 0.9 + 12.0, 100.0);
-            p.lift = if f == 3 || f == 7 { 1.5 } else { 0.0 };
-            p.hair_trail = 1.0;
-            p.hair_lift = if f % 4 == 3 { 0.25 } else { 0.1 };
-            p.w = 40.0;
-            p
-        }
-        Anim::JumpUp => {
-            let mut p = if f == 0 {
-                Pose::new().lean(6.0).legs((55.0, 95.0), (-5.0, 50.0)).arms((60.0, 80.0), (-35.0, 60.0))
-            } else {
-                Pose::new().lean(8.0).legs((70.0, 115.0), (35.0, 105.0)).arms((40.0, 115.0), (20.0, 110.0))
-            };
-            p.plant = Plant::Air;
-            p.hair_trail = 0.2;
-            p.hair_lift = if f == 0 { -0.4 } else { 0.3 };
-            p
-        }
-        Anim::Fall => {
-            let mut p = if f == 0 {
-                Pose::new().lean(4.0).legs((25.0, 45.0), (-15.0, 35.0)).arms((80.0, 30.0), (-70.0, 25.0))
-            } else {
-                Pose::new().lean(2.0).legs((12.0, 22.0), (-10.0, 15.0)).arms((100.0, 20.0), (-90.0, 20.0))
-            };
-            p.plant = Plant::Air;
-            p.hair_trail = 0.3;
-            p.hair_lift = 0.8 + f as f32 * 0.2;
-            p
-        }
-        Anim::Dodge => {
-            let mut p = if f == 0 {
-                Pose::new().lean(28.0).legs((55.0, 85.0), (-35.0, 40.0)).arms((-50.0, 40.0), (-70.0, 30.0))
-            } else {
-                Pose::new().lean(22.0).legs((40.0, 70.0), (-45.0, 30.0)).arms((-40.0, 50.0), (-60.0, 40.0))
-            };
-            p.hair_trail = 1.2;
-            p.blink = f == 1;
-            p
-        }
-        Anim::Hurt => {
-            let mut p = Pose::new().lean(-14.0).legs((10.0, 18.0), (-14.0, 10.0)).arms((-50.0, 40.0), (50.0, 30.0));
-            p.hurt = true;
-            p.hair_lift = 0.4;
-            p.hair_trail = -0.3;
-            p
-        }
-        Anim::Dead => Pose::new(),
-        Anim::Climb => {
-            // Alternate hands reaching up and knees stepping, like a ladder climb.
-            let up = f % 2 == 0;
-            let k = if f >= 2 { 1.0 } else { 0.0 };
-            let mut p = Pose::new().lean(4.0);
-            p.plant = Plant::Air;
-            p.fa = if up { (138.0, 12.0) } else { (100.0, 45.0) };
-            p.ba = if up { (100.0, 45.0) } else { (138.0, 12.0) };
-            p.fl = if up { (55.0, 95.0 - k * 10.0) } else { (20.0, 40.0) };
-            p.bl = if up { (15.0, 35.0) } else { (50.0, 90.0 - k * 10.0) };
-            p.w = 120.0;
-            p.bw = 120.0;
-            p.hair_lift = 0.1;
-            p
-        }
-        Anim::Attack(m) => attack_pose(m, f, weapon),
-    }
-}
-
-fn attack_pose(m: Motion, f: usize, weapon: Option<Weapon>) -> Pose {
-    let mut p = guard_stance();
-    p.mouth = f == 1;
-    let strike = f == 1 || f == 2;
-    // Weapons line up with the forearm when striking, angled when winding up.
-    p.w = if strike { 0.0 } else { 50.0 };
-    p.bw = 30.0;
-    match m {
-        Motion::Jab | Motion::Throw => {
-            let wind = if m == Motion::Throw { (-50.0, 80.0) } else { (20.0, 140.0) };
-            match f {
-                0 => p = p.lean(-2.0).arms(wind, (42.0, 128.0)),
-                1 => {
-                    p = p.lean(10.0).legs((20.0, 8.0), (-20.0, 10.0)).arms((84.0, 4.0), (40.0, 130.0));
-                    p.swoosh = Some((60.0, 100.0, SwooshAt::Shoulder));
-                }
-                2 => p = p.lean(10.0).legs((20.0, 8.0), (-20.0, 10.0)).arms((80.0, 10.0), (40.0, 130.0)),
-                _ => p = p.lean(6.0).arms((45.0, 90.0), (42.0, 128.0)),
-            }
-        }
-        Motion::Thrust => match f {
-            0 => p = p.lean(-2.0).legs((10.0, 12.0), (-10.0, 10.0)).arms((10.0, 100.0), (40.0, 120.0)),
-            1 | 2 => {
-                p = p.lean(16.0).legs((42.0, 40.0), (-38.0, 4.0)).arms((88.0 - f as f32 * 2.0, 2.0 + f as f32 * 2.0), (-30.0, 30.0));
-                if f == 1 {
-                    p.swoosh = Some((60.0, 110.0, SwooshAt::Shoulder));
-                }
-            }
-            _ => p = p.lean(8.0).legs((25.0, 25.0), (-22.0, 8.0)).arms((55.0, 60.0), (20.0, 90.0)),
-        },
-        Motion::Sweep => match f {
-            0 => p = p.lean(10.0).legs((35.0, 70.0), (-15.0, 60.0)).arms((50.0, 70.0), (20.0, 90.0)),
-            1 | 2 => {
-                p = p.lean(20.0).legs((82.0 - f as f32 * 3.0, 0.0), (-5.0, 115.0)).arms((40.0, 60.0), (-50.0, 40.0));
-                p.plant = Plant::Back;
-                if f == 1 {
-                    p.swoosh = Some((40.0, 100.0, SwooshAt::Hip));
-                }
-            }
-            _ => p = p.lean(10.0).legs((40.0, 60.0), (-10.0, 70.0)).arms((45.0, 80.0), (30.0, 100.0)),
-        },
-        Motion::Uppercut => match f {
-            0 => p = p.lean(12.0).legs((30.0, 55.0), (-20.0, 55.0)).arms((-10.0, 120.0), (40.0, 120.0)),
-            1 | 2 => {
-                p = p.lean(-6.0).legs((15.0, 10.0), (-20.0, 30.0)).arms((165.0 + f as f32 * 3.0, 10.0), (30.0, 100.0));
-                p.lift = 3.0;
-                p.hair_lift = 0.5;
-                if f == 1 {
-                    p.swoosh = Some((90.0, 175.0, SwooshAt::Shoulder));
-                }
-            }
-            _ => p = p.lean(2.0).arms((100.0, 60.0), (40.0, 120.0)),
-        },
-        Motion::Spin => {
-            p.plant = Plant::Air;
-            p = p.legs((60.0, 100.0), (20.0, 100.0));
-            let (a, b) = [(90.0, -90.0), (120.0, -60.0), (150.0, -30.0), (60.0, -40.0)][f.min(3)];
-            p.fa = (a, if f == 3 { 40.0 } else { 0.0 });
-            p.ba = (b, if f == 3 { 40.0 } else { 0.0 });
-            if f == 1 {
-                p.swoosh = Some((30.0, 170.0, SwooshAt::Shoulder));
-            }
-        }
-        Motion::Spike => {
-            p.plant = Plant::Air;
-            p = p.legs((55.0, 100.0), (25.0, 90.0));
-            match f {
-                0 => p = p.lean(-6.0).arms((170.0, 10.0), (150.0, 20.0)),
-                1 | 2 => {
-                    p = p.lean(14.0).arms((50.0 - f as f32 * 7.0, 0.0), (30.0, 10.0));
-                    if f == 1 {
-                        p.swoosh = Some((40.0, 170.0, SwooshAt::Shoulder));
-                    }
-                }
-                _ => p = p.lean(6.0).arms((60.0, 60.0), (40.0, 60.0)),
-            }
-        }
-        Motion::Slam => match f {
-            0 => p = p.lean(-10.0).legs((12.0, 10.0), (-12.0, 8.0)).arms((175.0, 15.0), (160.0, 20.0)),
-            1 | 2 => {
-                p = p.lean(18.0 + f as f32).legs((30.0, 35.0), (-30.0, 10.0)).arms((60.0 - f as f32 * 7.0, 0.0), (40.0, 10.0));
-                if f == 1 {
-                    p.swoosh = Some((40.0, 175.0, SwooshAt::Shoulder));
-                }
-            }
-            _ => p = p.lean(8.0).arms((70.0, 50.0), (40.0, 80.0)),
-        },
-        Motion::Kick => {
-            // High kick from the reference sheets: chamber, extend, hold, re-chamber.
-            p.plant = Plant::Back;
-            p.w = 50.0;
-            match f {
-                0 => p = p.lean(-2.0).legs((95.0, 130.0), (-6.0, 6.0)),
-                1 | 2 => {
-                    p = p.lean(-20.0 + f as f32).legs((128.0 - f as f32 * 5.0, 0.0), (-12.0, 4.0)).arms((20.0, 130.0), (50.0, 120.0));
-                    p.foot_front = Some(-15.0);
-                    if f == 1 {
-                        p.swoosh = Some((100.0, 140.0, SwooshAt::Hip));
-                    }
-                }
-                _ => p = p.lean(-2.0).legs((80.0, 115.0), (-6.0, 6.0)),
-            }
-        }
-        Motion::Cast => {
-            p = p.legs((12.0, 8.0), (-12.0, 8.0));
-            p.w = 0.0;
-            match f {
-                0 => p = p.lean(-4.0).arms((150.0, 30.0), (-20.0, 30.0)),
-                1 | 2 => p = p.lean(8.0).arms((88.0, 0.0), (-40.0, 20.0)),
-                _ => p = p.lean(4.0).arms((60.0, 30.0), (-20.0, 30.0)),
-            }
-        }
-        Motion::Shoot => {
-            p = p.lean(2.0).legs((16.0, 8.0), (-16.0, 8.0));
-            p.w = 0.0;
-            let ba = [(70.0, 60.0), (80.0, 150.0), (75.0, 155.0), (-20.0, 30.0)][f.min(3)];
-            p = p.arms((90.0, 0.0), ba);
-        }
-        Motion::Dive => {
-            p.plant = Plant::Air;
-            p = p.lean(30.0).legs((75.0, 0.0), (-20.0, 100.0)).arms((-40.0, 30.0), (-60.0, 30.0));
-            p.foot_front = Some(10.0);
-            p.hair_lift = 1.0;
-            if f == 1 {
-                p.swoosh = Some((40.0, 90.0, SwooshAt::Hip));
-            }
-        }
-        Motion::Rise => {
-            p.plant = Plant::Air;
-            p = p.lean(-4.0).legs((60.0, 110.0), (20.0, 100.0)).arms((175.0, 5.0), (130.0, 30.0));
-            p.hair_lift = -0.6;
-            p.w = 0.0;
-            if f <= 1 {
-                p.swoosh = Some((100.0, 180.0, SwooshAt::Shoulder));
-            }
-        }
-    }
-    if weapon == Some(Weapon::Bow) && m != Motion::Shoot {
-        p.w = 0.0;
-    }
-    p
 }
 
 // =================================================================== skeleton
@@ -533,7 +194,8 @@ impl Rig {
     }
 }
 
-fn build_leg(hip: P2, (thigh, knee): (f32, f32), foot_override: Option<f32>) -> Leg {
+fn build_leg(hip: P2, leg: Limb, foot_override: Option<f32>) -> Leg {
+    let (thigh, knee) = (leg.swing, leg.bend);
     let knee_bend = knee.clamp(0.0, 160.0);
     let k = add(hip, dir(thigh), THIGH);
     let shin_deg = thigh - knee_bend;
@@ -542,7 +204,8 @@ fn build_leg(hip: P2, (thigh, knee): (f32, f32), foot_override: Option<f32>) -> 
     Leg { hip, knee: k, ankle: a, thigh_deg: thigh, shin_deg, foot_deg: foot_override.unwrap_or(auto.clamp(-25.0, 75.0)) }
 }
 
-fn build_arm(sh: P2, lean: f32, (upper, elbow): (f32, f32)) -> Arm {
+fn build_arm(sh: P2, lean: f32, arm: Limb) -> Arm {
+    let (upper, elbow) = (arm.swing, arm.bend);
     let ua = lean + upper;
     let fa = ua + elbow.clamp(0.0, 165.0);
     let e = add(sh, dir(ua), UPPER);
@@ -552,8 +215,8 @@ fn build_arm(sh: P2, lean: f32, (upper, elbow): (f32, f32)) -> Arm {
 
 fn build_rig(p: &Pose, fem: bool) -> Rig {
     // Legs relative to a pelvis at the origin, then plant on the ground.
-    let fl0 = build_leg((1.2, 0.0), p.fl, p.foot_front);
-    let bl0 = build_leg((-1.2, 0.0), p.bl, None);
+    let fl0 = build_leg((1.2, 0.0), p.front_leg, p.front_foot);
+    let bl0 = build_leg((-1.2, 0.0), p.back_leg, None);
     let ground = FEET_Y as f32;
     // Lowest point of a leg: the sole, or the knee when kneeling.
     let drop_of = |l: &Leg| (l.ankle.1 + ANKLE_H * (l.foot_deg.to_radians().cos()).max(0.3)).max(l.knee.1 + 2.5);
@@ -582,10 +245,38 @@ fn build_rig(p: &Pose, fem: bool) -> Rig {
     let sw = if fem { 0.0 } else { 0.6 };
     let sh_f = rig.tw(1.5 + sw * 0.5, 13.0);
     let sh_b = rig.tw(-2.6 - sw, 13.4);
-    rig.fa = build_arm(sh_f, p.lean, p.fa);
-    rig.ba = build_arm(sh_b, p.lean, p.ba);
+    rig.fa = build_arm(sh_f, p.lean, p.front_arm);
+    rig.ba = build_arm(sh_b, p.lean, p.back_arm);
     rig.head = rig.t(1.4, HEAD_Y);
     rig
+}
+
+/// Sprite pixels per world unit (the same as `gfx::WORLD_PX`).
+const PX_PER_UNIT: f32 = 0.85;
+
+/// A point given like a hitbox (world units from the character's middle,
+/// x forward, y down) in sprite pixels.
+fn world_to_sprite((x, y): P2) -> P2 {
+    let middle_y = FEET_Y as f32 - galebound_core::sim::PLAYER_H * 0.5 * PX_PER_UNIT;
+    (FEET_X as f32 + x * PX_PER_UNIT, middle_y + y * PX_PER_UNIT)
+}
+
+/// Turns the front arm so the hand and weapon point at the pose's `aim`
+/// spot (see poses.rs). Poses without an aim are unchanged.
+fn apply_aim(mut p: Pose, fem: bool) -> Pose {
+    if let Some(aim) = p.aim {
+        let r = build_rig(&p, fem);
+        let target = world_to_sprite(aim);
+        let toward = (target.0 - r.fa.sh.0).atan2(target.1 - r.fa.sh.1).to_degrees();
+        let bend = p.front_arm.bend.min(12.0);
+        p.front_arm = Limb { swing: toward - p.lean - bend * 0.5, bend };
+    }
+    p
+}
+
+/// The finished pose for a frame: the animation book's pose, with any aim applied.
+fn final_pose(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) -> Pose {
+    apply_aim(pose_for(anim, frame % anim.frames(), weapon), look.feminine())
 }
 
 // =================================================================== palette
@@ -671,7 +362,7 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
     if anim == Anim::Dead {
         return render_dead(&look, &pal);
     }
-    let p = pose_for(anim, frame % anim.frames(), weapon);
+    let p = final_pose(&look, weapon, anim, frame);
     let r = build_rig(&p, look.feminine());
     let mut out = Canvas::new(SIZE, HEIGHT);
     let new = || Canvas::new(SIZE, HEIGHT);
@@ -716,7 +407,7 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
         let mut c = new();
         draw_arm(&mut c, &look, &pal, &r.ba, true);
         if weapon == Some(Weapon::TwinDaggers) {
-            dagger(&mut c, r.ba.hand, dir(r.ba.fore_deg + p.bw));
+            dagger(&mut c, r.ba.hand, dir(r.ba.fore_deg + p.back_weapon));
         }
         if weapon == Some(Weapon::Gauntlets) {
             gauntlet(&mut c, r.ba.hand);
@@ -769,7 +460,7 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
     }
     // 9. Front arm + weapon
     {
-        let wd = dir(r.fa.fore_deg + p.w);
+        let wd = dir(r.fa.fore_deg + p.weapon);
         let mut wc = new();
         if let Some(w) = weapon {
             draw_weapon(&mut wc, w, &r.fa, wd, &r.ba, &p);
@@ -792,7 +483,8 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
         }
     }
     // 10. Motion swoosh
-    if let Some((a0, a1, at)) = p.swoosh {
+    if let Some(sw) = p.swoosh {
+        let (a0, a1, at) = (sw.from, sw.to, sw.at);
         let (center, reach) = match at {
             SwooshAt::Shoulder => (
                 r.fa.sh,
@@ -1865,7 +1557,7 @@ fn draw_weapon(c: &mut Canvas, w: Weapon, a: &Arm, d: P2, back: &Arm, p: &Pose) 
             for i in 0..pts.len() - 1 {
                 c.capsule(pts[i], pts[i + 1], 2.2, wood);
             }
-            let drawn = p.ba.1 > 120.0;
+            let drawn = p.back_arm.bend > 120.0;
             let nock = if drawn { add(back.hand, dir(back.fore_deg), 0.8) } else { add(hand, d, -1.0) };
             c.linef(pts[0], nock, rgb(238, 238, 238));
             c.linef(nock, pts[10], rgb(238, 238, 238));
@@ -1953,8 +1645,8 @@ mod tests {
     use galebound_core::classes::EVERY_CLASS;
 
     fn all_anims() -> Vec<Anim> {
-        let mut v = vec![Anim::Idle, Anim::Run, Anim::JumpUp, Anim::Fall, Anim::Dodge, Anim::Hurt, Anim::Dead, Anim::Talk];
-        for m in [Motion::Jab, Motion::Thrust, Motion::Sweep, Motion::Uppercut, Motion::Spin, Motion::Spike, Motion::Slam, Motion::Kick, Motion::Cast, Motion::Shoot, Motion::Dive, Motion::Rise, Motion::Throw] {
+        let mut v = vec![Anim::Idle, Anim::Battle, Anim::Run, Anim::JumpUp, Anim::Fall, Anim::Dodge, Anim::Hurt, Anim::Dead, Anim::Talk];
+        for m in [Motion::Jab, Motion::Thrust, Motion::Sweep, Motion::Uppercut, Motion::Spin, Motion::Spike, Motion::Slam, Motion::Kick, Motion::Cast, Motion::Shoot, Motion::Dive, Motion::Rise, Motion::Throw, Motion::Stomp] {
             v.push(Anim::Attack(m));
         }
         v
@@ -2032,13 +1724,85 @@ mod tests {
         for a in all_anims() {
             for f in 0..a.frames() {
                 let p = pose_for(a, f, None);
-                for leg in [p.fl, p.bl] {
-                    assert!(leg.1 >= 0.0 && leg.1 <= 160.0, "{:?} knee {}", a, leg.1);
+                for leg in [p.front_leg, p.back_leg] {
+                    assert!(leg.bend >= 0.0 && leg.bend <= 160.0, "{:?} knee {}", a, leg.bend);
                 }
-                for arm in [p.fa, p.ba] {
-                    assert!(arm.1 >= 0.0 && arm.1 <= 165.0, "{:?} elbow {}", a, arm.1);
+                for arm in [p.front_arm, p.back_arm] {
+                    assert!(arm.bend >= 0.0 && arm.bend <= 165.0, "{:?} elbow {}", a, arm.bend);
                 }
             }
+        }
+    }
+
+    /// Where a strike visibly lands: the tip of the weapon (or fist), or
+    /// the foot for kicks and sweeps. In world units from the body's middle.
+    fn strike_point(look: &Appearance, w: Option<Weapon>, m: Motion) -> P2 {
+        let p = final_pose(look, w, Anim::Attack(m), 1);
+        let r = build_rig(&p, look.feminine());
+        let reach = match w {
+            Some(Weapon::SwordShield) => 21.0,
+            Some(Weapon::Club) => 16.0,
+            Some(Weapon::Stick) => 17.0,
+            Some(Weapon::WoodSword) => 18.0,
+            Some(Weapon::TwinDaggers) => 11.0,
+            Some(Weapon::Staff) => 18.0,
+            _ => 2.5,
+        };
+        let pt = match m {
+            Motion::Kick | Motion::Sweep | Motion::Dive | Motion::Stomp => add(r.fl.ankle, dir(r.fl.shin_deg), 3.0),
+            _ => add(r.fa.hand, dir(r.fa.fore_deg + p.weapon), reach),
+        };
+        let middle = world_to_sprite((0.0, 0.0));
+        ((pt.0 - middle.0) / PX_PER_UNIT, (pt.1 - middle.1) / PX_PER_UNIT)
+    }
+
+    /// Every melee strike's weapon, fist or foot lands inside the attack's
+    /// real hitbox (`core/src/classes.rs`), for every class. If you edit a
+    /// pose or a hitbox and this fails, the message says which one is off.
+    #[test]
+    fn strikes_land_in_their_hitboxes() {
+        use galebound_core::classes::{attack_def, AttackKind::*};
+        let looks = [Appearance { body: 0, ..Default::default() }, Appearance { body: 1, ..Default::default() }];
+        let mut off = Vec::new();
+        for &c in EVERY_CLASS {
+            let w = Some(c.info().weapon);
+            for k in [LightNeutral, LightSide, LightDown, AirNeutral, AirSide, AirDown, HeavyNeutral, HeavySide, HeavyDown, AirHeavyNeutral, AirHeavyDown] {
+                let d = attack_def(c, k);
+                if d.hw <= 0.0 || d.both_sides {
+                    continue; // projectiles and all-round bursts
+                }
+                let m = motion_for(c, k);
+                let (x0, x1) = (d.hx - d.hw * 0.25 - 4.0, d.hx + d.hw * 0.75 + 4.0);
+                let (y0, y1) = (d.hy - d.hh * 0.5 - 4.0, d.hy + d.hh * 0.5 + 4.0);
+                for look in &looks {
+                    let (x, y) = strike_point(look, w, m);
+                    if !(x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+                        off.push(format!(
+                            "{:?} {:?} ({:?} pose): strike lands at ({:.0}, {:.0}) but the hitbox is x {:.0}..{:.0}, y {:.0}..{:.0}",
+                            c, k, m, x, y, x0, x1, y0, y1
+                        ));
+                    }
+                }
+            }
+        }
+        off.dedup();
+        assert!(off.is_empty(), "strikes outside their hitboxes:\n{}", off.join("\n"));
+    }
+
+    /// The relaxed idle keeps hands low; the battle stance raises them.
+    #[test]
+    fn idle_is_relaxed_and_battle_is_raised() {
+        let look = Appearance::default();
+        for w in [None, Some(Weapon::Gauntlets), Some(Weapon::SwordShield), Some(Weapon::TwinDaggers), Some(Weapon::Staff), Some(Weapon::Bow)] {
+            for f in 0..4 {
+                let idle = build_rig(&final_pose(&look, w, Anim::Idle, f), false);
+                assert!(idle.fa.hand.1 > idle.pelvis.1 - 4.0, "{:?} idle hand too high", w);
+                assert!(idle.ba.hand.1 > idle.pelvis.1 - 4.0, "{:?} idle back hand too high", w);
+            }
+        }
+        for w in [None, Some(Weapon::Gauntlets)] {
+            let battle = build_rig(&final_pose(&look, w, Anim::Battle, 0), false);
+            assert!(battle.fa.hand.1 < battle.pelvis.1 - 8.0, "{:?} battle fists should be up", w);
         }
     }
 
@@ -2058,6 +1822,116 @@ mod tests {
 mod sheet {
     use super::*;
     use galebound_core::classes::ClassId;
+
+    /// Draws every class in every pose into `pose_preview.png` (run it with
+    /// preview-poses.bat). One row per class; the columns are:
+    ///
+    /// idle, idle (breathing), battle stance, battle (breathing), run x2,
+    /// jump, fall, dodge, hurt, climb, then the HIT frame of each attack:
+    /// light neutral, light side, light down, air neutral, air side,
+    /// air down, heavy neutral, heavy side, heavy down, air heavy neutral,
+    /// air heavy down.
+    ///
+    /// Attack cells show the real hitbox: red = where the attack hits.
+    /// A good pose has the weapon, fist or foot inside the red box.
+    #[test]
+    #[ignore]
+    fn pose_preview() {
+        use galebound_core::classes::{attack_def, AttackKind::*, EVERY_CLASS};
+        let path = std::env::var("GB_PREVIEW").unwrap_or("pose_preview.png".into());
+        let scale = 2i32;
+        let (cw, ch) = (144i32, 132i32);
+        let feet_x = 40i32; // where the feet go inside a cell
+        let looks = [
+            Appearance { body: 0, hair: 0, hair_color: 5, face: 4, top: 6, top_dye: 1, bottom: 1, bottom_dye: 4, shoes: 0, skin: 2, ..Default::default() },
+            Appearance { body: 1, hair: 2, hair_color: 9, face: 0, top: 7, top_dye: 8, bottom: 3, bottom_dye: 2, shoes: 6, skin: 1, ..Default::default() },
+            Appearance { body: 0, hair: 8, hair_color: 0, face: 1, top: 3, top_dye: 8, bottom: 7, bottom_dye: 9, shoes: 1, skin: 6, ..Default::default() },
+            Appearance { body: 1, hair: 3, hair_color: 3, face: 2, top: 1, top_dye: 3, bottom: 6, bottom_dye: 8, shoes: 1, skin: 0, ..Default::default() },
+            Appearance { body: 0, hair: 5, hair_color: 2, face: 3, top: 2, top_dye: 5, bottom: 2, bottom_dye: 6, shoes: 3, skin: 4, ..Default::default() },
+            Appearance { body: 1, hair: 6, hair_color: 7, face: 5, top: 4, top_dye: 7, bottom: 4, bottom_dye: 1, shoes: 2, skin: 3, ..Default::default() },
+        ];
+        let plain: Vec<(Anim, u8)> = vec![
+            (Anim::Idle, 0), (Anim::Idle, 2), (Anim::Battle, 0), (Anim::Battle, 2), (Anim::Run, 1), (Anim::Run, 5),
+            (Anim::JumpUp, 1), (Anim::Fall, 1), (Anim::Dodge, 0), (Anim::Hurt, 0), (Anim::Climb, 0),
+        ];
+        let kinds = [LightNeutral, LightSide, LightDown, AirNeutral, AirSide, AirDown, HeavyNeutral, HeavySide, HeavyDown, AirHeavyNeutral, AirHeavyDown];
+        let cols = plain.len() + kinds.len();
+        let rows = EVERY_CLASS.len();
+        let (w, h) = (cw * cols as i32, ch * rows as i32);
+        let mut img = vec![0u8; (w * h * 4) as usize];
+        fn put(img: &mut [u8], w: i32, h: i32, x: i32, y: i32, p: Px) {
+            if x >= 0 && y >= 0 && x < w && y < h {
+                let k = ((y * w + x) * 4) as usize;
+                img[k..k + 4].copy_from_slice(&p);
+            }
+        }
+        for (r, &class) in EVERY_CLASS.iter().enumerate() {
+            let look = &looks[r % looks.len()];
+            let weapon = Some(class.info().weapon);
+            for c in 0..cols {
+                let (ox, oy) = (c as i32 * cw, r as i32 * ch);
+                // checkered background, a little darker for attack cells
+                for y in 0..ch {
+                    for x in 0..cw {
+                        let even = (x / 8 + y / 8) % 2 == 0;
+                        let mut bg: Px = if even { [214, 228, 240, 255] } else { [200, 216, 232, 255] };
+                        if c >= plain.len() {
+                            bg = shadow(bg, 0.06);
+                        }
+                        if x == cw - 1 || y == ch - 1 {
+                            bg = [150, 160, 180, 255];
+                        }
+                        put(&mut img, w, h, ox + x, oy + y, bg);
+                    }
+                }
+                let (anim, frame, hitbox) = if c < plain.len() {
+                    (plain[c].0, plain[c].1, None)
+                } else {
+                    let k = kinds[c - plain.len()];
+                    let d = attack_def(class, k);
+                    let hb = if d.hw > 0.0 && d.hh > 0.0 { Some(d) } else { None };
+                    (Anim::Attack(motion_for(class, k)), 1, hb)
+                };
+                let shift = feet_x - FEET_X;
+                if let Some(d) = &hitbox {
+                    // the hitbox, as attack_hitbox() places it when facing right
+                    let cx = if d.both_sides { d.hx } else { d.hx + d.hw * 0.25 };
+                    let a = world_to_sprite((cx - d.hw * 0.5, d.hy - d.hh * 0.5));
+                    let b = world_to_sprite((cx + d.hw * 0.5, d.hy + d.hh * 0.5));
+                    let (x0, y0, x1, y1) = (a.0.round() as i32 + shift, a.1.round() as i32, b.0.round() as i32 + shift, b.1.round() as i32);
+                    for y in y0.max(0)..=y1.min(ch - 2) {
+                        for x in x0.max(0)..=x1.min(cw - 2) {
+                            let edge = x == x0 || x == x1 || y == y0 || y == y1;
+                            let k = (((oy + y) * w + ox + x) * 4) as usize;
+                            let under: Px = [img[k], img[k + 1], img[k + 2], 255];
+                            put(&mut img, w, h, ox + x, oy + y, if edge { [230, 40, 50, 255] } else { mix(under, [255, 90, 90, 255], 0.22) });
+                        }
+                    }
+                }
+                let sprite = render(look, weapon, anim, frame);
+                for y in 0..sprite.h {
+                    for x in 0..sprite.w {
+                        let p = sprite.get(x, y);
+                        if p[3] > 0 && x + shift < cw - 1 && x + shift >= 0 && y < ch - 1 {
+                            put(&mut img, w, h, ox + x + shift, oy + y, p);
+                        }
+                    }
+                }
+            }
+        }
+        // scale up so it's easy to look at
+        let (sw, sh) = (w * scale, h * scale);
+        let mut big = vec![0u8; (sw * sh * 4) as usize];
+        for y in 0..sh {
+            for x in 0..sw {
+                let s = (((y / scale) * w + x / scale) * 4) as usize;
+                let d = ((y * sw + x) * 4) as usize;
+                big[d..d + 4].copy_from_slice(&img[s..s + 4]);
+            }
+        }
+        std::fs::write(&path, crate::pixel::png_rgba(sw as u32, sh as u32, &big)).unwrap();
+        println!("wrote {}", path);
+    }
     #[test]
     #[ignore]
     fn sheet_export() {
@@ -2141,3 +2015,4 @@ mod sheet {
         std::fs::write(&path, crate::pixel::png_rgba((w * scale) as u32, (h * scale) as u32, &out)).unwrap();
     }
 }
+

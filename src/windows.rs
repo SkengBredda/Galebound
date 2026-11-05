@@ -30,6 +30,10 @@ enum Target {
     Skill(&'static str),
     Bar(usize),
     Shop(&'static str),
+    /// A recipe in the crafting window (by its output item).
+    Recipe(&'static str),
+    /// A slot of the house storage chest.
+    Store(usize),
     /// Anywhere inside a window (blocks "drop to clear").
     Window,
 }
@@ -52,7 +56,17 @@ pub struct Windows {
     pet_sel: usize,
     map_sel: Option<&'static str>,
     map_cache: Option<WorldCache>,
+    // 0.13.0: crafting, house and quest log
+    craft_tab: usize,
+    craft_sel: Option<&'static str>,
+    craft_page: usize,
+    house_sel: usize,
+    quest_tab: usize,
+    quest_page: usize,
 }
+
+#[path = "lifewin.rs"]
+mod life;
 
 fn item_tex(def: &ItemDef) -> macroquad::prelude::Texture2D {
     sprites::get(&format!("icon_i_{}", def.id), || icons::item(def))
@@ -104,11 +118,38 @@ fn px_color(p: crate::pixel::Px) -> Color {
 
 impl Windows {
     pub fn any_open(&self, sim: &Sim) -> bool {
-        self.inventory || self.character || self.abilities || self.world_map || self.pets || sim.shop_open.is_some() || sim.teleport_open
+        self.inventory
+            || self.character
+            || self.abilities
+            || self.world_map
+            || self.pets
+            || sim.shop_open.is_some()
+            || sim.teleport_open
+            || sim.craft_open.is_some()
+            || sim.house_open
+            || sim.storage_open
+            || sim.quest_log_open
     }
 
     /// Esc: close the top-most window. Returns true if something closed.
     pub fn close_one(&mut self, sim: &mut Sim) -> bool {
+        if sim.quest_log_open {
+            sim.quest_log_open = false;
+            return true;
+        }
+        if sim.craft_open.is_some() {
+            sim.craft_open = None;
+            return true;
+        }
+        if sim.house_open {
+            sim.house_open = false;
+            return true;
+        }
+        if sim.storage_open {
+            sim.storage_open = false;
+            self.inventory = false;
+            return true;
+        }
         if sim.teleport_open {
             sim.teleport_open = false;
             return true;
@@ -201,12 +242,13 @@ impl Windows {
     pub fn frame(&mut self, sim: &mut Sim, dt: f32, ui: &Ui) {
         gfx::clear_cam();
         self.prev_hits = std::mem::take(&mut self.hits);
-        if sim.shop_open.is_some() && !self.shop_was_open {
+        let shop_like = sim.shop_open.is_some() || sim.storage_open;
+        if shop_like && !self.shop_was_open {
             self.inventory = true;
             self.abilities = false;
             self.shop_page = 0;
         }
-        self.shop_was_open = sim.shop_open.is_some();
+        self.shop_was_open = shop_like;
         let ui = Ui { chars: Vec::new(), clicked: ui.clicked, enabled: ui.enabled };
         self.hotbar(sim);
         if self.character {
@@ -224,11 +266,23 @@ impl Windows {
         if self.inventory {
             self.inventory_window(sim, &ui);
         }
+        if sim.storage_open {
+            self.storage_window(sim, &ui);
+        }
+        if sim.house_open {
+            self.house_window(sim, &ui);
+        }
+        if sim.craft_open.is_some() {
+            self.craft_window(sim, &ui);
+        }
         if sim.teleport_open {
             self.teleport_window(sim, &ui);
         }
         if self.world_map {
             self.world_map_window(sim, &ui);
+        }
+        if sim.quest_log_open {
+            self.quest_log_window(sim, &ui);
         }
         self.mouse(sim);
         self.tooltip(sim);
@@ -349,7 +403,13 @@ impl Windows {
         }
         gfx::circle(x + 34.0, y + h - 56.0, 8.0, rgb(240, 196, 70));
         gfx::text(&format!("{} gold", sim.save.gold), x + 48.0, y + h - 64.0, 16.0, widgets::ink());
-        let help = if sim.shop_open.is_some() { "Click: use/equip. Right-click: sell" } else { "Click: use/equip. Drag to hotbar, or out to drop" };
+        let help = if sim.storage_open {
+            "Click: put in storage (Shift: just one)"
+        } else if sim.shop_open.is_some() {
+            "Click: use/equip. Right-click: sell"
+        } else {
+            "Click: use/equip. Drag to hotbar, or out to drop"
+        };
         gfx::text(help, x + 24.0, y + h - 38.0, 12.0, widgets::ink_soft());
     }
 
@@ -488,7 +548,7 @@ impl Windows {
             gfx::text_wrapped(
                 &format!(
                     "You don't have a pet yet. The Pet Shop in Breezehollow and in every class town sells pets for {} gold, and Pet Food for {} gold.",
-                    pets::PET_PRICE, pets::FOOD_PRICE
+                    thousands(pets::PET_PRICE * items::PRICE_MULT), thousands(pets::FOOD_PRICE * items::PRICE_MULT)
                 ),
                 x + 40.0,
                 y + 80.0,
@@ -648,7 +708,7 @@ impl Windows {
             let text_w = w - 74.0 - 200.0;
             gfx::text(&clip(def.name, text_w + 40.0, 15.0), x + 74.0, ry + 2.0, 15.0, widgets::ink());
             let each = sim.unit_price(def.id);
-            let discounted = each < def.price;
+            let discounted = each < def.buy_price();
             let problem = sim.equip_problem(def.id);
             let (sub, sub_col) = match &problem {
                 Some(p) => (p.clone(), widgets::danger()),
@@ -664,7 +724,7 @@ impl Windows {
             gfx::text(&price, px - gfx::text_w(&price, 15.0), if discounted { ry + 2.0 } else { ry + 10.0 }, 15.0, if afford { rgb(170, 120, 20) } else { widgets::danger() });
             if discounted {
                 // the full price, struck through
-                let old = format!("{}g", def.price);
+                let old = format!("{}g", thousands(def.buy_price()));
                 let ow = gfx::text_w(&old, 12.0);
                 gfx::text(&old, px - ow, ry + 22.0, 12.0, rgb(150, 140, 130));
                 gfx::rect(px - ow - 1.0, ry + 28.0, ow + 2.0, 2.0, rgb(170, 70, 60));
@@ -774,6 +834,7 @@ impl Windows {
                 world::NodeKind::Town => rgb(232, 182, 72),
                 world::NodeKind::Field => rgb(110, 176, 96),
                 world::NodeKind::Hunting => rgb(200, 84, 70),
+                world::NodeKind::Dungeon => rgb(150, 110, 230),
             };
             let hov = (mxp - px).powi(2) + (myp - py).powi(2) < (r + 6.0).powi(2);
             if hov {
@@ -898,6 +959,18 @@ impl Windows {
 
         if is_mouse_button_pressed(MouseButton::Right) {
             match under {
+                Some(Target::Inv(i)) if sim.storage_open => {
+                    let n = if shift() { 1 } else { u32::MAX };
+                    if let Err(e) = sim.store(i, n) {
+                        self.say(e, true);
+                    }
+                }
+                Some(Target::Store(i)) => {
+                    let n = if shift() { 1 } else { u32::MAX };
+                    if let Err(e) = sim.withdraw(i, n) {
+                        self.say(e, true);
+                    }
+                }
                 Some(Target::Inv(i)) if sim.shop_open.is_some() => {
                     let n = if shift() { u32::MAX } else { 1 };
                     match sim.sell(i, n) {
@@ -925,6 +998,7 @@ impl Windows {
                 let draggable = match t {
                     Target::Inv(i) => i < sim.save.inventory.slots.len(),
                     Target::Bar(i) => sim.save.hotbar.get(i).map(|h| *h != HotbarSlot::Empty).unwrap_or(false),
+                    Target::Store(i) => i < sim.save.storage.len(),
                     Target::Skill(_) | Target::Equip(_) => true,
                     _ => false,
                 };
@@ -952,6 +1026,7 @@ impl Windows {
         let Some((src, _)) = self.press else { return };
         let tex = match src {
             Target::Inv(i) => sim.save.inventory.slots.get(i).and_then(|s| items::item(&s.id)).map(item_tex),
+            Target::Store(i) => sim.save.storage.get(i).and_then(|s| items::item(&s.id)).map(item_tex),
             Target::Equip(s) => sim.save.inventory.equipped(s).map(item_tex),
             Target::Skill(id) => skills::skill(id).map(skill_tex),
             Target::Bar(i) => match sim.save.hotbar.get(i) {
@@ -968,6 +1043,19 @@ impl Windows {
 
     fn click(&mut self, sim: &mut Sim, t: Target) {
         match t {
+            Target::Inv(i) if sim.storage_open => {
+                let n = if shift() { 1 } else { u32::MAX };
+                if let Err(e) = sim.store(i, n) {
+                    self.say(e, true);
+                }
+            }
+            Target::Store(i) => {
+                let n = if shift() { 1 } else { u32::MAX };
+                if let Err(e) = sim.withdraw(i, n) {
+                    self.say(e, true);
+                }
+            }
+            Target::Recipe(id) => self.craft_sel = Some(id),
             Target::Inv(i) => {
                 let Some(id) = sim.save.inventory.slots.get(i).map(|s| s.id.clone()) else { return };
                 if let Some(def) = items::item(&id) {
@@ -1017,6 +1105,16 @@ impl Windows {
                 }
             }
             (Target::Inv(i), Some(Target::Inv(j))) => sim.swap_inventory(i, j),
+            (Target::Inv(i), Some(Target::Store(_))) => {
+                if let Err(e) = sim.store(i, u32::MAX) {
+                    self.say(e, true);
+                }
+            }
+            (Target::Store(i), Some(Target::Inv(_))) | (Target::Store(i), Some(Target::Window)) => {
+                if let Err(e) = sim.withdraw(i, u32::MAX) {
+                    self.say(e, true);
+                }
+            }
             // Dragged out of every window: drop it on the ground.
             (Target::Inv(i), None) => {
                 let name = sim.save.inventory.slots.get(i).and_then(|st| items::item(&st.id)).map(|d| d.name).unwrap_or("item");
@@ -1047,9 +1145,22 @@ impl Windows {
         let mut lines: Vec<(String, Color, f32)> = Vec::new();
         let item_lines = |def: &ItemDef, lines: &mut Vec<(String, Color, f32)>, selling: bool| {
             lines.push((def.name.to_string(), px_color(icons::tier_color(def.tier.max(1))), 17.0));
+            if def.tier >= 4 {
+                lines.push((format!("{} tier", def.tier_name()), px_color(icons::tier_color(def.tier)), 14.0));
+            }
             let kind = match def.kind {
+                ItemKind::Consumable(items::Effect::Food { .. }) => "Meal - one at a time; a new meal replaces the last".to_string(),
                 ItemKind::Consumable(_) => "Consumable".to_string(),
+                ItemKind::Material if galebound_core::crafting::RECIPES.iter().any(|r| r.inputs.iter().any(|i| i.0 == def.id)) => {
+                    "Crafting material - also sells to any shop".to_string()
+                }
                 ItemKind::Material => "Monster loot - sells to any shop".to_string(),
+                ItemKind::Special(items::Special::HouseDeed) => "Deed - click to claim your house".to_string(),
+                ItemKind::Special(items::Special::Cache) => "Cache - click to open".to_string(),
+                ItemKind::Furniture(f) => match f.use_hint() {
+                    Some(h) => format!("Furniture - {} (place it in your house)", h.to_lowercase()),
+                    None => "Furniture - place it in your house".to_string(),
+                },
                 ItemKind::Special(items::Special::Revive) => "Special - use when defeated".to_string(),
                 ItemKind::Special(items::Special::SkillReset) => "Special - click to use".to_string(),
                 ItemKind::Special(items::Special::Pet(_)) => "Pet - click to adopt".to_string(),
@@ -1080,6 +1191,9 @@ impl Windows {
             if selling && def.can_sell() {
                 lines.push((format!("Sells for {}g", def.sell_price()), rgb(240, 200, 90), 13.0));
             }
+            if let Some(r) = galebound_core::crafting::recipe(def.id) {
+                lines.push((format!("Craftable: {} Lv.{}", r.craft.name(), r.level), rgb(240, 200, 90), 12.0));
+            }
         };
         let skill_lines = |s: &SkillDef, lines: &mut Vec<(String, Color, f32)>| {
             lines.push((s.name.to_string(), px_color(icons::fx_color(s.fx)), 17.0));
@@ -1105,8 +1219,13 @@ impl Windows {
                     item_lines(d, &mut lines, false);
                 }
             }
-            Some(Target::Shop(id)) => {
+            Some(Target::Shop(id)) | Some(Target::Recipe(id)) => {
                 if let Some(d) = items::item(id) {
+                    item_lines(d, &mut lines, false);
+                }
+            }
+            Some(Target::Store(i)) => {
+                if let Some(d) = sim.save.storage.get(i).and_then(|s| items::item(&s.id)) {
                     item_lines(d, &mut lines, false);
                 }
             }
