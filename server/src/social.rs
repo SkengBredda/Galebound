@@ -166,6 +166,10 @@ impl SocialStore {
     pub fn remember(&mut self, name: &str, level: u32, class: &str) {
         self.known.insert(name.to_lowercase(), Known { name: name.to_string(), level, class: class.to_string() });
     }
+    /// The real spelling of a lowercase character name, if we know it.
+    pub fn display_name(&self, lower: &str) -> Option<String> {
+        self.known.get(lower).map(|k| k.name.clone())
+    }
     /// The real spelling of a character name, if it exists.
     pub fn canonical(&self, name: &str) -> Option<String> {
         self.known.get(&name.trim().to_lowercase()).map(|k| k.name.clone())

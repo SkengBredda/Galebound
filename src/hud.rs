@@ -49,7 +49,33 @@ fn bar(x: f32, y: f32, w: f32, h: f32, frac: f32, c: Color, label: &str) {
     gfx::text_centered_outlined(label, x + w * 0.5, y + h * 0.5 - 7.0, 14.0, rgb(255, 255, 255));
 }
 
+/// A duel's countdown, clock and opponent (top centre).
+fn duel(sim: &Sim, time: f32) {
+    use galebound_core::net::{DUEL_COUNTDOWN, DUEL_FIGHT};
+    let Some(d) = &sim.duel else { return };
+    let cx = gfx::VW * 0.5;
+    if d.phase == DUEL_COUNTDOWN {
+        let n = d.secs.ceil().max(1.0) as i32;
+        let pulse = 1.0 + (1.0 - d.secs.fract()) * 0.25;
+        gfx::text_centered_outlined(&format!("{}", n), cx, 200.0, 72.0 * pulse, rgb(255, 214, 110));
+        gfx::text_centered_outlined(&format!("Duel with {}", d.name), cx, 290.0, 22.0, rgb(255, 255, 255));
+        return;
+    }
+    if d.phase != DUEL_FIGHT {
+        return;
+    }
+    let (w, h) = (300.0, 54.0);
+    let x = cx - w * 0.5;
+    gfx::rrect(x, 12.0, w, h, 10.0, rgba(40, 14, 18, 220));
+    gfx::rect_lines(x + 1.0, 13.0, w - 2.0, h - 2.0, 1.0, rgba(255, 120, 110, 180));
+    gfx::text_centered(&format!("DUEL  vs  {}", d.name), cx, 20.0, 17.0, rgb(255, 200, 190));
+    let left = d.secs.max(0.0) as i32;
+    let low = left <= 10 && (time * 4.0) as i32 % 2 == 0;
+    gfx::text_centered(&format!("{}:{:02}   -   /yield to give up", left / 60, left % 60), cx, 42.0, 14.0, if low { rgb(255, 120, 110) } else { rgb(230, 220, 236) });
+}
+
 pub fn draw(sim: &Sim, show_controls: bool, time: f32) {
+    duel(sim, time);
     gfx::clear_cam();
     let p = &sim.player;
     let layout = sim.settings.layout;

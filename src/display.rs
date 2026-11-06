@@ -87,3 +87,18 @@ pub fn apply(mode: DisplayMode) {
     CURRENT.with(|c| c.set(Some(mode)));
     let _ = write_atomic(&cfg_path(), mode.key());
 }
+
+fn zoom_path() -> std::path::PathBuf {
+    data_dir().join("zoom.cfg")
+}
+
+/// The zoom chosen on this computer (1.0 if none).
+pub fn saved_zoom() -> f32 {
+    std::fs::read_to_string(zoom_path()).ok().and_then(|s| s.trim().parse::<f32>().ok()).filter(|z| crate::gfx::ZOOMS.iter().any(|(v, _)| (v - z).abs() < 0.001)).unwrap_or(1.0)
+}
+
+/// Zoom the world view in or out, and remember it on this computer.
+pub fn set_zoom(z: f32) {
+    crate::gfx::set_zoom(z);
+    let _ = write_atomic(&zoom_path(), &format!("{}", z));
+}

@@ -24,12 +24,14 @@ pub struct Tally {
     pub crafts: u32,
     /// Houses bought.
     pub houses: u32,
+    /// 0.15.0 co-op dungeons cleared.
+    pub dungeon_clears: u32,
 }
 
 impl Tally {
-    pub const KEYS: [&'static str; 16] = [
+    pub const KEYS: [&'static str; 17] = [
         "kills", "bosses", "quests", "deaths", "revives", "looted", "trades", "parties", "friends", "guild", "class", "gold", "pet", "waystones", "crafts",
-        "houses",
+        "houses", "dungeons",
     ];
     fn slot(&mut self, k: &str) -> Option<&mut u32> {
         Some(match k {
@@ -47,6 +49,7 @@ impl Tally {
             "waystones" => &mut self.waystones,
             "crafts" => &mut self.crafts,
             "houses" => &mut self.houses,
+            "dungeons" => &mut self.dungeon_clears,
             _ => return None,
         })
     }
@@ -151,6 +154,13 @@ pub const ACHIEVEMENTS: &[AchievementDef] = &[
     ach!("level_20", "Veteran", "Reach level 20.", 25, |s| s.level >= 20),
     ach!("level_30", "Hero of the Gale", "Reach level 30.", 50, |s| s.level >= 30),
     ach!("path_chosen", "A Path Chosen", "Change class.", 10, |s| s.tally.class_changed),
+    ach!("level_40", "Highlander", "Reach level 40.", 50, |s| s.level >= 40),
+    ach!("level_50", "Paragon", "Reach level 50.", 75, |s| s.level >= 50),
+    ach!("level_60", "Legend of Galebound", "Reach level 60, the level cap.", 100, |s| s.level >= 60),
+    ach!("advanced", "The Second Path", "Advance into an advanced class.", 25, |s| s.job.is_some()),
+    ach!("frozen_throne", "Throne of Ice", "Defeat Glacia in the Frozen Throne.", 40, |s| s.has_flag("cleared_frozen_throne")),
+    ach!("cinder_sanctum", "Dragonslayer", "Defeat Ignaroth in the Cinder Sanctum.", 50, |s| s.has_flag("cleared_cinder_sanctum")),
+    ach!("celestial_spire", "Eclipse Breaker", "Defeat the Aether Twins in the Celestial Spire.", 75, |s| s.has_flag("cleared_celestial_spire")),
     ach!("first_craft", "Handmade", "Craft your first item.", 5, |s| s.tally.crafts >= 1),
     ach!("crafts_250", "Artisan", "Craft 250 items.", 25, |s| s.tally.crafts >= 250),
     ach!("master_smith", "Master Smith", "Reach Weaponsmithing or Armoursmithing level 20.", 25, |s| s.crafts[0].level >= 20 || s.crafts[1].level >= 20),

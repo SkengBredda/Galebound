@@ -15,12 +15,14 @@ pub enum Objective {
     TalkMany(&'static [&'static str]),
     /// Change from Novice to any class.
     ChangeClass,
+    /// Advance into an advanced class (level 30).
+    Advance,
 }
 
 impl Objective {
     pub fn target(&self) -> u32 {
         match *self {
-            Objective::Reach(_) | Objective::TalkTo(_) | Objective::ChangeClass => 1,
+            Objective::Reach(_) | Objective::TalkTo(_) | Objective::ChangeClass | Objective::Advance => 1,
             Objective::Dodge(n) | Objective::DummyLight(n) | Objective::DummyHeavy(n) | Objective::Kill(_, n) => n,
             Objective::TalkMany(l) => l.len() as u32,
         }
@@ -323,7 +325,7 @@ pub const QUESTS: &[QuestDef] = &[
             "The Gustlings are what's souring the wind. Little troublemakers, spitting gusts at everyone.",
             "Disperse six of them. Dodge their orbs - they pack a punch.",
         ],
-        reminder: "Six Gustlings. They float over the middle fields.",
+        reminder: "Six Gustlings. They roam the middle fields.",
         complete: &["The breeze smells sweet again! Windcaller Oren at the far end of the fields will want to hear about this."],
         exp: 260,
         gold: 45,
@@ -408,12 +410,12 @@ pub const QUESTS: &[QuestDef] = &[
         requires: Some("restless_caps"),
         min_level: 0,
         objective: Objective::Kill(EnemyKind::Lanternwisp, 8),
-        summary: "Snuff out 8 Lanternwisps. They hurl starfire from above.",
+        summary: "Snuff out 8 Lanternwisps. They hurl starfire.",
         offer: &[
-            "See those lights drifting between the trees? Lanternwisps. Lost travellers follow them and never come back.",
-            "Snuff out eight. They float out of reach - jump, double jump, and hit them hard.",
+            "See those lights creeping between the trees? Lanternwisps. Lost travellers follow them and never come back.",
+            "Snuff out eight. Dodge their starfire, close in, and hit them hard.",
         ],
-        reminder: "Eight Lanternwisps. Look up between the trees.",
+        reminder: "Eight Lanternwisps. Look between the trees.",
         complete: &["Darker out there now - the good kind of dark. The Hermit Sable lives at the far end of the woods. She'll know what's behind all this."],
         exp: 480,
         gold: 70,
@@ -521,12 +523,12 @@ pub const QUESTS: &[QuestDef] = &[
         requires: Some("crab_cracking"),
         min_level: 0,
         objective: Objective::Kill(EnemyKind::Galehawk, 6),
-        summary: "Defeat 6 Galehawks. They screech, then dive - dodge!",
+        summary: "Defeat 6 Galehawks. They screech, then charge - dodge!",
         offer: &[
-            "Galehawks hunt anything that climbs. They hang in the wind, screech, then dive like arrows.",
-            "When you hear the screech, dodge. Then knock them out of the sky. Six should do.",
+            "Galehawks hunt anything that climbs. They stalk the ledges, screech, then charge like arrows.",
+            "When you hear the screech, dodge. Then punish them. Six should do.",
         ],
-        reminder: "Six Galehawks. Dodge the dive, then punish.",
+        reminder: "Six Galehawks. Dodge the charge, then punish.",
         complete: &["The sky's clearer. Stormwatcher Kael is waiting at the summit - he's been watching that storm for weeks."],
         exp: 900,
         gold: 120,
@@ -594,8 +596,8 @@ pub const QUESTS: &[QuestDef] = &[
         summary: "Take the North Road (east Breezehollow) to Wayfarer's Crossroads, pick a class town and change class with its instructor.",
         offer: &[
             "Level ten! You're no Novice anymore - well, you are, but not for long.",
-            "Take the North Road, just behind me, to Wayfarer's Crossroads. Five roads lead from there, one to each class town.",
-            "Ironhold trains Vanguards, Shadowmere trains Duskblades, Tempest Monastery trains Stormfists, Leafwhisper trains Windrunners and Starfall Spire trains Aethermancers.",
+            "Take the North Road, just behind me, to Wayfarer's Crossroads. Six roads lead from there, one to each class town.",
+            "Ironhold trains Vanguards, Shadowmere trains Duskblades, Tempest Monastery trains Stormfists, Leafwhisper trains Windrunners, Starfall Spire trains Aethermancers and Dustwind Gulch trains Gunslingers.",
             "Talk to a town's instructor to take up its class. Choose well - the path you pick is yours for good. Then come back and tell me!",
         ],
         reminder: "Take the North Road behind me to Wayfarer's Crossroads and pick a class town. The instructor there will change your class.",
@@ -603,6 +605,333 @@ pub const QUESTS: &[QuestDef] = &[
         exp: 150,
         gold: 120,
         potions: 3,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: None,
+    },
+    QuestDef {
+        id: "cactus_trouble",
+        name: "Cactus Trouble",
+        giver: "inn_dustwind",
+        turn_in: "inn_dustwind",
+        requires: None,
+        min_level: 11,
+        objective: Objective::Kill(EnemyKind::Cactling, 8),
+        summary: "Defeat 8 Cactlings on the Sunscorch Trail.",
+        offer: &[
+            "Cactlings have been rolling into town again. They hop, they prickle, and they scare the horses.",
+            "Clear eight of them off the Sunscorch Trail, west of town, would you?",
+        ],
+        reminder: "Eight Cactlings, on the Sunscorch Trail.",
+        complete: &[
+            "Not a spine in sight. Have a drink on the house - and some coin for the trouble.",
+        ],
+        exp: 900,
+        gold: 120,
+        potions: 3,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: None,
+    },
+    QuestDef {
+        id: "stinger_bounty",
+        name: "Stinger Bounty",
+        giver: "instructor_dustwind",
+        turn_in: "instructor_dustwind",
+        requires: None,
+        min_level: 18,
+        objective: Objective::Kill(EnemyKind::MesaScorpion, 10),
+        summary: "Defeat 10 Mesa Scorpions on Rattlesnake Mesa (east of Dustwind Gulch).",
+        offer: &[
+            "There's a bounty on Mesa Scorpions. Big ones. Bigger than you.",
+            "Head east to Rattlesnake Mesa and bring down ten. Keep moving - they lunge.",
+        ],
+        reminder: "Ten Mesa Scorpions on Rattlesnake Mesa.",
+        complete: &[
+            "Fine shooting. The bounty's yours.",
+        ],
+        exp: 3200,
+        gold: 420,
+        potions: 4,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: None,
+    },
+    QuestDef {
+        id: "skyward_bound",
+        name: "Skyward Bound",
+        giver: "wayfarer_jory",
+        turn_in: "grandmaster_aldric",
+        requires: None,
+        min_level: 28,
+        objective: Objective::Reach("skyreach_citadel"),
+        summary: "Climb Cloudstep Pass (east end of Wayfarer's Crossroads) to Skyreach Citadel and meet Grandmaster Aldric.",
+        offer: &[
+            "You've grown strong. Too strong for these roads, maybe.",
+            "At the far east end of the Crossroads a pass climbs into the clouds: Cloudstep Pass. At the top is Skyreach Citadel.",
+            "Grandmaster Aldric lives there. At level 30 he can show you a second path for your class. Go on - the Highlands are waiting.",
+        ],
+        reminder: "Climb Cloudstep Pass to Skyreach Citadel.",
+        complete: &[
+            "So you're the one Jory keeps writing about. Welcome to Skyreach.",
+            "Up here the monsters are older and the treasure is better. And at level 30, I can make you something more than you are.",
+        ],
+        exp: 5200,
+        gold: 600,
+        potions: 3,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("the_second_path"),
+    },
+    QuestDef {
+        id: "the_second_path",
+        name: "The Second Path",
+        giver: "grandmaster_aldric",
+        turn_in: "grandmaster_aldric",
+        requires: Some("skyward_bound"),
+        min_level: 30,
+        objective: Objective::Advance,
+        summary: "Reach level 30, then advance into one of your class's two advanced classes with Grandmaster Aldric (or your class instructor).",
+        offer: &[
+            "Every class has two advanced paths. Each brings a new weapon, two new abilities and three passive skills.",
+            "Talk to me again once you're level 30 and choose. Your class instructor back home can do it too.",
+        ],
+        reminder: "Talk to Grandmaster Aldric at level 30 and choose your advanced class.",
+        complete: &[
+            "There. Feel that? That's the weapon knowing you. Your new abilities are in your Abilities window, and your passives are always on.",
+        ],
+        exp: 6000,
+        gold: 800,
+        potions: 4,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: None,
+    },
+    QuestDef {
+        id: "frost_patrol",
+        name: "Frost Patrol",
+        giver: "captain_brannoch",
+        turn_in: "captain_brannoch",
+        requires: None,
+        min_level: 30,
+        objective: Objective::Kill(EnemyKind::Frostling, 12),
+        summary: "Defeat 12 Frostlings in the Frostveil Tundra (east end of the Citadel).",
+        offer: &[
+            "The Frostlings are getting bold - they've attacked two supply sleds this week.",
+            "Head east through the Citadel's far gate into the Frostveil Tundra and thin them out. Twelve should teach them.",
+        ],
+        reminder: "Twelve Frostlings in the Frostveil Tundra.",
+        complete: &[
+            "The sleds are moving again. Good work, soldier.",
+        ],
+        exp: 7600,
+        gold: 900,
+        potions: 4,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("yeti_hunt"),
+    },
+    QuestDef {
+        id: "yeti_hunt",
+        name: "Yeti Hunt",
+        giver: "captain_brannoch",
+        turn_in: "captain_brannoch",
+        requires: Some("frost_patrol"),
+        min_level: 35,
+        objective: Objective::Kill(EnemyKind::GlacialYeti, 10),
+        summary: "Defeat 10 Glacial Yetis in Glacier Hollow (east of the Frostveil Tundra).",
+        offer: &[
+            "The Frostlings answer to something bigger: the Glacial Yetis of Glacier Hollow.",
+            "Ten of them. Bring a warm coat.",
+        ],
+        reminder: "Ten Glacial Yetis in Glacier Hollow.",
+        complete: &[
+            "Ten yetis! The tundra will be quiet for a while.",
+        ],
+        exp: 10800,
+        gold: 1300,
+        potions: 4,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("throne_of_ice"),
+    },
+    QuestDef {
+        id: "throne_of_ice",
+        name: "Throne of Ice",
+        giver: "captain_brannoch",
+        turn_in: "captain_brannoch",
+        requires: Some("yeti_hunt"),
+        min_level: 35,
+        objective: Objective::Kill(EnemyKind::FrostBat, 10),
+        summary: "Defeat 10 Frost Bats inside the Frozen Throne (talk to Hrolf in the Citadel to enter).",
+        offer: &[
+            "The cold is coming from the Frozen Throne. Something sits on that throne - Glacia, the Frost Wyrm.",
+            "Get a party together and go in through Hrolf. Thin out the Frost Bats on your way to her - ten of them.",
+        ],
+        reminder: "Ten Frost Bats in the Frozen Throne.",
+        complete: &[
+            "You've been inside and lived. Few can say that. Give Glacia my regards next time - with your weapon.",
+        ],
+        exp: 12500,
+        gold: 1500,
+        potions: 5,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: None,
+    },
+    QuestDef {
+        id: "salamander_season",
+        name: "Salamander Season",
+        giver: "sage_ilyra",
+        turn_in: "sage_ilyra",
+        requires: None,
+        min_level: 40,
+        objective: Objective::Kill(EnemyKind::CinderSalamander, 12),
+        summary: "Defeat 12 Cinder Salamanders in Emberfall Caldera (east end of the Citadel).",
+        offer: &[
+            "I study the caldera's fire spirits. Well - I'd like to. The Cinder Salamanders keep setting my notes on fire.",
+            "Clear twelve of them from Emberfall Caldera so I can work in peace.",
+        ],
+        reminder: "Twelve Cinder Salamanders in Emberfall Caldera.",
+        complete: &[
+            "Ah, peace and quiet - and only slightly singed. Thank you.",
+        ],
+        exp: 12000,
+        gold: 1500,
+        potions: 4,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("obsidian_harvest"),
+    },
+    QuestDef {
+        id: "obsidian_harvest",
+        name: "Obsidian Harvest",
+        giver: "sage_ilyra",
+        turn_in: "sage_ilyra",
+        requires: Some("salamander_season"),
+        min_level: 45,
+        objective: Objective::Kill(EnemyKind::ObsidianGolem, 10),
+        summary: "Defeat 10 Obsidian Golems in the Cinderspire Wastes (east of Emberfall Caldera).",
+        offer: &[
+            "The Obsidian Golems of the Cinderspire hold fire in their cores. I need to know how.",
+            "Break ten of them. Carefully. Well - as carefully as you can hit a golem.",
+        ],
+        reminder: "Ten Obsidian Golems in the Cinderspire Wastes.",
+        complete: &[
+            "Fascinating! The cores are still warm. Here - you've earned this.",
+        ],
+        exp: 15500,
+        gold: 1900,
+        potions: 5,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("dragonfire"),
+    },
+    QuestDef {
+        id: "dragonfire",
+        name: "Dragonfire",
+        giver: "sage_ilyra",
+        turn_in: "sage_ilyra",
+        requires: Some("obsidian_harvest"),
+        min_level: 45,
+        objective: Objective::Kill(EnemyKind::FireBat, 10),
+        summary: "Defeat 10 Fire Bats inside the Cinder Sanctum (talk to Ashka in the Citadel to enter).",
+        offer: &[
+            "All the caldera's fire flows from one place: the Cinder Sanctum, and the dragon Ignaroth.",
+            "Take your party in through Ashka. Bring down ten Fire Bats inside - I need their wings for my research.",
+        ],
+        reminder: "Ten Fire Bats in the Cinder Sanctum.",
+        complete: &[
+            "You walked into a dragon's house and walked out again. I'll write you into my book.",
+        ],
+        exp: 17000,
+        gold: 2100,
+        potions: 5,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: None,
+    },
+    QuestDef {
+        id: "stormbreak",
+        name: "Stormbreak",
+        giver: "skywatcher_oriel",
+        turn_in: "skywatcher_oriel",
+        requires: None,
+        min_level: 50,
+        objective: Objective::Kill(EnemyKind::Stormbeak, 12),
+        summary: "Defeat 12 Stormbeaks on the Stormcrown Isles (take the Skybridge in the Citadel).",
+        offer: &[
+            "The Stormcrown Isles float above us, and the Stormbeaks nest on every one of them.",
+            "Take the Skybridge and bring down twelve. Mind the edges.",
+        ],
+        reminder: "Twelve Stormbeaks on the Stormcrown Isles.",
+        complete: &[
+            "The skies are clearer already. Thank you.",
+        ],
+        exp: 16500,
+        gold: 2000,
+        potions: 4,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("falling_stars"),
+    },
+    QuestDef {
+        id: "falling_stars",
+        name: "Falling Stars",
+        giver: "skywatcher_oriel",
+        turn_in: "skywatcher_oriel",
+        requires: Some("stormbreak"),
+        min_level: 55,
+        objective: Objective::Kill(EnemyKind::StarWyrmling, 10),
+        summary: "Defeat 10 Star Wyrmlings in the Shattered Heavens (east of the Stormcrown Isles).",
+        offer: &[
+            "Something shattered the heavens long ago. Now Star Wyrmlings crawl out of the cracks.",
+            "Ten of them. Then we'll talk about where they come from.",
+        ],
+        reminder: "Ten Star Wyrmlings in the Shattered Heavens.",
+        complete: &[
+            "They come from the Celestial Spire. From the Twins. I was afraid of that.",
+        ],
+        exp: 20000,
+        gold: 2500,
+        potions: 5,
+        items: &[],
+        flag_on_accept: None,
+        flag_on_complete: None,
+        chain_to: Some("eclipse"),
+    },
+    QuestDef {
+        id: "eclipse",
+        name: "Eclipse",
+        giver: "skywatcher_oriel",
+        turn_in: "skywatcher_oriel",
+        requires: Some("falling_stars"),
+        min_level: 55,
+        objective: Objective::Kill(EnemyKind::StarBat, 10),
+        summary: "Defeat 10 Star Bats inside the Celestial Spire (talk to Vesper in the Citadel to enter).",
+        offer: &[
+            "Sol and Luna, the Aether Twins, rule the Celestial Spire. They can only be beaten together.",
+            "Go in through Vesper with your strongest friends. Clear ten Star Bats on the way - and if you reach the Twins, kill them both, and fast.",
+        ],
+        reminder: "Ten Star Bats in the Celestial Spire.",
+        complete: &[
+            "You've seen the top of the world. Whatever comes next - Galebound will remember your name.",
+        ],
+        exp: 24000,
+        gold: 3200,
+        potions: 6,
         items: &[],
         flag_on_accept: None,
         flag_on_complete: None,
@@ -622,6 +951,8 @@ pub enum QuestEvent<'a> {
     DummyHit { heavy: bool },
     Killed(EnemyKind),
     ChangedClass,
+    /// Advanced into an advanced class (level 30).
+    Advanced,
 }
 
 /// Apply an event; returns names of quests that just became ready to turn in.
@@ -639,6 +970,7 @@ pub fn on_event(save: &mut CharacterSave, ev: QuestEvent) -> Vec<&'static str> {
             (Objective::DummyHeavy(_), QuestEvent::DummyHit { heavy: true }) => true,
             (Objective::Kill(k, _), QuestEvent::Killed(e)) => k == e,
             (Objective::ChangeClass, QuestEvent::ChangedClass) => true,
+            (Objective::Advance, QuestEvent::Advanced) => true,
             _ => false,
         };
         if hit {
@@ -672,6 +1004,10 @@ pub enum DialogAction {
     House,
     /// Enter the Tempest Vault (co-op dungeon).
     EnterVault,
+    /// Choose one of a class's two advanced classes (level 30).
+    Advance(ClassId),
+    /// Enter a 0.15.0 co-op dungeon (map key).
+    EnterDungeon(&'static str),
 }
 
 /// Gold a quest NPC charges to call their boss back for another fight.
@@ -736,7 +1072,7 @@ fn idle_lines(npc: &str, save: &CharacterSave) -> Vec<String> {
         "mira" => &["Potions! Fresh potions! I'll patch you up for free, too - just ask."],
         id if id.starts_with("pet_keeper_") => &[
             "Looking for a companion? Every pet here will follow you, pick up loot for you and learn new tricks as it grows.",
-            "Pets are 90,000 gold, Pet Food is 900. Keep your pet fed - a hungry pet won't lift a paw to help.",
+            "Pets are 15,000 gold, Pet Food is 500. Keep your pet fed - a hungry pet won't lift a paw to help.",
         ],
         "garrick" => &[
             "Need something sturdier than a stick? Take a look at what's on the rack.",
@@ -762,17 +1098,33 @@ fn idle_lines(npc: &str, save: &CharacterSave) -> Vec<String> {
                     "Until then: spend your ability points ({Character}) and master your directional moves.",
                 ]
             } else {
-                &["The path suits you. Keep training - new abilities come at levels 12, 15 and 20."]
+                &["The path suits you. Keep training - new abilities come at levels 12, 15 and 20, and at 30 Skyreach Citadel can advance your class."]
             }
         }
         "wayfarer_jory" => &[
-            "Five roads, five towns, five ways to fight. Ironhold and Shadowmere lie west, the Monastery and Leafwhisper north, Starfall Spire at the far end.",
+            "Six roads, six towns, six ways to fight. Ironhold and Shadowmere lie west, the Monastery and Leafwhisper north, then Starfall Spire and Dustwind Gulch.",
+            "And past them all, at the far east end, Cloudstep Pass climbs to Skyreach Citadel. That's for the strong - level 28 and up.",
             "Every town has a general store, a weaponsmith and an armourer. Just walk in through the door.",
         ],
-        "ironhold_general" | "shadowmere_general" | "tempest_general" | "leafwhisper_general" | "starfall_general" => &["Potions, ethers, tonics. Everything an adventurer needs to stay upright."],
-        "ironhold_weapons" | "shadowmere_weapons" | "tempest_weapons" | "leafwhisper_weapons" | "starfall_weapons" => &["Finest weapons in the land. Class weapons need the right class to wield, mind."],
-        "ironhold_armor" | "shadowmere_armor" | "tempest_armor" | "leafwhisper_armor" | "starfall_armor" => &["Armour, boots and trinkets. Good gear is cheaper than a funeral."],
-        "inn_ironhold" | "inn_shadowmere" | "inn_tempest" | "inn_leafwhisper" | "inn_starfall" => &["Rest a while, traveller. You look like you've had a rough road."],
+        "dustwind_general" | "skyreach_general" | "ironhold_general" | "shadowmere_general" | "tempest_general" | "leafwhisper_general" | "starfall_general" => &["Potions, ethers, tonics. Everything an adventurer needs to stay upright."],
+        "dustwind_weapons" | "skyreach_weapons" | "ironhold_weapons" | "shadowmere_weapons" | "tempest_weapons" | "leafwhisper_weapons" | "starfall_weapons" => &["Finest weapons in the land. Class weapons need the right class to wield, mind."],
+        "dustwind_armor" | "skyreach_armor" | "ironhold_armor" | "shadowmere_armor" | "tempest_armor" | "leafwhisper_armor" | "starfall_armor" => &["Armour, boots and trinkets. Good gear is cheaper than a funeral."],
+        "inn_dustwind" | "inn_skyreach" | "inn_ironhold" | "inn_shadowmere" | "inn_tempest" | "inn_leafwhisper" | "inn_starfall" => &["Rest a while, traveller. You look like you've had a rough road."],
+        "captain_brannoch" => &["The cold up here bites. The Frostlings bite harder."],
+        "sage_ilyra" => &["Fire is just knowledge that hasn't been written down yet. Mind the sparks."],
+        "skywatcher_oriel" => &["The Isles drift a little further every night. Something up there is pulling them."],
+        "delver_hrolf" => &[
+            "The Frozen Throne lies beyond that door. Glacia, the Frost Wyrm, sits on it - and Rimeheart Gold gear waits in her hoard.",
+            "Bring your party: everyone in your party who enters goes to the same throne. Defeat the Rime Colossus to open the inner gate.",
+        ],
+        "delver_ashka" => &[
+            "The Cinder Sanctum: lava, fire bats and a dragon called Ignaroth. Its hoard holds Cinderforged Red gear and advanced-class weapons.",
+            "Bring your party. Magmaw guards the inner gate - when it glows, hit it hard.",
+        ],
+        "delver_vesper" => &[
+            "The Celestial Spire is the top of the world. Sol and Luna, the Aether Twins, rule it - and Celestial Red gear is theirs.",
+            "Bring your strongest friends. The Twins must fall together, or they bring each other back.",
+        ],
         "kid_bo" => &["Did you REALLY beat the Bramblehorn?! Can you teach me the double jump?"],
         "farmer_tilly" => &["The Puffwools say thank you. Well, they say 'baa', but I know what they mean."],
         "windcaller_oren" => &["Listen... the wind always tells you where trouble is. Right now it's whispering 'east'."],
@@ -911,21 +1263,24 @@ pub fn talk(npc_id: &'static str, speaker: &'static str, save: &mut CharacterSav
             action: DialogAction::Waystone,
         };
     }
-    // 6) Class instructors.
+    // 6) Class instructors and the Grandmaster.
     if let Some(class) = instructor_class(npc_id) {
         return instructor_dialog(npc_id, speaker, class, save);
+    }
+    if npc_id == "grandmaster_aldric" {
+        return advancement_dialog(npc_id, speaker, save, Some("Welcome to Skyreach. Up here, we make legends.".to_string()));
     }
     // 7) House, vault and kitchens.
     if npc_id == "housekeeper_hobb" {
         return Dialog { npc_id, speaker, lines: idle_lines(npc_id, save), action: DialogAction::House };
     }
-    if npc_id == crate::world::VAULT_NPC {
+    if let Some(d) = crate::world::dungeon_for_npc(npc_id) {
         let mut lines = idle_lines(npc_id, save);
-        if save.level < crate::world::VAULT_LEVEL {
-            lines.push(format!("Come back at level {}. The vault doesn't forgive the unready.", crate::world::VAULT_LEVEL));
+        if save.level < d.level {
+            lines.push(format!("Come back at level {}. The {} doesn't forgive the unready.", d.level, d.name));
             return Dialog { npc_id, speaker, lines, action: DialogAction::None };
         }
-        return Dialog { npc_id, speaker, lines, action: DialogAction::EnterVault };
+        return Dialog { npc_id, speaker, lines, action: if d.map == crate::world::VAULT_MAP { DialogAction::EnterVault } else { DialogAction::EnterDungeon(d.map) } };
     }
     if npc_id.starts_with("inn_") {
         let mut lines = idle_lines(npc_id, save);
@@ -958,15 +1313,18 @@ pub fn accept(save: &mut CharacterSave, id: &str) {
     sync_class_quests(save);
 }
 
-/// "Change class" objectives are already met by anyone who has a class:
-/// such quests move straight to "return to turn in". Returns how many moved.
+/// "Change class" objectives are already met by anyone who has a class
+/// (and "Advance" ones by anyone with an advanced class): such quests move
+/// straight to "return to turn in". Returns how many moved.
 pub fn sync_class_quests(save: &mut CharacterSave) -> usize {
     if save.class == ClassId::Novice {
         return 0;
     }
     let mut n = 0;
+    let advanced = save.job.is_some();
     for q in save.quests.iter_mut() {
-        if q.state == QuestState::Active && quest_def(&q.id).map(|d| d.objective == Objective::ChangeClass).unwrap_or(false) {
+        let met = |o: Objective| o == Objective::ChangeClass || (advanced && o == Objective::Advance);
+        if q.state == QuestState::Active && quest_def(&q.id).map(|d| met(d.objective)).unwrap_or(false) {
             q.progress = 1;
             q.state = QuestState::ReadyToTurnIn;
             n += 1;
@@ -1157,6 +1515,24 @@ pub const TOWN_NPCS: &[(&str, &str)] = &[
     ("pet_keeper_tempest_monastery", "Brother Mochi"),
     ("pet_keeper_leafwhisper", "Fern"),
     ("pet_keeper_starfall_spire", "Stella"),
+    ("pet_keeper_dustwind_gulch", "Dusty"),
+    ("pet_keeper_skyreach_citadel", "Aerie"),
+    ("instructor_dustwind", "Marshal Colt"),
+    ("grandmaster_aldric", "Grandmaster Aldric"),
+    ("inn_dustwind", "Ma Hattie"),
+    ("inn_skyreach", "Innkeeper Wren"),
+    ("dustwind_general", "Saddlebag Sue"),
+    ("dustwind_weapons", "Gunsmith Eli"),
+    ("dustwind_armor", "Juno"),
+    ("skyreach_general", "Apothecary Lumen"),
+    ("skyreach_weapons", "Armsmaster Brakka"),
+    ("skyreach_armor", "Tailor Seraphine"),
+    ("captain_brannoch", "Captain Brannoch"),
+    ("sage_ilyra", "Sage Ilyra"),
+    ("skywatcher_oriel", "Skywatcher Oriel"),
+    ("delver_hrolf", "Hrolf"),
+    ("delver_ashka", "Ashka"),
+    ("delver_vesper", "Vesper"),
     ("instructor_ironhold", "Commander Hale"),
     ("instructor_shadowmere", "Mistress Vey"),
     ("instructor_tempest", "Master Kaito"),
@@ -1192,6 +1568,7 @@ pub fn instructor_class(npc_id: &str) -> Option<ClassId> {
         "instructor_tempest" => ClassId::Stormfist,
         "instructor_leafwhisper" => ClassId::Windrunner,
         "instructor_starfall" => ClassId::Aethermancer,
+        "instructor_dustwind" => ClassId::Gunslinger,
         _ => return None,
     })
 }
@@ -1216,10 +1593,11 @@ fn instructor_dialog(npc_id: &'static str, speaker: &'static str, class: ClassId
         ClassId::Duskblade => "Duskblades strike from the shadows and are gone before the body hits the floor.",
         ClassId::Stormfist => "A Stormfist needs no blade. Discipline, speed and fists that crackle like thunder.",
         ClassId::Windrunner => "Windrunners read the wind and loose arrows that never miss. Stay light, stay far.",
+        ClassId::Gunslinger => "Gunslingers never stand still. Two pistols, a backflip and a grin - that's all you need.",
         _ => "Aethermancers bend the raw aether of the sky. Fragile in body, terrifying in power.",
     };
     let (lines, action) = if save.class == class {
-        (vec![format!("Train hard, {}. The {} path rewards those who never stop.", save.name, info.name)], DialogAction::None)
+        return advancement_dialog(npc_id, speaker, save, Some(format!("Train hard, {}. The {} path rewards those who never stop.", save.name, info.name)));
     } else if save.class != ClassId::Novice {
         (vec![format!("You already walk the {} path. Respect to you - but I have nothing to teach you.", save.class.info().name)], DialogAction::None)
     } else if save.level < CLASS_CHANGE_LEVEL {
@@ -1247,9 +1625,38 @@ fn instructor_dialog(npc_id: &'static str, speaker: &'static str, class: ClassId
     Dialog { npc_id, speaker, lines, action }
 }
 
+/// Level 30 class advancement (instructors and Grandmaster Aldric).
+fn advancement_dialog(npc_id: &'static str, speaker: &'static str, save: &CharacterSave, first: Option<String>) -> Dialog {
+    use crate::jobs::{jobs_for, JOB_LEVEL};
+    let mut lines: Vec<String> = first.into_iter().collect();
+    if save.class == ClassId::Novice {
+        lines.push(format!("Choose a class first (level {}), then come back at level {} to advance it.", CLASS_CHANGE_LEVEL, JOB_LEVEL));
+        return Dialog { npc_id, speaker, lines, action: DialogAction::None };
+    }
+    if let Some(j) = save.job {
+        lines.push(format!("A {} already. Keep growing - your passives deepen at levels 35 and 45, and a new ability comes at 40.", j.name()));
+        return Dialog { npc_id, speaker, lines, action: DialogAction::None };
+    }
+    let [a, b] = jobs_for(save.class);
+    let (ai, bi) = (a.info(), b.info());
+    if save.level < JOB_LEVEL {
+        lines.push(format!("At level {} a {} can become a {} or a {}. Come back then.", JOB_LEVEL, save.class.info().name, ai.name, bi.name));
+        return Dialog { npc_id, speaker, lines, action: DialogAction::None };
+    }
+    lines.push(format!("You're ready for your second path. A {} can advance into one of two classes.", save.class.info().name));
+    lines.push(format!("The {}: {} ({})", ai.name, ai.blurb, ai.weapon_name));
+    lines.push(format!("The {}: {} ({})", bi.name, bi.blurb, bi.weapon_name));
+    lines.push("Choose - this is permanent. (Press Escape to decide later.)".to_string());
+    Dialog { npc_id, speaker, lines, action: DialogAction::Advance(save.class) }
+}
+
 /// Which NPCs should show a marker: '!' new quest, '?' turn-in.
 pub fn npc_marker(npc_id: &str, save: &CharacterSave) -> Option<char> {
     if instructor_class(npc_id).is_some() && save.class == ClassId::Novice && save.level >= CLASS_CHANGE_LEVEL {
+        return Some('!');
+    }
+    let advancer = instructor_class(npc_id) == Some(save.class) || npc_id == "grandmaster_aldric";
+    if advancer && save.class != ClassId::Novice && save.job.is_none() && save.level >= crate::jobs::JOB_LEVEL {
         return Some('!');
     }
     for q in &save.quests {

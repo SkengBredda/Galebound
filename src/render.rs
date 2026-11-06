@@ -1,6 +1,7 @@
 //! World rendering with pixel-art sprites: parallax backgrounds, cobblestone
 //! terrain, props, characters, enemies, projectiles and effects.
 
+use galebound_core::save::FxCat;
 use crate::art;
 use crate::charsprite::{self, Anim};
 use crate::gfx::{self, alpha, mix, rgb, rgba, shade};
@@ -24,14 +25,14 @@ impl Camera {
     pub fn target(sim: &Sim) -> (f32, f32) {
         let p = &sim.player.body;
         let look = sim.player.facing * 40.0;
-        let tx = p.pos.x + p.w * 0.5 - gfx::VIEW_W * 0.5 + look;
+        let tx = p.pos.x + p.w * 0.5 - gfx::view_w() * 0.5 + look;
         // Keep the player's feet about 3/4 down the screen.
-        let mut ty = p.pos.y + p.h - gfx::VIEW_H * 0.68;
+        let mut ty = p.pos.y + p.h - gfx::view_h() * 0.68;
         if sim.dialog.is_some() {
             ty += 90.0; // lift the action above the dialog box
         }
-        let maxx = (sim.map.width - gfx::VIEW_W).max(0.0);
-        (tx.clamp(0.0, maxx), ty.clamp(-300.0, sim.map.height - gfx::VIEW_H))
+        let maxx = (sim.map.width - gfx::view_w()).max(0.0);
+        (tx.clamp(0.0, maxx), ty.clamp(-300.0, (sim.map.height - gfx::view_h()).max(-300.0)))
     }
     pub fn snap(&mut self, sim: &Sim) {
         let (x, y) = Self::target(sim);
@@ -68,6 +69,10 @@ fn tkey(theme: Theme) -> &'static str {
         Theme::Cliffs => "c",
         Theme::Arcane => "a",
         Theme::Interior => "i",
+        Theme::Desert => "d",
+        Theme::Frost => "fr",
+        Theme::Ember => "e",
+        Theme::Sky => "s",
     }
 }
 
@@ -101,6 +106,20 @@ pub fn background(theme: Theme, cam: &Camera, time: f32) {
             gfx::circle(sx - 100.0, sy + 250.0, 120.0, rgba(255, 210, 140, 60));
             gfx::circle(sx - 100.0, sy + 250.0, 70.0, rgb(255, 220, 150));
         }
+        Theme::Desert => {
+            // a big blazing sun
+            gfx::circle(sx, sy, 110.0, rgba(255, 236, 170, 50));
+            gfx::circle(sx, sy, 62.0, rgb(255, 240, 190));
+        }
+        Theme::Ember => {
+            // a red moon behind the smoke
+            gfx::circle(sx, sy + 40.0, 90.0, rgba(255, 120, 60, 40));
+            gfx::circle(sx, sy + 40.0, 50.0, rgb(240, 110, 70));
+        }
+        Theme::Frost | Theme::Sky => {
+            gfx::circle(sx, sy, 70.0, rgba(255, 255, 240, 60));
+            gfx::circle(sx, sy, 44.0, rgb(255, 252, 230));
+        }
         Theme::Arcane => {
             // dense stars, a ringed planet and falling stars
             for i in 0..90 {
@@ -125,7 +144,7 @@ pub fn background(theme: Theme, cam: &Camera, time: f32) {
             gfx::circle(sx, sy, 42.0, rgb(255, 246, 206));
         }
     }
-    if theme != Theme::Woods && theme != Theme::Arcane {
+    if !matches!(theme, Theme::Woods | Theme::Arcane | Theme::Ember) {
         let tint = if theme == Theme::Cliffs { Color::new(1.0, 0.82, 0.8, 1.0) } else { WHITE };
         for i in 0..6 {
             let t = sprites::get(&format!("cloud{}", i % 3), || art::cloud(i % 3));
@@ -199,8 +218,8 @@ pub fn lighting(sim: &Sim, cam: &Camera, time: f32) {
             }
             // fireflies
             for i in 0..18 {
-                let x = cam.x + ((i * 211) as f32 + (time * 0.4 + i as f32).sin() * 40.0) % gfx::VIEW_W;
-                let y = cam.y + 120.0 + ((i * 97) as f32 + (time * 0.7 + i as f32 * 1.3).cos() * 30.0) % (gfx::VIEW_H - 140.0);
+                let x = cam.x + ((i * 211) as f32 + (time * 0.4 + i as f32).sin() * 40.0) % gfx::view_w();
+                let y = cam.y + 120.0 + ((i * 97) as f32 + (time * 0.7 + i as f32 * 1.3).cos() * 30.0) % (gfx::view_h() - 140.0);
                 let a = ((time * 2.0 + i as f32).sin() * 0.5 + 0.5) * 220.0;
                 gfx::rect(x, y, u(1.0), u(1.0), rgba(220, 255, 140, a as u8));
             }
@@ -208,6 +227,35 @@ pub fn lighting(sim: &Sim, cam: &Camera, time: f32) {
         Theme::Cliffs => {
             gfx::clear_cam();
             gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(255, 140, 80, 18));
+        }
+        Theme::Desert => {
+            gfx::clear_cam();
+            gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(255, 190, 110, 18));
+        }
+        Theme::Frost => {
+            // falling snow
+            gfx::clear_cam();
+            gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(170, 200, 255, 22));
+            for i in 0..70 {
+                let x = ((i * 211) as f32 + (time * 0.8 + i as f32).sin() * 30.0 + time * 14.0).rem_euclid(gfx::VW);
+                let y = ((i * 97) as f32 + time * (40.0 + (i % 5) as f32 * 12.0)).rem_euclid(gfx::VH);
+                gfx::rect(x, y, 3.0, 3.0, rgba(255, 255, 255, 200));
+            }
+        }
+        Theme::Ember => {
+            // red haze and rising embers
+            gfx::clear_cam();
+            gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(140, 30, 10, 34));
+            for i in 0..40 {
+                let x = ((i * 233) as f32 + (time * 0.6 + i as f32).sin() * 40.0).rem_euclid(gfx::VW);
+                let y = gfx::VH - ((time * (30.0 + (i % 4) as f32 * 14.0) + i as f32 * 61.0).rem_euclid(gfx::VH));
+                let a = ((time * 3.0 + i as f32).sin() * 0.5 + 0.5) * 220.0;
+                gfx::rect(x, y, 3.0, 3.0, rgba(255, 150, 60, a as u8));
+            }
+        }
+        Theme::Sky => {
+            gfx::clear_cam();
+            gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(200, 220, 255, 14));
         }
         Theme::Arcane => {
             gfx::clear_cam();
@@ -221,8 +269,8 @@ pub fn lighting(sim: &Sim, cam: &Camera, time: f32) {
             }
             // drifting motes
             for i in 0..16 {
-                let x = cam.x + ((i * 233) as f32 + (time * 0.3 + i as f32).sin() * 30.0) % gfx::VIEW_W;
-                let y = cam.y + gfx::VIEW_H - ((time * 18.0 + i as f32 * 53.0) % gfx::VIEW_H);
+                let x = cam.x + ((i * 233) as f32 + (time * 0.3 + i as f32).sin() * 30.0) % gfx::view_w();
+                let y = cam.y + gfx::view_h() - ((time * 18.0 + i as f32 * 53.0) % gfx::view_h());
                 gfx::rect(x, y, u(1.0), u(1.0), rgba(180, 240, 255, 200));
             }
         }
@@ -251,7 +299,7 @@ pub fn lighting(sim: &Sim, cam: &Camera, time: f32) {
 // ---------------------------------------------------------------- terrain
 
 fn visible(r: &Aabb, cam: &Camera) -> bool {
-    r.right() > cam.x - 50.0 && r.left() < cam.x + gfx::VIEW_W + 50.0 && r.bottom() > cam.y - 50.0 && r.top() < cam.y + gfx::VIEW_H + 50.0
+    r.right() > cam.x - 50.0 && r.left() < cam.x + gfx::view_w() + 50.0 && r.bottom() > cam.y - 50.0 && r.top() < cam.y + gfx::view_h() + 50.0
 }
 
 /// Fill a world rect with a repeating texture aligned to the global pixel grid.
@@ -287,8 +335,8 @@ pub fn terrain(sim: &Sim, cam: &Camera) {
             continue;
         }
         let l = s.left().max(cam.x - 20.0);
-        let r = s.right().min(cam.x + gfx::VIEW_W + 20.0);
-        let bottom = (cam.y + gfx::VIEW_H + 10.0).min(s.bottom());
+        let r = s.right().min(cam.x + gfx::view_w() + 20.0);
+        let bottom = (cam.y + gfx::view_h() + 10.0).min(s.bottom());
         tile_fill(&stone, l, s.top(), r, bottom, s.top());
         // outline exposed ledge sides
         let p1 = u(1.0);
@@ -296,7 +344,7 @@ pub fn terrain(sim: &Sim, cam: &Camera) {
             gfx::rect(s.left() - p1, s.top(), p1, bottom - s.top(), ink);
             gfx::rect(s.left(), s.top(), u(3.0), bottom - s.top(), rgba(0, 0, 0, 50));
         }
-        if s.right() < cam.x + gfx::VIEW_W + 20.0 {
+        if s.right() < cam.x + gfx::view_w() + 20.0 {
             gfx::rect(s.right(), s.top(), p1, bottom - s.top(), ink);
             gfx::rect(s.right() - u(4.0), s.top(), u(4.0), bottom - s.top(), rgba(0, 0, 0, 70));
         }
@@ -360,7 +408,7 @@ pub fn climbs(sim: &Sim, cam: &Camera) {
 pub fn decos(sim: &Sim, cam: &Camera, layer: u8, time: f32) {
     gfx::set_cam(cam.x, cam.y);
     for d in sim.map.decos.iter().filter(|d| d.layer == layer) {
-        if d.x < cam.x - 300.0 || d.x > cam.x + gfx::VIEW_W + 300.0 {
+        if d.x < cam.x - 300.0 || d.x > cam.x + gfx::view_w() + 300.0 {
             continue;
         }
         deco(d, time, sim.map.theme);
@@ -374,6 +422,9 @@ fn crest(theme: Theme) -> crate::pixel::Px {
         Theme::Woods => prgb(96, 60, 150),
         Theme::Cliffs => prgb(230, 186, 50),
         Theme::Glade => prgb(70, 150, 80),
+        Theme::Desert => prgb(200, 110, 50),
+        Theme::Frost => prgb(110, 170, 230),
+        Theme::Ember => prgb(220, 70, 40),
         _ => prgb(70, 170, 220),
     }
 }
@@ -486,7 +537,7 @@ pub fn tufts(sim: &Sim, cam: &Camera) {
         let mut x = s.left() + 30.0 + (i as f32 * 37.0) % 60.0;
         let mut k = i as i32;
         while x < s.right() - 30.0 {
-            if x > cam.x - 60.0 && x < cam.x + gfx::VIEW_W + 60.0 && (k * 7) % 5 < 2 {
+            if x > cam.x - 60.0 && x < cam.x + gfx::view_w() + 60.0 && (k * 7) % 5 < 2 {
                 let t = sprites::get(&format!("tuft{}", k % 3), || art::tuft(k % 3));
                 sprite_at(&t, x, s.top() + u(1.0), k % 2 == 0, WHITE);
             }
@@ -528,11 +579,42 @@ pub fn signs_and_portals(sim: &Sim, cam: &Camera, time: f32) {
 
 // ---------------------------------------------------------------- characters
 
+/// An admin's name tag: a gold "GM" badge with a little crown in front of
+/// a gold-edged name plate.
+fn admin_tag(x: f32, y: f32, name: &str, title: Option<&str>) {
+    let nw = gfx::text_w(name, 16.0) + u(6.0);
+    let bw = u(17.0);
+    let w = nw + bw + u(2.0);
+    let left = x - w * 0.5;
+    let t = (macroquad::time::get_time() as f32 * 2.0).sin() * 0.5 + 0.5;
+    gfx::rrect(left - u(1.0), y + u(1.0), w + u(2.0), u(13.0), u(3.0), rgba(255, 200, 70, (120.0 + 80.0 * t) as u8));
+    gfx::rrect(left, y + u(2.0), w, u(11.0), u(2.0), rgba(40, 26, 10, 230));
+    // badge
+    gfx::rrect(left + u(1.0), y + u(3.0), bw - u(1.0), u(9.0), u(2.0), rgb(236, 176, 40));
+    let cx = left + u(4.5);
+    let cy = y + u(7.5);
+    gfx::tri(cx - u(2.5), cy + u(1.5), cx - u(2.5), cy - u(2.0), cx - u(0.8), cy, rgb(255, 250, 220));
+    gfx::tri(cx - u(1.2), cy + u(1.5), cx, cy - u(2.6), cx + u(1.2), cy + u(1.5), rgb(255, 250, 220));
+    gfx::tri(cx + u(2.5), cy + u(1.5), cx + u(2.5), cy - u(2.0), cx + u(0.8), cy, rgb(255, 250, 220));
+    gfx::rect(cx - u(2.5), cy + u(1.0), u(5.0), u(1.2), rgb(255, 250, 220));
+    gfx::text("GM", left + u(8.0), y + u(4.0), 14.0, rgb(60, 30, 0));
+    gfx::text(name, left + bw + u(4.0), y + u(4.0), 16.0, rgb(255, 214, 90));
+    if let Some(t) = title {
+        name_tag_title(x, y, t);
+    }
+}
+
 fn name_tag(x: f32, y: f32, name: &str, title: Option<&str>, col: Color) {
     let w = gfx::text_w(name, 16.0) + u(6.0);
     gfx::rrect(x - w * 0.5, y + u(2.0), w, u(11.0), u(2.0), rgba(24, 22, 40, 200));
     gfx::text_centered(name, x, y + u(4.0), 16.0, col);
     if let Some(t) = title {
+        name_tag_title(x, y, t);
+    }
+}
+
+fn name_tag_title(x: f32, y: f32, t: &str) {
+    {
         if let Some(g) = t.strip_prefix('<').and_then(|t| t.strip_suffix('>')) {
             // guild tag: a little emblem and the guild's name, like the classics
             let gw = gfx::text_w(g, 14.0) + u(12.0);
@@ -553,7 +635,7 @@ pub fn npcs(sim: &Sim, cam: &Camera, time: f32) {
     let talking_to = sim.dialog.as_ref().map(|d| d.dialog.npc_id);
     let near = sim.nearest_npc();
     for (i, n) in sim.map.npcs.iter().enumerate() {
-        if n.x < cam.x - 100.0 || n.x > cam.x + gfx::VIEW_W + 100.0 {
+        if n.x < cam.x - 100.0 || n.x > cam.x + gfx::view_w() + 100.0 {
             continue;
         }
         let facing = if talking_to == Some(n.id) {
@@ -636,6 +718,24 @@ pub fn player_anim(p: &Player) -> (Anim, u8) {
                 AttackPhase::Active => (AttackPhase::Active, (a.t - d.startup) / d.active.max(1e-3)),
                 AttackPhase::Recovery => (AttackPhase::Recovery, (a.t - d.startup - d.active) / d.recovery.max(1e-3)),
             };
+            // Hundred Fists and other rapid multi-hit jabs: a new punch on
+            // every hit, alternating front and back fist.
+            let hits = match a.skill.map(|s| &s.effect) {
+                Some(galebound_core::skills::SkillEffect::Strike { hits, .. }) => *hits,
+                _ => 1,
+            };
+            if hits > 1 && m == charsprite::Motion::Jab {
+                let frame = match phase {
+                    AttackPhase::Startup => 0,
+                    AttackPhase::Recovery => 3,
+                    AttackPhase::Active => {
+                        let per = prog.clamp(0.0, 0.999) * hits as f32;
+                        let n = per as u32;
+                        if per.fract() < 0.6 { 1 + (n % 2) as u8 } else { 0 }
+                    }
+                };
+                return (Anim::Attack(charsprite::Motion::Flurry), frame);
+            }
             (Anim::Attack(m), charsprite::attack_frame(phase, prog))
         }
         PState::Normal => {
@@ -694,7 +794,11 @@ pub fn player(sim: &Sim, cam: &Camera, look: &Appearance) {
     }
     draw_char(&tex, f.x, f.y, flip, Color::new(1.0, 1.0, 1.0, a));
     let tag = sim.guild.as_ref().map(|g| format!("<{}>", g.name));
-    name_tag(f.x, f.y, &sim.save.name, tag.as_deref(), rgb(255, 255, 255));
+    if sim.am_admin() {
+        admin_tag(f.x, f.y, &sim.save.name, tag.as_deref());
+    } else {
+        name_tag(f.x, f.y, &sim.save.name, tag.as_deref(), rgb(255, 255, 255));
+    }
 }
 
 // ---------------------------------------------------------------- enemies
@@ -703,7 +807,7 @@ pub fn enemies(sim: &Sim, cam: &Camera) {
     gfx::set_cam(cam.x, cam.y);
     for e in &sim.enemies {
         let b = &e.body;
-        if b.pos.x + b.w < cam.x - 120.0 || b.pos.x > cam.x + gfx::VIEW_W + 120.0 {
+        if b.pos.x + b.w < cam.x - 120.0 || b.pos.x > cam.x + gfx::view_w() + 120.0 {
             continue;
         }
         let a = if e.state == EState::Dying { (1.0 - e.state_t / 0.6).max(0.0) } else { 1.0 };
@@ -794,6 +898,47 @@ pub fn enemies(sim: &Sim, cam: &Camera) {
                 let kind = base;
                 sprites::get(&key, move || if kind == EnemyKind::Rotstump { art::rotstump(fr, st, flash) } else { art::crag_crab(fr, st, flash) })
             }
+            // 0.15.0 monsters
+            EnemyKind::Cactling => {
+                let fr = if b.on_ground { walk_frame } else if b.vel.y < 0.0 { 3 } else { 1 };
+                sprites::get(&format!("cact{}{}", fr, flash as u8), || crate::art2::cactling(fr, flash))
+            }
+            EnemyKind::DuneScuttler | EnemyKind::Frostling | EnemyKind::CinderSalamander | EnemyKind::FrostBat | EnemyKind::RimeGolem | EnemyKind::RimeColossus => {
+                let st = match e.state {
+                    EState::Telegraph | EState::Spit => 1,
+                    EState::Lunge | EState::Charge => 2,
+                    _ if e.state != EState::Walk && e.state != EState::Idle && base == EnemyKind::RimeColossus => 1,
+                    _ => 0,
+                };
+                let fr = if matches!(base, EnemyKind::FrostBat) { ((sim.time * 8.0) as i32).rem_euclid(4) } else if e.state == EState::Walk || st == 1 { walk_frame } else { 0 };
+                let en = e.boss_phase2;
+                let key = format!("{}{}{}{}{}", base.key(), fr, st, flash as u8, en as u8);
+                let kind = base;
+                sprites::get(&key, move || match kind {
+                    EnemyKind::DuneScuttler => crate::art2::scorpion(fr, st, flash),
+                    EnemyKind::Frostling => crate::art2::yeti(fr, st, flash),
+                    EnemyKind::CinderSalamander => crate::art2::salamander(fr, st, flash),
+                    EnemyKind::FrostBat => crate::art2::bat(fr, st, flash),
+                    EnemyKind::RimeColossus => crate::art2::golem(fr, st, flash, true, en),
+                    _ => crate::art2::golem(fr, st, flash, false, false),
+                })
+            }
+            EnemyKind::Glacia | EnemyKind::Sol => {
+                let fr = ((sim.time * 6.0) as i32).rem_euclid(4);
+                let st = match e.state {
+                    EState::Spit | EState::Breath | EState::Flare | EState::Telegraph => 1,
+                    EState::Charge | EState::Inferno | EState::Icicles | EState::LunarRain => 2,
+                    _ => 0,
+                };
+                let en = e.boss_phase2;
+                let key = format!("{}{}{}{}{}", base.key(), fr, st, flash as u8, en as u8);
+                let kind = base;
+                sprites::get(&key, move || if kind == EnemyKind::Glacia { crate::art2::wyrm(fr, st, flash, en) } else { crate::art2::seraph(fr, st, flash, en) })
+            }
+            EnemyKind::FrostCrystal => {
+                let fr = ((sim.time * 4.0) as i32).rem_euclid(4);
+                sprites::get(&format!("fcrys{}{}", fr, flash as u8), || crate::art2::frost_crystal(fr, flash))
+            }
             // Variants always map to a base kind via art_base().
             _ => sprites::get("dummy00", || art::dummy(0)),
         };
@@ -817,6 +962,217 @@ pub fn enemies(sim: &Sim, cam: &Camera) {
             gfx::rrect(f.x - lw * 0.5, f.y + u(2.0), lw, u(11.0), u(2.0), rgba(150, 40, 50, 210));
             gfx::text_centered(&label, f.x, f.y + u(4.0), 16.0, rgb(255, 240, 240));
         }
+        vault_boss_fx(sim, e);
+    }
+}
+
+/// The 0.15.0 dungeon bosses' mechanics: what's coming, and what to do.
+fn dungeon_boss_fx(sim: &Sim, e: &galebound_core::enemies::Enemy) {
+    use galebound_core::enemies::boss_ai::{ECLIPSE_SECS, INFERNO_WARN, OVERHEAT_SECS};
+    if !e.kind.is_boss() {
+        return;
+    }
+    let b = &e.body;
+    let (f, c, t) = (b.feet(), b.center(), sim.time as f32);
+    let label = |text: &str, col: Color| gfx::text_centered_outlined(text, f.x, b.pos.y - u(44.0), 26.0, col);
+    match e.state {
+        EState::Blizzard => {
+            for i in 0..40 {
+                let x = c.x - 900.0 + ((i * 97) as f32 + t * 260.0) % 1800.0;
+                let y = c.y - 360.0 + ((i * 53) as f32 + t * 180.0) % 520.0;
+                gfx::line(x, y, x - 18.0, y + 8.0, 2.0, rgba(240, 248, 255, 170));
+            }
+            label("BLIZZARD - keep moving or freeze!", rgb(200, 230, 255));
+        }
+        EState::Avalanche => label("Avalanche - jump the snowballs!", rgb(220, 236, 255)),
+        EState::Icicles => label("Icicles fall where you stand - move!", rgb(190, 230, 255)),
+        EState::Encased => {
+            gfx::ellipse(c.x, c.y, b.w * 0.75, b.h * 0.85, 0.0, rgba(180, 230, 255, 90));
+            gfx::ellipse(c.x, c.y, b.w * 0.75, b.h * 0.85, 0.0, rgba(255, 255, 255, 40));
+            label("ICE SHIELD - smash the Frost Crystals!", rgb(170, 230, 255));
+        }
+        EState::Overheat => {
+            let k = (e.state_t / OVERHEAT_SECS).clamp(0.0, 1.0);
+            gfx::circle(c.x, c.y, b.w * (0.7 + 0.2 * (t * 10.0).sin()), rgba(255, 220, 140, (60.0 + 120.0 * k) as u8));
+            let (bw, bx, by) = (160.0, f.x - 80.0, b.pos.y - u(30.0));
+            gfx::rect(bx, by, bw, 10.0, rgba(0, 0, 0, 160));
+            gfx::rect(bx, by, bw * k, 10.0, rgb(255, 120 - (80.0 * k) as u8, 40));
+            label("OVERHEATING - hit it hard to cool it down!", rgb(255, 200, 120));
+        }
+        EState::Eruption => label("Magma! Stay out of the pools", rgb(255, 170, 90)),
+        EState::Breath => label("Flame breath!", rgb(255, 160, 90)),
+        EState::Inferno => {
+            let arena = galebound_core::world::highlands::final_arena_x(sim.map.key);
+            let live = e.state_t > INFERNO_WARN;
+            let (x0, x1) = if e.facing > 0.0 { (arena, arena + 760.0) } else { (arena - 760.0, arena) };
+            let a = if live { 120.0 + 40.0 * (t * 12.0).sin() } else { 40.0 + 40.0 * (t * 8.0).sin().abs() };
+            gfx::rect(x0, f.y - 140.0, x1 - x0, 140.0, rgba(255, 90, 30, a as u8));
+            for i in 0..18 {
+                let x = x0 + (x1 - x0) * (i as f32 + 0.5) / 18.0;
+                let hgt = 30.0 + ((t * 9.0 + i as f32).sin().abs()) * if live { 70.0 } else { 20.0 };
+                gfx::tri(x - 14.0, f.y, x + 14.0, f.y, x, f.y - hgt, rgba(255, 180, 60, (a + 40.0).min(255.0) as u8));
+            }
+            label(if live { "INFERNO - get to the other side!" } else { "The ground is igniting..." }, rgb(255, 170, 90));
+        }
+        EState::WingGust => label("Wing gust - brace yourself!", rgb(255, 210, 160)),
+        EState::Flare => label("Solar Flare!", rgb(255, 236, 150)),
+        EState::LunarRain => label("Lunar Rain!", rgb(200, 210, 255)),
+        EState::Eclipse => {
+            let k = (e.state_t / ECLIPSE_SECS).clamp(0.0, 1.0);
+            gfx::circle(c.x, c.y, b.w * 0.9, rgba(30, 20, 60, 120));
+            gfx::circle(c.x, c.y, b.w * 0.9 * (1.0 - k) + 6.0, rgba(255, 240, 200, 80));
+            label(&format!("ECLIPSE - {:.0}s to finish it!", (ECLIPSE_SECS - e.state_t).max(0.0)), rgb(255, 230, 200));
+        }
+        _ => {}
+    }
+}
+
+/// Turrets, the spirit hawk and the Oracle's orbiting stars (0.15.0).
+fn summons(sim: &Sim) {
+    use galebound_core::skills::SummonKind;
+    let ink = rgb(26, 18, 30);
+    let t = sim.time as f32;
+    for s in &sim.summons {
+        if !sim.settings.fx_shown(FxCat::Companion, s.owner.is_none()) {
+            continue;
+        }
+        let fade = (s.left / 0.6).clamp(0.0, 1.0);
+        match s.kind {
+            SummonKind::Turret | SummonKind::Mender => {
+                let (x, y) = (s.pos.x, s.pos.y);
+                let mender = s.kind == SummonKind::Mender;
+                let body = if mender { rgb(120, 200, 150) } else { rgb(150, 156, 176) };
+                // tripod legs
+                for dx in [-14.0f32, 0.0, 14.0] {
+                    gfx::line(x, y - 18.0, x + dx, y, 3.0, alpha(ink, fade));
+                }
+                gfx::rrect(x - 14.0, y - 40.0, 28.0, 24.0, 5.0, alpha(ink, fade));
+                gfx::rrect(x - 12.0, y - 38.0, 24.0, 20.0, 4.0, alpha(body, fade));
+                if mender {
+                    gfx::rect(x - 2.0, y - 34.0, 4.0, 12.0, rgb(255, 255, 255));
+                    gfx::rect(x - 6.0, y - 30.0, 12.0, 4.0, rgb(255, 255, 255));
+                    gfx::circle(x, y - 28.0, 60.0 + (t * 4.0).sin() * 6.0, rgba(140, 255, 180, 26));
+                } else {
+                    gfx::rect(x + s.facing * 8.0 - 1.0, y - 32.0, s.facing * 18.0, 6.0, alpha(ink, fade));
+                    gfx::circle(x, y - 28.0, 4.0, rgb(255, 120, 80));
+                }
+                // time left
+                let k = (s.left / s.total).clamp(0.0, 1.0);
+                gfx::rect(x - 14.0, y - 48.0, 28.0, 4.0, rgba(0, 0, 0, 140));
+                gfx::rect(x - 14.0, y - 48.0, 28.0 * k, 4.0, if mender { rgb(120, 230, 150) } else { rgb(255, 200, 90) });
+            }
+            SummonKind::Hawk => {
+                let (x, y) = (s.pos.x, s.pos.y);
+                let flap = (t * 14.0).sin() * 10.0;
+                let col = rgba(170, 240, 200, (210.0 * fade) as u8);
+                gfx::tri(x, y, x - 24.0 * s.facing, y - 6.0 - flap, x - 8.0 * s.facing, y + 4.0, col);
+                gfx::tri(x, y, x - 22.0 * s.facing, y + 2.0 + flap * 0.5, x - 6.0 * s.facing, y + 6.0, col);
+                gfx::circle(x + 6.0 * s.facing, y - 2.0, 6.0, col);
+                gfx::tri(x + 11.0 * s.facing, y - 3.0, x + 18.0 * s.facing, y, x + 11.0 * s.facing, y + 1.0, rgb(250, 220, 120));
+                gfx::circle(x, y, 22.0, rgba(140, 255, 200, 30));
+            }
+        }
+    }
+    // the blizzard: a frost meter, then a block of ice
+    let pb = &sim.player.body;
+    if sim.frozen > 0.0 {
+        gfx::rrect(pb.pos.x - 8.0, pb.pos.y - 8.0, pb.w + 16.0, pb.h + 12.0, 6.0, rgba(180, 225, 255, 140));
+        gfx::rrect(pb.pos.x - 4.0, pb.pos.y - 4.0, 8.0, pb.h, 3.0, rgba(255, 255, 255, 90));
+    } else if sim.frost > 0.02 {
+        let (x, y) = (pb.pos.x + pb.w * 0.5 - 30.0, pb.pos.y - 26.0);
+        gfx::rect(x, y, 60.0, 7.0, rgba(0, 0, 0, 150));
+        gfx::rect(x, y, 60.0 * sim.frost.min(1.0), 7.0, rgb(170, 220, 255));
+        gfx::text_centered_outlined("FROST", x + 30.0, y - 16.0, 14.0, rgb(200, 235, 255));
+    }
+    let star = |o: galebound_core::math::V2| {
+        gfx::circle(o.x, o.y, 13.0, rgba(200, 180, 255, 50));
+        gfx::circle(o.x, o.y, 6.0, rgb(255, 240, 200));
+        gfx::circle(o.x, o.y, 3.0, rgb(255, 255, 255));
+    };
+    if sim.settings.fx_shown(FxCat::Companion, true) {
+        let n = sim.orbit_count();
+        for k in 0..n {
+            star(sim.orbit_pos(k, n));
+        }
+    }
+    if sim.settings.fx_shown(FxCat::Companion, false) {
+        for o in sim.others.iter().filter(|o| !o.dead) {
+            let n = sim.other_orbit_count(&o.info.class, o.info.level);
+            let c = galebound_core::math::V2::new(o.pos.x, o.pos.y - galebound_core::sim::PLAYER_H * 0.5);
+            for k in 0..n {
+                star(sim.orbit_pos_at(c, k, n));
+            }
+        }
+    }
+}
+
+/// The Tempest Vault bosses' mechanics: what's coming, and what to do.
+fn vault_boss_fx(sim: &Sim, e: &galebound_core::enemies::Enemy) {
+    use galebound_core::enemies::{PORTCULLIS_WARN, SURGE_RANGE, SURGE_WARN, VORTEX_RANGE};
+    if !matches!(e.kind, EnemyKind::Gatekeeper | EnemyKind::Stormwarden) {
+        dungeon_boss_fx(sim, e);
+        return;
+    }
+    let b = &e.body;
+    let (f, c, t) = (b.feet(), b.center(), sim.time as f32);
+    let label = |text: &str, col: Color| gfx::text_centered_outlined(text, f.x, b.pos.y - u(44.0), 26.0, col);
+    match e.state {
+        EState::Guard => {
+            // a glowing shield wall in front of it
+            let sx = c.x + e.facing * (b.w * 0.5 + 14.0);
+            let pulse = 0.65 + 0.25 * (t * 8.0).sin();
+            gfx::ellipse(sx, c.y - 6.0, 16.0, b.h * 0.75, 0.0, rgba(255, 210, 100, (90.0 * pulse) as u8));
+            gfx::rrect(sx - 6.0, b.pos.y - 18.0, 12.0, b.h + 18.0, 5.0, rgba(255, 226, 140, (200.0 * pulse) as u8));
+            gfx::line(sx, b.pos.y - 14.0, sx, f.y - 4.0, 2.0, rgba(255, 255, 230, 230));
+            label("SHIELD UP - strike from behind!", rgb(255, 214, 110));
+        }
+        EState::Portcullis if e.state_t < PORTCULLIS_WARN + 0.4 => {
+            label("Spikes from above - find a gap!", rgb(220, 226, 240));
+        }
+        EState::Vortex => {
+            // rings rushing inward
+            for i in 0..5 {
+                let k = 1.0 - ((t * 0.9 + i as f32 / 5.0).fract());
+                let r = 40.0 + k * VORTEX_RANGE * 0.6;
+                gfx::circle_lines(c.x, c.y, r, 2.0 + k * 2.0, rgba(150, 205, 255, (40.0 + 120.0 * (1.0 - k)) as u8));
+            }
+            for i in 0..8 {
+                let a = t * 5.0 + i as f32 * std::f32::consts::TAU / 8.0;
+                let r = 70.0 + (t * 3.0 + i as f32).sin().abs() * 60.0;
+                gfx::line(c.x + a.cos() * r, c.y + a.sin() * r, c.x + (a + 0.6).cos() * (r - 30.0), c.y + (a + 0.6).sin() * (r - 30.0), 2.0, rgba(220, 240, 255, 170));
+            }
+            label("VORTEX - run from it!", rgb(170, 215, 255));
+        }
+        EState::Surge => {
+            let live = e.state_t > SURGE_WARN;
+            let (x0, x1) = (c.x - SURGE_RANGE, c.x + SURGE_RANGE);
+            let y = f.y;
+            if live {
+                gfx::rect(x0, y - 10.0, x1 - x0, 10.0, rgba(255, 236, 120, 50));
+                let seed = (t * 24.0) as u32;
+                let mut x = x0;
+                let mut i = 0u32;
+                while x < x1 {
+                    let nx = (x + 120.0).min(x1);
+                    zigzag(x, y - 4.0, nx, y - 4.0, 4, 9.0, seed.wrapping_add(i * 977), 3.0, rgba(255, 230, 90, 150));
+                    zigzag(x, y - 4.0, nx, y - 4.0, 4, 9.0, seed.wrapping_add(i * 977), 1.2, rgb(255, 255, 230));
+                    x = nx;
+                    i += 1;
+                }
+                label("THE FLOOR IS LIVE - get up on a ledge!", rgb(255, 236, 120));
+            } else {
+                // sparks crawl along the floor, faster as it charges
+                let k = e.state_t / SURGE_WARN;
+                let n = (8.0 + 30.0 * k) as u32;
+                for i in 0..n {
+                    let h = (i.wrapping_mul(2654435761) ^ (t * 10.0) as u32).wrapping_mul(40503) % 10_000;
+                    let x = x0 + (h as f32 / 10_000.0) * (x1 - x0);
+                    gfx::line(x, y - 2.0, x + 6.0, y - 10.0 - 8.0 * k, 2.0, rgba(255, 240, 140, (90.0 + 140.0 * k) as u8));
+                }
+                label("The floor is charging...", rgb(255, 236, 160));
+            }
+        }
+        _ => {}
     }
 }
 
@@ -851,6 +1207,10 @@ pub fn swings(sim: &Sim, cam: &Camera) {
     use galebound_core::classes::AttackKind as K;
     gfx::set_cam(cam.x, cam.y);
     for s in &sim.swings {
+        let cat = if s.fx.is_some() { FxCat::Skill } else { FxCat::Weapon };
+        if !sim.settings.fx_shown(cat, s.owner.is_none()) {
+            continue;
+        }
         let k = (s.t / s.dur).clamp(0.0, 1.0);
         let fade = (1.0 - k).powf(0.7);
         let col = match s.fx {
@@ -929,6 +1289,9 @@ pub fn projectiles(sim: &Sim, cam: &Camera) {
     gfx::set_cam(cam.x, cam.y);
     let ink = rgb(26, 18, 30);
     for p in &sim.projectiles {
+        if p.team != Team::Enemy && !sim.settings.fx_shown(p.fx, p.team == Team::Player) {
+            continue;
+        }
         let (x, y) = (p.pos.x, p.pos.y);
         let ang = p.vel.y.atan2(p.vel.x);
         let (dx, dy) = (ang.cos(), ang.sin());
@@ -975,6 +1338,103 @@ pub fn projectiles(sim: &Sim, cam: &Camera) {
                     gfx::tri(bx - 4.0, y + 13.0, bx + 4.0, y + 13.0, bx, y + 16.0 - hgt, alpha(rgb(176, 136, 90), fade));
                 }
             }
+            ProjStyle::Bullet => {
+                // a hot tracer round
+                gfx::line(x - dx * 26.0, y - dy * 26.0, x, y, u(1.2), rgba(255, 230, 150, 120));
+                gfx::line(x - dx * 6.0, y - dy * 6.0, x + dx * 3.0, y + dy * 3.0, u(2.6), ink);
+                gfx::line(x - dx * 5.0, y - dy * 5.0, x + dx * 2.0, y + dy * 2.0, u(1.4), rgb(255, 214, 110));
+            }
+            ProjStyle::Card => {
+                // a spinning playing card
+                let a = sim.time * 18.0;
+                let (cx, cy) = (a.cos() * 9.0, a.sin() * 9.0);
+                let (px, py) = (-a.sin() * 6.0, a.cos() * 6.0);
+                let pts = [(x - cx - px, y - cy - py), (x + cx - px, y + cy - py), (x + cx + px, y + cy + py), (x - cx + px, y - cy + py)];
+                gfx::tri(pts[0].0, pts[0].1, pts[1].0, pts[1].1, pts[2].0, pts[2].1, rgb(250, 248, 240));
+                gfx::tri(pts[0].0, pts[0].1, pts[2].0, pts[2].1, pts[3].0, pts[3].1, rgb(250, 248, 240));
+                gfx::circle(x, y, 2.5, rgb(200, 40, 50));
+                gfx::circle(x, y, 14.0, rgba(200, 160, 255, 50));
+            }
+            ProjStyle::Cannonball => {
+                let r = p.w * 0.45;
+                gfx::line(x - dx * 30.0, y - dy * 30.0, x, y, r, rgba(200, 200, 210, 60));
+                gfx::circle(x, y, r + u(1.0), ink);
+                gfx::circle(x, y, r, rgb(60, 60, 70));
+                gfx::circle(x - r * 0.3, y - r * 0.3, r * 0.35, rgb(150, 150, 166));
+                gfx::circle(x + dx * r, y + dy * r, 3.0, rgb(255, 160, 60));
+            }
+            ProjStyle::Snowball => {
+                let r = p.w * 0.5;
+                gfx::circle(x, y, r + u(1.0), alpha(ink, fade));
+                gfx::circle(x, y, r, alpha(rgb(240, 246, 255), fade));
+                let spin = sim.time * 8.0;
+                gfx::circle(x + spin.cos() * r * 0.5, y + spin.sin() * r * 0.5, r * 0.25, rgb(200, 216, 240));
+                gfx::ellipse(x, y + r, r * 1.2, 4.0, 0.0, rgba(255, 255, 255, 90));
+            }
+            ProjStyle::Icicle => {
+                // a falling shard of ice, point down
+                let (hw, hh) = (p.w * 0.3, p.w * 1.5);
+                gfx::tri(x - hw - u(1.0), y - hh - u(1.0), x + hw + u(1.0), y - hh - u(1.0), x, y + hh * 0.5 + u(2.0), ink);
+                gfx::tri(x - hw, y - hh, x + hw, y - hh, x, y + hh * 0.5, rgb(190, 230, 255));
+                gfx::tri(x - hw * 0.3, y - hh, x + hw * 0.4, y - hh, x, y + hh * 0.2, rgb(255, 255, 255));
+            }
+            ProjStyle::Fireball => {
+                let r = p.w * 0.45;
+                gfx::line(x - dx * 26.0, y - dy * 26.0, x, y, r * 1.4, rgba(255, 120, 40, 90));
+                gfx::circle(x, y, r * 1.5, rgba(255, 160, 60, 70));
+                gfx::circle(x, y, r + u(1.0), ink);
+                gfx::circle(x, y, r, rgb(255, 120, 40));
+                gfx::circle(x, y, r * 0.55, rgb(255, 230, 140));
+            }
+            ProjStyle::LavaPool => {
+                // a bubbling pool of lava on the floor
+                let w = p.w;
+                let a = (p.life / p.max_life).min(1.0).max(0.0).sqrt();
+                gfx::ellipse(x, y + 6.0, w * 0.75, 9.0, 0.0, rgba(255, 90, 30, (200.0 * a) as u8));
+                gfx::ellipse(x, y + 6.0, w * 0.5, 5.0, 0.0, rgba(255, 210, 90, (220.0 * a) as u8));
+                for i in 0..3 {
+                    let bx = x - w * 0.4 + i as f32 * w * 0.4;
+                    let by = y + 2.0 - ((sim.time * 2.0 + i as f32).sin().abs() * 8.0);
+                    gfx::circle(bx, by, 3.0, rgba(255, 180, 70, (200.0 * a) as u8));
+                }
+            }
+            ProjStyle::Flame => {
+                let r = p.w * 0.5;
+                let t = 1.0 - (p.life / p.max_life).clamp(0.0, 1.0);
+                gfx::circle(x, y, r * (1.0 + t), rgba(255, 110, 30, (150.0 * (1.0 - t)) as u8));
+                gfx::circle(x, y, r * 0.6 * (1.0 + t), rgba(255, 220, 120, (200.0 * (1.0 - t)) as u8));
+            }
+            ProjStyle::Spike => {
+                // an iron portcullis spike on a chain, point down
+                let (hw, hh) = (p.w * 0.32, p.w * 1.6);
+                gfx::line(x, y - hh - 120.0, x, y - hh, u(1.5), rgba(120, 120, 140, 160));
+                gfx::rect(x - hw - u(1.0), y - hh - u(1.0), hw * 2.0 + u(2.0), hh + u(2.0), ink);
+                gfx::rect(x - hw, y - hh, hw * 2.0, hh, rgb(96, 100, 118));
+                gfx::rect(x - hw, y - hh, hw * 0.6, hh, rgb(140, 146, 166));
+                gfx::tri(x - hw - u(1.0), y - u(1.0), x + hw + u(1.0), y - u(1.0), x, y + hw * 3.0 + u(2.0), ink);
+                gfx::tri(x - hw, y, x + hw, y, x, y + hw * 3.0, rgb(186, 190, 206));
+            }
+            ProjStyle::Lightning => {
+                // a jagged white-blue bolt trailing back up to the sky
+                let top = y - p.travelled.min(430.0) - 40.0;
+                zigzag(x, top, x, y, 7, 18.0, (p.pos.x as i32 as u32).wrapping_mul(2654435761) ^ (sim.time * 30.0) as u32, u(3.0), rgba(120, 190, 255, 120));
+                zigzag(x, top, x, y, 7, 18.0, (p.pos.x as i32 as u32).wrapping_mul(2654435761) ^ (sim.time * 30.0) as u32, u(1.4), rgb(240, 250, 255));
+                gfx::circle(x, y, 16.0, rgba(180, 220, 255, 90));
+            }
+            ProjStyle::Meteor => {
+                let r = p.w * 0.5;
+                // fiery tail
+                for k in 1..7 {
+                    let t = k as f32 / 7.0;
+                    gfx::circle(x - dx * r * 1.6 * k as f32 * 0.5, y - dy * r * 1.6 * k as f32 * 0.5, r * (1.0 - t * 0.7), rgba(255, (170.0 - t * 110.0) as u8, 40, (200.0 * (1.0 - t)) as u8));
+                }
+                gfx::circle(x, y, r * 1.5, rgba(255, 150, 40, 60));
+                gfx::circle(x, y, r + u(1.5), ink);
+                gfx::circle(x, y, r, rgb(150, 70, 40));
+                gfx::circle(x + r * 0.25, y + r * 0.2, r * 0.55, rgb(110, 48, 30));
+                gfx::circle(x - r * 0.3, y - r * 0.3, r * 0.3, rgb(255, 190, 90));
+                gfx::circle(x - r * 0.1, y + r * 0.35, r * 0.16, rgb(255, 230, 140));
+            }
             ProjStyle::Star => {
                 gfx::circle(x, y, 14.0, alpha(rgb(255, 230, 140), 0.3));
                 gfx::line(x, y, x - dx * 30.0, y - dy * 30.0, u(2.0), rgba(255, 230, 140, 120));
@@ -982,6 +1442,73 @@ pub fn projectiles(sim: &Sim, cam: &Camera) {
                 gfx::tri(x - 9.0, y - 5.0, x + 9.0, y - 5.0, x, y + 11.0, rgb(255, 236, 140));
                 gfx::rect(x - u(1.0), y - u(1.0), u(2.0), u(2.0), rgb(255, 255, 255));
             }
+        }
+    }
+}
+
+/// A jagged line from (x1, y1) to (x2, y2) with `n` kinks, the same shape
+/// for the same `seed`.
+#[allow(clippy::too_many_arguments)]
+fn zigzag(x1: f32, y1: f32, x2: f32, y2: f32, n: u32, jitter: f32, seed: u32, th: f32, c: Color) {
+    let (dx, dy) = (x2 - x1, y2 - y1);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let (nx, ny) = (-dy / len, dx / len);
+    let mut h = seed | 1;
+    let mut rnd = || {
+        h ^= h << 13;
+        h ^= h >> 17;
+        h ^= h << 5;
+        (h % 2000) as f32 / 1000.0 - 1.0
+    };
+    let mut px = x1;
+    let mut py = y1;
+    for k in 1..=n {
+        let t = k as f32 / n as f32;
+        let off = if k == n { 0.0 } else { rnd() * jitter };
+        let qx = x1 + dx * t + nx * off;
+        let qy = y1 + dy * t + ny * off;
+        gfx::line(px, py, qx, qy, th, c);
+        px = qx;
+        py = qy;
+    }
+}
+
+/// Lightning arcs and explosion rings (Arcane Bolt, Meteor, Thunder Palm).
+pub fn magic(sim: &Sim, cam: &Camera) {
+    use galebound_core::sim::{BoomKind, ZapKind};
+    gfx::set_cam(cam.x, cam.y);
+    summons(sim);
+    for b in sim.booms.iter().filter(|b| sim.settings.fx_shown(b.fx, b.mine)) {
+        let t = 1.0 - (b.life / b.max_life).clamp(0.0, 1.0);
+        let r = b.radius * (0.35 + 0.65 * t.sqrt());
+        let a = 1.0 - t;
+        match b.kind {
+            BoomKind::Meteor => {
+                gfx::circle(b.pos.x, b.pos.y, r, rgba(255, 150, 50, (110.0 * a) as u8));
+                gfx::circle(b.pos.x, b.pos.y, r * 0.6, rgba(255, 230, 150, (170.0 * a) as u8));
+                gfx::circle_lines(b.pos.x, b.pos.y, r, u(2.5), rgba(255, 110, 40, (230.0 * a) as u8));
+                // scorch on the ground
+                gfx::ellipse(b.pos.x, b.pos.y + b.radius * 0.35, b.radius * 0.9, b.radius * 0.18, 0.0, rgba(40, 20, 14, (110.0 * a) as u8));
+            }
+            BoomKind::Thunder => {
+                gfx::circle(b.pos.x, b.pos.y, r, rgba(150, 210, 255, (70.0 * a) as u8));
+                gfx::circle_lines(b.pos.x, b.pos.y, r, u(1.5), rgba(220, 240, 255, (220.0 * a) as u8));
+            }
+        }
+    }
+    for z in sim.zaps.iter().filter(|z| sim.settings.fx_shown(z.fx, z.mine)) {
+        let a = (z.life / z.max_life).clamp(0.0, 1.0);
+        // re-roll the shape a few times a second so it flickers
+        let seed = z.seed ^ ((sim.time * 24.0) as u32);
+        let (n, jit, th) = match z.kind {
+            ZapKind::Chain => (8, 16.0, u(2.2)),
+            ZapKind::Sky => (9, 22.0, u(2.6)),
+            ZapKind::Spark => (4, 7.0, u(1.2)),
+        };
+        zigzag(z.a.x, z.a.y, z.b.x, z.b.y, n, jit, seed, th * 2.2, rgba(110, 180, 255, (120.0 * a) as u8));
+        zigzag(z.a.x, z.a.y, z.b.x, z.b.y, n, jit, seed, th, alpha(rgb(240, 250, 255), a));
+        if z.kind != ZapKind::Spark {
+            gfx::circle(z.b.x, z.b.y, 12.0 * a + 4.0, rgba(200, 230, 255, (150.0 * a) as u8));
         }
     }
 }
@@ -1023,7 +1550,7 @@ pub fn drops(sim: &Sim, cam: &Camera, time: f32) {
     gfx::set_cam(cam.x, cam.y);
     for d in &sim.drops {
         let f = d.body.feet();
-        if f.x < cam.x - 60.0 || f.x > cam.x + gfx::VIEW_W + 60.0 {
+        if f.x < cam.x - 60.0 || f.x > cam.x + gfx::view_w() + 60.0 {
             continue;
         }
         // Blink during the last 10 seconds before vanishing.
@@ -1120,7 +1647,7 @@ pub fn pet_label(sim: &Sim, cam: &Camera, time: f32) {
 pub fn others(sim: &Sim, cam: &Camera, time: f32) {
     gfx::set_cam(cam.x, cam.y);
     for o in &sim.others {
-        if o.since > 10.0 || o.pos.x < cam.x - 120.0 || o.pos.x > cam.x + gfx::VIEW_W + 120.0 {
+        if o.since > 10.0 || o.pos.x < cam.x - 120.0 || o.pos.x > cam.x + gfx::view_w() + 120.0 {
             continue;
         }
         let f = o.pos;
@@ -1156,12 +1683,24 @@ pub fn other_labels(sim: &Sim, cam: &Camera) {
     gfx::set_cam(cam.x, cam.y);
     let revive = sim.revivable();
     for (i, o) in sim.others.iter().enumerate() {
-        if o.since > 10.0 || o.pos.x < cam.x - 120.0 || o.pos.x > cam.x + gfx::VIEW_W + 120.0 {
+        if o.since > 10.0 || o.pos.x < cam.x - 120.0 || o.pos.x > cam.x + gfx::view_w() + 120.0 {
             continue;
         }
         let f = o.pos;
         let tag = (!o.info.guild.is_empty()).then(|| format!("<{}>", o.info.guild));
-        name_tag(f.x, f.y, &format!("{}  Lv.{}", o.name, o.info.level), tag.as_deref(), rgb(150, 210, 255));
+        let label = format!("{}  Lv.{}", o.name, o.info.level);
+        let foe = sim.duel.as_ref().map(|d| d.foe == o.id).unwrap_or(false);
+        if sim.is_admin_name(&o.name) {
+            admin_tag(f.x, f.y, &label, tag.as_deref());
+        } else {
+            name_tag(f.x, f.y, &label, tag.as_deref(), if foe { rgb(255, 120, 110) } else { rgb(150, 210, 255) });
+        }
+        if foe {
+            // crossed swords over your duel opponent
+            let y = f.y - u(84.0);
+            gfx::line(f.x - u(5.0), y - u(5.0), f.x + u(5.0), y + u(5.0), u(1.5), rgb(255, 120, 110));
+            gfx::line(f.x + u(5.0), y - u(5.0), f.x - u(5.0), y + u(5.0), u(1.5), rgb(255, 120, 110));
+        }
         if !o.dead && o.st.hp < 0.999 {
             let (w, y) = (u(28.0), f.y - u(70.0));
             gfx::rect(f.x - w * 0.5, y, w, u(3.0), rgba(20, 16, 30, 200));

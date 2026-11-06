@@ -52,7 +52,7 @@ pub fn forget() {
 }
 
 // New motions go at the END so older clients keep the same numbers.
-const MOTIONS: [Motion; 14] = [
+const MOTIONS: [Motion; 15] = [
     Motion::Jab,
     Motion::Thrust,
     Motion::Sweep,
@@ -67,6 +67,7 @@ const MOTIONS: [Motion; 14] = [
     Motion::Rise,
     Motion::Throw,
     Motion::Stomp,
+    Motion::Flurry,
 ];
 
 /// Animation -> number, for telling other players what we're doing.

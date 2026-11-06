@@ -84,21 +84,42 @@ pub fn move_and_collide(b: &mut Body, lvl: &Level, dt: f32) {
 
     // ---- X axis
     let dx = b.vel.x * dt;
+    let before = b.aabb();
     b.pos.x += dx;
     let mut r = b.aabb();
     for s in lvl.solids {
         if r.overlaps(s) {
-            if dx > 0.0 {
-                b.pos.x = s.left() - b.w;
-            } else if dx < 0.0 {
-                b.pos.x = s.right();
+            if before.overlaps(s) {
+                // Already inside this block before moving (e.g. coming off a
+                // ladder beside a ledge): push out the shortest way, never
+                // through to the far side.
+                let to_left = r.right() - s.left();
+                let to_right = s.right() - r.left();
+                let to_top = r.bottom() - s.top();
+                if to_top <= to_left && to_top <= to_right {
+                    b.pos.y = s.top() - b.h;
+                    if b.vel.y > 0.0 {
+                        b.vel.y = 0.0;
+                    }
+                    b.on_ground = true;
+                } else if to_left < to_right {
+                    b.pos.x = s.left() - b.w;
+                    b.vel.x = 0.0;
+                    b.hit_wall = true;
+                } else {
+                    b.pos.x = s.right();
+                    b.vel.x = 0.0;
+                    b.hit_wall = true;
+                }
             } else {
-                // Spawned inside: push out the shortest way horizontally.
-                let c = r.center().x;
-                if c < s.center().x { b.pos.x = s.left() - b.w } else { b.pos.x = s.right() }
+                if dx > 0.0 {
+                    b.pos.x = s.left() - b.w;
+                } else {
+                    b.pos.x = s.right();
+                }
+                b.vel.x = 0.0;
+                b.hit_wall = true;
             }
-            b.vel.x = 0.0;
-            b.hit_wall = true;
             r = b.aabb();
         }
     }
@@ -226,6 +247,24 @@ mod tests {
             move_and_collide(&mut b, &l, 1.0 / 120.0);
         }
         assert!((b.pos.y + b.h - 500.0).abs() < 0.01, "dropped to floor");
+    }
+
+    #[test]
+    fn starting_inside_a_block_never_teleports_across_it() {
+        // A wide ledge; the body overlaps its left edge a little, the way it
+        // does at the top of a ladder beside a shelf.
+        let ledge = [Aabb::new(100.0, 300.0, 400.0, 200.0)];
+        for vx in [-300.0, 300.0] {
+            let mut b = Body::new(80.0, 300.0 - 50.0 + 20.0, 30.0, 50.0);
+            b.vel.x = vx;
+            move_and_collide(&mut b, &lvl(&ledge, &[]), 1.0 / 60.0);
+            assert!(b.pos.x < 120.0, "moving {} pushed the body to x={}", vx, b.pos.x);
+        }
+        // Mostly inside near the top: it pops up onto the ledge.
+        let mut b = Body::new(110.0, 300.0 - 50.0 + 6.0, 30.0, 50.0);
+        b.vel.x = -300.0;
+        move_and_collide(&mut b, &lvl(&ledge, &[]), 1.0 / 60.0);
+        assert!((b.pos.y + b.h - 300.0).abs() < 0.01 && b.pos.x < 120.0);
     }
 
     #[test]

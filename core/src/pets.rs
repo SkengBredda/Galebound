@@ -7,6 +7,9 @@ use crate::stats::{MainStats, StatMods};
 
 /// Price of a pet at the Pet Shop.
 pub const PET_PRICE: u32 = 10_000;
+/// What a pet shop charges for a pet (0.14.0: a flat 15,000 gold, not
+/// scaled by `items::PRICE_MULT`). Shops buy pets back at `PET_PRICE`-based rates.
+pub const PET_SHOP_PRICE: u32 = 15_000;
 /// Price of one Pet Food.
 pub const FOOD_PRICE: u32 = 100;
 pub const MAX_LEVEL: u32 = 20;

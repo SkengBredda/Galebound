@@ -62,6 +62,39 @@ pub struct Settings {
     pub minimap_size: u8,
     /// Show the whole map (true) or just the area around you (false).
     pub minimap_whole: bool,
+    /// Who's effects to show (0.15.1), see `FX_*`: companions (turrets,
+    /// hawks, orbiting stars), ability effects and weapon effects.
+    pub fx_companions: u8,
+    pub fx_skills: u8,
+    pub fx_weapons: u8,
+}
+
+/// Effect visibility: everyone's, only your own, or none.
+pub const FX_ALL: u8 = 0;
+pub const FX_MINE: u8 = 1;
+pub const FX_OFF: u8 = 2;
+
+/// Which kind of effect something is (for the graphics options).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FxCat {
+    /// Basic attacks: swings, shots.
+    Weapon,
+    /// Abilities: their projectiles, lightning, explosions, auras.
+    Skill,
+    /// Turrets, the spirit hawk, orbiting stars.
+    Companion,
+}
+
+impl Settings {
+    /// Should an effect of this kind be drawn? `mine` = your own.
+    pub fn fx_shown(&self, cat: FxCat, mine: bool) -> bool {
+        let v = match cat {
+            FxCat::Weapon => self.fx_weapons,
+            FxCat::Skill => self.fx_skills,
+            FxCat::Companion => self.fx_companions,
+        };
+        v == FX_ALL || (v == FX_MINE && mine)
+    }
 }
 
 impl Default for Settings {
@@ -74,6 +107,9 @@ impl Default for Settings {
             display: DisplayMode::Windowed,
             minimap_size: 2,
             minimap_whole: false,
+            fx_companions: FX_ALL,
+            fx_skills: FX_ALL,
+            fx_weapons: FX_ALL,
         }
     }
 }
@@ -96,6 +132,8 @@ pub struct QuestEntry {
 pub struct CharacterSave {
     pub name: String,
     pub class: ClassId,
+    /// Advanced class (level 30, 0.15.0).
+    pub job: Option<crate::jobs::Job>,
     pub look: Appearance,
     pub level: u32,
     pub exp: u32,
@@ -165,6 +203,7 @@ impl CharacterSave {
         CharacterSave {
             name: name.to_string(),
             class: ClassId::Novice,
+            job: None,
             look,
             level: 1,
             exp: 0,
@@ -344,6 +383,9 @@ pub fn encode_settings(st: &Settings) -> String {
     kv("layout", st.layout.key().to_string());
     kv("tap_up_jump", st.tap_up_to_jump.to_string());
     kv("damage_numbers", st.show_damage_numbers.to_string());
+    kv("fx_companions", st.fx_companions.to_string());
+    kv("fx_skills", st.fx_skills.to_string());
+    kv("fx_weapons", st.fx_weapons.to_string());
     kv("screen_shake", st.screen_shake.to_string());
     kv("display", st.display.key().to_string());
     kv("minimap", st.minimap_size.to_string());
@@ -367,6 +409,9 @@ pub fn encode_character(c: &CharacterSave) -> String {
     };
     kv("name", c.name.clone());
     kv("class", c.class.key().to_string());
+    if let Some(j) = c.job {
+        kv("job", j.key().to_string());
+    }
     kv("look", c.look.encode());
     kv("level", c.level.to_string());
     kv("exp", c.exp.to_string());
@@ -520,6 +565,9 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                 "layout" => a.settings.layout = Layout::from_key(&v).unwrap_or(Layout::Wasd),
                 "tap_up_jump" => a.settings.tap_up_to_jump = pb(&v),
                 "damage_numbers" => a.settings.show_damage_numbers = pb(&v),
+                "fx_companions" => a.settings.fx_companions = v.parse::<u8>().unwrap_or(FX_ALL).min(FX_OFF),
+                "fx_skills" => a.settings.fx_skills = v.parse::<u8>().unwrap_or(FX_ALL).min(FX_OFF),
+                "fx_weapons" => a.settings.fx_weapons = v.parse::<u8>().unwrap_or(FX_ALL).min(FX_OFF),
                 "screen_shake" => a.settings.screen_shake = pb(&v),
                 "display" => a.settings.display = DisplayMode::from_key(&v).unwrap_or(DisplayMode::Windowed),
                 "minimap" => a.settings.minimap_size = (pu(&v) as u8).min(MINIMAP_SIZES - 1),
@@ -529,6 +577,7 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
             Some(c) => match k {
                 "name" => c.name = v,
                 "class" => c.class = ClassId::from_key(&v).unwrap_or(ClassId::Novice),
+                "job" => c.job = crate::jobs::Job::from_key(&v),
                 "look" => {
                     if let Some(l) = Appearance::decode(&v) {
                         c.look = l;
@@ -578,6 +627,12 @@ pub fn decode_account(text: &str) -> Result<Account, String> {
                 "hotbar" => {
                     let mut h: Vec<HotbarSlot> = v.split_whitespace().map(HotbarSlot::decode).collect();
                     h.resize(HOTBAR_SLOTS, HotbarSlot::Empty);
+                    // 0.14.0: Starfall became Meteor
+                    for s in h.iter_mut() {
+                        if *s == HotbarSlot::Skill("starfall".into()) {
+                            *s = HotbarSlot::Skill("meteor".into());
+                        }
+                    }
                     c.hotbar = h;
                 }
                 "tally" => c.tally = crate::achievements::Tally::decode(&v),
@@ -788,7 +843,7 @@ mod tests {
         c.active_pet = Some(0);
         let back = decode_character(&encode_character(&c)).unwrap();
         assert_eq!(back, c);
-        let st = Settings { layout: Layout::ClassicMmo, minimap_size: 1, ..Default::default() };
+        let st = Settings { layout: Layout::ClassicMmo, minimap_size: 1, fx_companions: FX_MINE, fx_skills: FX_OFF, ..Default::default() };
         assert_eq!(decode_settings(&encode_settings(&st)), st);
         assert!(decode_character("garbage").is_none());
     }

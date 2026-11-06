@@ -464,3 +464,125 @@ fn a_party_shares_a_private_vault_with_tougher_monsters() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+/// Like `start`, with some characters already in admins.txt.
+fn start_with_admins(name: &str, admins: &[&str]) -> Running {
+    let dir = std::env::temp_dir().join(format!("galebound_test_{}_{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("admins.txt"), admins.join("\n")).unwrap();
+    let cfg = Config { port: 0, max_players: 16, data_dir: dir.clone(), motd: "test".into() };
+    let mut s = Server::bind(cfg).unwrap();
+    let port = s.port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let st = stop.clone();
+    let handle = std::thread::spawn(move || s.run(st, None));
+    Running { port, stop, handle: Some(handle), dir }
+}
+
+#[test]
+fn admins_run_commands_and_others_cant() {
+    let r = start_with_admins("admin", &["chief"]);
+    let (mut a, mut b, mut c) = (connect(&r), connect(&r), connect(&r));
+    join(&mut a, "chief@test.com", "Chief");
+    wait(&mut a, "admin list", |m| matches!(m, ServerMsg::Admins { names } if names == &vec!["Chief".to_string()]));
+    let _ = join(&mut b, "bo@test.com", "Bobo");
+    let idc = join(&mut c, "cy@test.com", "Cyra");
+    for (cl, x) in [(&a, 300.0), (&b, 330.0), (&c, 360.0)] {
+        cl.send(&pos("whistling_fields", x, 640.0, false));
+    }
+    // give and gold reach the player as grants
+    a.send(&ClientMsg::Admin { cmd: "give Bobo elixir 3".into() });
+    wait(&mut b, "admin gift", |m| matches!(m, ServerMsg::Grant { items, .. } if items == &vec![("elixir".to_string(), 3)]));
+    wait(&mut a, "admin log", |m| matches!(m, ServerMsg::AdminLog { text } if text.contains("gave Bobo 3x")));
+    // a non-admin gets nothing
+    b.send(&ClientMsg::Admin { cmd: "gold me 9999".into() });
+    system_text(&mut b, "refused", "Only admins");
+    // summon, heal and the player list
+    a.send(&ClientMsg::Admin { cmd: "summon Bobo".into() });
+    wait(&mut b, "summoned", |m| matches!(m, ServerMsg::AdminDo { action, map, .. } if action == "tp" && map == "whistling_fields"));
+    a.send(&ClientMsg::Admin { cmd: "players".into() });
+    wait(&mut a, "player list", |m| matches!(m, ServerMsg::AdminPlayers(rows) if rows.len() == 3 && rows.iter().any(|r| r.name == "Chief" && r.admin)));
+    // mute: Cy's chat goes nowhere
+    a.send(&ClientMsg::Admin { cmd: "mute Cyra 5".into() });
+    system_text(&mut c, "muted", "muted you");
+    c.send(&ClientMsg::Chat { text: "hello?".into() });
+    system_text(&mut c, "mute notice", "You're muted");
+    a.send(&ClientMsg::Chat { text: "marker".into() });
+    wait(&mut b, "chief's chat", |m| matches!(m, ServerMsg::Chat { from, .. } if from == "Chief"));
+    // passing the role on: everyone hears about it
+    a.send(&ClientMsg::Admin { cmd: "admin Bobo".into() });
+    wait(&mut c, "new admin list", |m| matches!(m, ServerMsg::Admins { names } if names.len() == 2 && names.contains(&"Bobo".to_string())));
+    b.send(&ClientMsg::Admin { cmd: "unadmin Bobo".into() });
+    wait(&mut b, "can't unadmin yourself", |m| matches!(m, ServerMsg::AdminLog { text } if text.contains("can't remove your own")));
+    // kick
+    a.send(&ClientMsg::Admin { cmd: "kick Cyra spamming".into() });
+    wait(&mut c, "kicked", |m| matches!(m, ServerMsg::Error { text } if text.contains("kicked by Chief: spamming")));
+    wait(&mut a, "cy left", |m| matches!(m, ServerMsg::PlayerGone { id } if *id == idc));
+    let saved = std::fs::read_to_string(r.dir.join("admins.txt")).unwrap();
+    assert!(saved.contains("bobo") && saved.contains("chief"));
+}
+
+#[test]
+fn duels_count_down_pass_hits_and_end() {
+    use galebound_core::net::{DUEL_COUNTDOWN, DUEL_FIGHT, DUEL_OVER, INV_DUEL};
+    let r = start("duel", 16);
+    let (mut a, mut b) = (connect(&r), connect(&r));
+    let ida = join(&mut a, "da@test.com", "Duela");
+    let idb = join(&mut b, "db@test.com", "Duelb");
+    a.send(&pos("whistling_fields", 300.0, 640.0, false));
+    b.send(&pos("whistling_fields", 360.0, 640.0, false));
+    wait(&mut a, "see b", |m| matches!(m, ServerMsg::PlayerPos(p) if p.id == idb));
+    // a hit before the duel is ignored
+    a.send(&ClientMsg::DuelHit { target: idb, damage: 10.0, kbx: 0.0, kby: 0.0 });
+    soc(&a, SocialCmd::DuelRequest { name: "Duelb".into() });
+    wait(&mut b, "challenge", |m| matches!(m, ServerMsg::Invite { kind, from, .. } if *kind == INV_DUEL && from == "Duela"));
+    soc(&b, SocialCmd::DuelAnswer { from: "Duela".into(), accept: true });
+    wait(&mut a, "countdown", |m| matches!(m, ServerMsg::Duel { foe, phase, .. } if *foe == idb && *phase == DUEL_COUNTDOWN));
+    wait(&mut b, "fight", |m| matches!(m, ServerMsg::Duel { foe, phase, .. } if *foe == ida && *phase == DUEL_FIGHT));
+    let mut early = false;
+    for m in b.poll() {
+        early |= matches!(m, ServerMsg::DuelHit { .. });
+    }
+    assert!(!early, "the hit before the duel got through");
+    a.send(&ClientMsg::DuelHit { target: idb, damage: 25.0, kbx: 300.0, kby: -200.0 });
+    wait(&mut b, "duel hit", |m| matches!(m, ServerMsg::DuelHit { from, damage, .. } if *from == ida && *damage == 25.0));
+    // b runs out of HP: their game yields
+    soc(&b, SocialCmd::DuelYield);
+    wait(&mut a, "won", |m| matches!(m, ServerMsg::Duel { phase, name, .. } if *phase == DUEL_OVER && name == "Duela"));
+    wait(&mut b, "lost", |m| matches!(m, ServerMsg::Duel { phase, name, .. } if *phase == DUEL_OVER && name == "Duela"));
+    system_text(&mut b, "announced", "defeated Duelb in a duel");
+    // leaving the map mid-duel forfeits
+    soc(&a, SocialCmd::DuelRequest { name: "Duelb".into() });
+    wait(&mut b, "challenge 2", |m| matches!(m, ServerMsg::Invite { kind, .. } if *kind == INV_DUEL));
+    soc(&b, SocialCmd::DuelAnswer { from: "Duela".into(), accept: true });
+    wait(&mut a, "countdown 2", |m| matches!(m, ServerMsg::Duel { phase, .. } if *phase == DUEL_COUNTDOWN));
+    a.send(&pos("breezehollow", 300.0, 640.0, false));
+    wait(&mut b, "forfeit", |m| matches!(m, ServerMsg::Duel { phase, name, .. } if *phase == DUEL_OVER && name == "Duelb"));
+}
+
+/// 0.15.0: support abilities reach party members nearby, and nobody else.
+#[test]
+fn support_abilities_reach_the_party() {
+    let r = start("aid", 16);
+    let (mut a, mut b, mut c) = (connect(&r), connect(&r), connect(&r));
+    let _ida = join(&mut a, "aa@test.com", "Paladia");
+    let idb = join(&mut b, "ab@test.com", "Friendo");
+    let _idc = join(&mut c, "ac@test.com", "Strangr");
+    soc(&a, SocialCmd::PartyInvite { name: "Friendo".into() });
+    wait(&mut b, "party invite", |m| matches!(m, ServerMsg::Invite { kind, .. } if *kind == INV_PARTY));
+    soc(&b, SocialCmd::PartyAnswer { from: "Paladia".into(), accept: true });
+    wait(&mut a, "party", |m| matches!(m, ServerMsg::Party(Some(p)) if p.members.len() == 2));
+    for (cl, x) in [(&a, 300.0), (&b, 400.0), (&c, 420.0)] {
+        cl.send(&pos("whistling_fields", x, 640.0, false));
+    }
+    wait(&mut a, "see b", |m| matches!(m, ServerMsg::PlayerPos(p) if p.id == idb));
+    // not a support skill: ignored
+    a.send(&ClientMsg::Aid { skill: "power_strike".into(), x: 300.0, y: 600.0 });
+    a.send(&ClientMsg::Aid { skill: "sanctuary".into(), x: 300.0, y: 600.0 });
+    let m = wait(&mut b, "aid", |m| matches!(m, ServerMsg::Aid { .. }));
+    assert_eq!(m, ServerMsg::Aid { from: "Paladia".into(), skill: "sanctuary".into() });
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(!c.poll().iter().any(|m| matches!(m, ServerMsg::Aid { .. })), "strangers don't get party heals");
+    assert!(!b.poll().iter().any(|m| matches!(m, ServerMsg::Aid { skill, .. } if skill == "power_strike")));
+}

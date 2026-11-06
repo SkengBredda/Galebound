@@ -1,6 +1,6 @@
 //! Character creation: customise body, hair, face, clothes, shoes and skin
 //! tone with a live animated preview. Everyone starts as a Novice; the
-//! left panel previews the five classes you can choose at level 10.
+//! left panel previews the six classes you can choose at level 10.
 
 use crate::gfx::{self, rgb, rgba};
 use crate::charsprite::{self, Anim};
@@ -91,10 +91,10 @@ impl CreateScreen {
         );
         for (i, &c) in EVERY_CLASS.iter().enumerate() {
             let info = c.info();
-            let by = ly + 112.0 + i as f32 * 40.0;
+            let by = ly + 104.0 + i as f32 * 35.0;
             let style = if c == self.class { ButtonStyle::Primary } else { ButtonStyle::Secondary };
             let label = if c == ClassId::Novice { "Novice (you start here)".to_string() } else { info.name.to_string() };
-            if widgets::button(&ui, lx + 24.0, by, lw - 48.0, 34.0, &label, style, true) {
+            if widgets::button(&ui, lx + 24.0, by, lw - 48.0, 31.0, &label, style, true) {
                 self.class = c;
                 self.anim_start = t;
             }
@@ -119,7 +119,15 @@ impl CreateScreen {
         }
         if self.class != ClassId::Novice {
             let town = galebound_core::world::load_map(info.town).map(|m| m.name).unwrap_or("its town");
-            gfx::text_wrapped(&format!("Taught in {} from level {}.", town, CLASS_CHANGE_LEVEL), lx + 26.0, y + 4.0, lw - 52.0, 14.0, widgets::accent());
+            let h = gfx::text_wrapped(&format!("Taught in {} from level {}.", town, CLASS_CHANGE_LEVEL), lx + 26.0, y + 4.0, lw - 52.0, 14.0, widgets::accent());
+            gfx::text_wrapped(
+                &format!("At level {}: advance into a {} or a {}.", galebound_core::jobs::JOB_LEVEL, info.advancements[0], info.advancements[1]),
+                lx + 26.0,
+                y + 8.0 + h,
+                lw - 52.0,
+                14.0,
+                widgets::ink_soft(),
+            );
         }
 
         // ------------------------------------------------ preview (centre)

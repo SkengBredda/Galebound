@@ -20,6 +20,15 @@ pub enum Theme {
     Arcane,
     /// Inside a building (shops).
     Interior,
+    // 0.15.0
+    /// Sun-baked canyon country (Dustwind Gulch).
+    Desert,
+    /// Snowfields and glaciers.
+    Frost,
+    /// Volcanic ash and lava.
+    Ember,
+    /// Floating isles above the clouds (Skyreach).
+    Sky,
 }
 
 pub use crate::enemies::EnemyKind;
@@ -226,7 +235,8 @@ fn plat(x: f32, top: f32, w: f32) -> Aabb {
     Aabb::new(x, top, w, 14.0)
 }
 
-/// At most this many flying monsters live on one map at a time.
+/// At most this many flying monsters come from one map's spawn zones (0.14.0:
+/// only dungeons have flyers at all - see `combat` tests).
 pub const MAX_FLYERS: usize = 4;
 
 pub fn load_map(key: &str) -> Option<Map> {
@@ -262,6 +272,12 @@ fn load_map_raw(key: &str) -> Option<Map> {
         crate::housing::HOUSE_MAP => Some(player_house()),
         VAULT_MAP => Some(tempest_vault()),
         other => {
+            if let Some(d) = highlands::DUNGEONS.iter().find(|d| d.map == other && d.map != VAULT_MAP) {
+                return Some(highlands::dungeon_map(d));
+            }
+            if other == highlands::CITADEL {
+                return Some(highlands::citadel(TOWNS.iter().find(|t| t.key == other).unwrap()));
+            }
             if let Some(w) = wild(other) {
                 return Some(wild_map(w));
             }
@@ -282,7 +298,8 @@ fn load_map_raw(key: &str) -> Option<Map> {
 
 /// Every map key, for tests and tools.
 pub fn all_map_keys() -> Vec<&'static str> {
-    let mut v = vec!["dawnwind_glade", "breezehollow", "whistling_fields", "thornvale_woods", "windcrag_cliffs", "wayfarers_crossroads", crate::housing::HOUSE_MAP, VAULT_MAP];
+    let mut v = vec!["dawnwind_glade", "breezehollow", "whistling_fields", "thornvale_woods", "windcrag_cliffs", "wayfarers_crossroads", crate::housing::HOUSE_MAP];
+    v.extend(highlands::DUNGEONS.iter().map(|d| d.map));
     v.extend(WILDS.iter().map(|w| w.key));
     for t in TOWNS {
         v.push(t.key);
@@ -749,7 +766,7 @@ fn windcrag_cliffs() -> Map {
         portal(4650.0, top, "windcrag_cliffs", 4400.0, "The Skyroad", Some("skyroad_open"), "The Skyroad beyond the summit isn't charted yet. (Next update!)"),
     ];
     let signs = vec![
-        Sign { x: 260.0, y: g, text: "Windcrag Cliffs. Galehawks dive from above - dodge when they screech!" },
+        Sign { x: 260.0, y: g, text: "Windcrag Cliffs. Galehawks charge along the ledges - dodge when they screech!" },
         Sign { x: 3180.0, y: top, text: "The Summit. Storms gather here." },
     ];
     let decos = vec![
@@ -926,6 +943,44 @@ pub const TOWNS: &[TownSpec] = &[
         ),
         flavour: &[DecoKind::Crystal, DecoKind::LanternPost, DecoKind::Crystal, DecoKind::Flowers],
     },
+    TownSpec {
+        key: "dustwind_gulch",
+        name: "Dustwind Gulch",
+        theme: Theme::Desert,
+        crossroads_x: 4650.0,
+        instructor: "instructor_dustwind",
+        instructor_title: "Gunslinger Instructor",
+        instructor_look: lk(0, 4, 1, 4, 2, 2, 4, 2, 5, 5),
+        inn: "inn_dustwind",
+        inn_look: lk(1, 7, 4, 0, 0, 3, 2, 3, 5, 3),
+        welcome: "Dustwind Gulch - a frontier town carved into the canyon. Gunslingers train at the Shooting Range at the east end.",
+        shops: shops(
+            ["dustwind_general", "dustwind_weapons", "dustwind_armor"],
+            ["dustwind_general_in", "dustwind_weapons_in", "dustwind_armor_in"],
+            ["Trader", "Gunsmith", "Leatherworker"],
+            [lk(1, 5, 2, 2, 2, 5, 4, 5, 5, 2), lk(0, 6, 1, 4, 2, 8, 4, 8, 5, 6), lk(1, 1, 3, 1, 2, 0, 2, 0, 5, 4)],
+        ),
+        flavour: &[DecoKind::Rock, DecoKind::Crate, DecoKind::Barrel, DecoKind::Fence],
+    },
+    TownSpec {
+        key: "skyreach_citadel",
+        name: "Skyreach Citadel",
+        theme: Theme::Sky,
+        crossroads_x: 0.0,
+        instructor: "grandmaster_aldric",
+        instructor_title: "Grandmaster - class advancement",
+        instructor_look: lk(0, 3, 9, 4, 4, 6, 4, 6, 3, 3),
+        inn: "inn_skyreach",
+        inn_look: lk(1, 9, 8, 0, 3, 6, 3, 6, 4, 1),
+        welcome: "Skyreach Citadel, the fortress above the clouds. Every road to glory starts here.",
+        shops: shops(
+            ["skyreach_general", "skyreach_weapons", "skyreach_armor"],
+            ["skyreach_general_in", "skyreach_weapons_in", "skyreach_armor_in"],
+            ["Apothecary", "Armsmaster", "Tailor"],
+            [lk(1, 5, 9, 2, 3, 4, 3, 4, 4, 2), lk(0, 6, 0, 4, 4, 1, 4, 1, 3, 6), lk(1, 8, 6, 2, 3, 6, 2, 6, 4, 0)],
+        ),
+        flavour: &[DecoKind::Banner, DecoKind::Lamp, DecoKind::Crystal, DecoKind::Banner],
+    },
 ];
 
 const TOWN_W: f32 = 3800.0;
@@ -943,6 +998,8 @@ pub fn pet_keeper_id(town: &str) -> &'static str {
         "shadowmere" => "pet_keeper_shadowmere",
         "tempest_monastery" => "pet_keeper_tempest_monastery",
         "leafwhisper" => "pet_keeper_leafwhisper",
+        "dustwind_gulch" => "pet_keeper_dustwind_gulch",
+        "skyreach_citadel" => "pet_keeper_skyreach_citadel",
         _ => "pet_keeper_starfall_spire",
     }
 }
@@ -1090,7 +1147,7 @@ fn shop_interior(t: &'static TownSpec, i: usize) -> Map {
 fn crossroads() -> Map {
     use DecoKind::*;
     let g = GROUND;
-    let w = 4600.0;
+    let w = 5600.0;
     let solids = vec![ground(0.0, w, g), Aabb::new(-40.0, 0.0, 40.0, 900.0), Aabb::new(w, 0.0, 40.0, 900.0)];
     let platforms = vec![plat(1250.0, g - 130.0, 180.0), plat(2780.0, g - 130.0, 180.0)];
     let npcs = vec![
@@ -1098,14 +1155,18 @@ fn crossroads() -> Map {
         npc(VAULT_NPC, "Maren", "Vault Delver - co-op dungeon", 4300.0, g, look(1, 0, 8, 3, 5, 2, 4, 2, 3, 4), true),
     ];
     let mut portals = vec![portal(40.0, g, "breezehollow", 3745.0, "To Breezehollow", None, "")];
-    let mut signs = vec![Sign { x: 300.0, y: g, text: "Wayfarer's Crossroads. Five roads lead to the five class towns - each has shops, an inn and a class instructor." }];
+    let mut signs = vec![Sign { x: 300.0, y: g, text: "Wayfarer's Crossroads. Six roads lead to the six class towns - each has shops, an inn and a class instructor. The far east road climbs to Skyreach." }];
     let mut decos = vec![deco(Campfire, 640.0, g, 1.0, 1), deco(Tent, 760.0, g, 1.0, 0)];
-    for t in TOWNS {
+    for t in TOWNS.iter().filter(|t| t.crossroads_x > 0.0) {
         portals.push(portal(t.crossroads_x, g, town_road(t.key), 220.0, road_label(t.key), None, ""));
         decos.push(deco(Signpost, t.crossroads_x - 40.0, g, 1.0, 1));
         signs.push(Sign { x: t.crossroads_x + 160.0, y: g, text: road_sign(t.key) });
     }
     signs.push(Sign { x: 4120.0, y: g, text: "The Tempest Vault (Lv 20+): a co-op dungeon. Gather your party and speak with Maren. Gold and Red tier gear await." });
+    // 0.15.0: the high road to the Skyreach Highlands
+    portals.push(portal(w - 130.0, g, "cloudstep_pass", 220.0, "East: Cloudstep Pass to Skyreach (Lv 28+)", None, ""));
+    signs.push(Sign { x: w - 330.0, y: g, text: "East: Cloudstep Pass climbs to Skyreach Citadel and the Highlands (Lv 28-60). Level 30 adventurers advance their class there." });
+    decos.push(deco(Signpost, w - 170.0, g, 1.0, 1));
     decos.push(deco(VaultDoor, 4470.0, g, 1.0, 0));
     let props = [(TreeRound, 1100.0), (Haystack, 1450.0), (Rock, 2000.0), (Pine, 2650.0), (Flowers, 2900.0), (TreeTall, 3500.0), (Crystal, 4000.0), (Bush, 4200.0)];
     for (k, x) in props {
@@ -1141,6 +1202,7 @@ fn road_label(town: &str) -> &'static str {
         "shadowmere" => "Road to Shadowmere (Duskblade)",
         "tempest_monastery" => "Road to Tempest Monastery (Stormfist)",
         "leafwhisper" => "Road to Leafwhisper (Windrunner)",
+        "dustwind_gulch" => "Road to Dustwind Gulch (Gunslinger)",
         _ => "Road to Starfall Spire (Aethermancer)",
     }
 }
@@ -1151,6 +1213,7 @@ fn road_sign(town: &str) -> &'static str {
         "shadowmere" => "Shadowmere: home of the Duskblade. Mind your purse.",
         "tempest_monastery" => "Tempest Monastery: home of the Stormfist. Mind the stairs.",
         "leafwhisper" => "Leafwhisper: home of the Windrunner. Up in the trees.",
+        "dustwind_gulch" => "Dustwind Gulch: home of the Gunslinger. Keep your hands where they can see them.",
         _ => "Starfall Spire: home of the Aethermancer. Where stars fall.",
     }
 }
@@ -1202,8 +1265,19 @@ pub const WILDS: &[WildSpec] = &[
     WildSpec { key: "starfall_road", name: "Starlit Causeway", theme: Theme::Arcane, width: 4200.0, west: ("wayfarers_crossroads", 3945.0, "To Wayfarer's Crossroads"), east: Some(("starfall_spire", 220.0, "To Starfall Spire")), ground: [E::Starwool, E::Starwool], shelf: E::Gloomwisp, high: E::Starwool, levels: (12, 13), seed: 5, label: "", sign: "" },
     WildSpec { key: "old_quarry", name: "Old Quarry", theme: Theme::Cliffs, width: 5000.0, west: ("ironhold", 3700.0, "To Ironhold"), east: None, ground: [E::QuarryCrab, E::Ironbeak], shelf: E::QuarryCrab, high: E::QuarryCrab, levels: (17, 20), seed: 6, label: "Hunting Ground: Old Quarry (Lv 17-20)", sign: "East: the Old Quarry hunting ground, Lv 17-20. Crabs the size of carts." },
     WildSpec { key: "mournful_marsh", name: "Mournful Marsh", theme: Theme::Woods, width: 5000.0, west: ("shadowmere", 3700.0, "To Shadowmere"), east: None, ground: [E::MireStump, E::Shadecap], shelf: E::Gloomwisp, high: E::MireStump, levels: (18, 21), seed: 7, label: "Hunting Ground: Mournful Marsh (Lv 18-21)", sign: "East: the Mournful Marsh hunting ground, Lv 18-21. Don't follow the lights." },
-    WildSpec { key: "thunder_peaks", name: "Thunder Peaks", theme: Theme::Cliffs, width: 5000.0, west: ("tempest_monastery", 3700.0, "To Tempest Monastery"), east: None, ground: [E::Stormwool, E::Thunderhawk], shelf: E::Thunderhawk, high: E::Thunderhawk, levels: (19, 22), seed: 8, label: "Hunting Ground: Thunder Peaks (Lv 19-22)", sign: "East: Thunder Peaks hunting ground, Lv 19-22. Thunderhawks dive from the clouds." },
+    WildSpec { key: "thunder_peaks", name: "Thunder Peaks", theme: Theme::Cliffs, width: 5000.0, west: ("tempest_monastery", 3700.0, "To Tempest Monastery"), east: None, ground: [E::Stormwool, E::Thunderhawk], shelf: E::Thunderhawk, high: E::Thunderhawk, levels: (19, 22), seed: 8, label: "Hunting Ground: Thunder Peaks (Lv 19-22)", sign: "East: Thunder Peaks hunting ground, Lv 19-22. Thunderhawks charge along the ridges." },
     WildSpec { key: "canopy_heights", name: "Canopy Heights", theme: Theme::Glade, width: 5000.0, west: ("leafwhisper", 3700.0, "To Leafwhisper"), east: None, ground: [E::Barkstump, E::Thornling], shelf: E::Briarbeak, high: E::Barkstump, levels: (16, 19), seed: 9, label: "Hunting Ground: Canopy Heights (Lv 16-19)", sign: "East: Canopy Heights hunting ground, Lv 16-19. Climb the vines to the treetops." },
+    // 0.15.0: Dustwind Gulch
+    WildSpec { key: "dustwind_road", name: "Sunscorch Trail", theme: Theme::Desert, width: 4200.0, west: ("wayfarers_crossroads", 4595.0, "To Wayfarer's Crossroads"), east: Some(("dustwind_gulch", 220.0, "To Dustwind Gulch")), ground: [E::Cactling, E::DuneScuttler], shelf: E::Sandwhirl, high: E::DuneScuttler, levels: (11, 13), seed: 11, label: "", sign: "" },
+    WildSpec { key: "rattlesnake_mesa", name: "Rattlesnake Mesa", theme: Theme::Desert, width: 5000.0, west: ("dustwind_gulch", 3700.0, "To Dustwind Gulch"), east: None, ground: [E::MesaScorpion, E::Thornback], shelf: E::DustDevil, high: E::MesaScorpion, levels: (18, 21), seed: 12, label: "Hunting Ground: Rattlesnake Mesa (Lv 18-21)", sign: "East: the Rattlesnake Mesa hunting ground, Lv 18-21. Mind the stingers." },
+    // 0.15.0: the Skyreach Highlands (Lv 28-60)
+    WildSpec { key: "cloudstep_pass", name: "Cloudstep Pass", theme: Theme::Frost, width: 5200.0, west: ("wayfarers_crossroads", 5300.0, "To Wayfarer's Crossroads"), east: Some(("skyreach_citadel", 220.0, "To Skyreach Citadel")), ground: [E::Snowpuff, E::Snowpuff], shelf: E::IceSprite, high: E::Rimeclaw, levels: (28, 31), seed: 13, label: "", sign: "" },
+    WildSpec { key: "frostveil_tundra", name: "Frostveil Tundra", theme: Theme::Frost, width: 5600.0, west: ("skyreach_citadel", 3700.0, "To Skyreach Citadel"), east: Some(("glacier_hollow", 220.0, "East: Glacier Hollow (Lv 35-40)")), ground: [E::Rimeclaw, E::Frostling], shelf: E::IceSprite, high: E::Frostling, levels: (31, 35), seed: 14, label: "Hunting Ground: Frostveil Tundra (Lv 31-35)", sign: "East: the Frostveil Tundra hunting ground, Lv 31-35. Frostlings hunt in packs." },
+    WildSpec { key: "glacier_hollow", name: "Glacier Hollow", theme: Theme::Frost, width: 5600.0, west: ("frostveil_tundra", 5400.0, "To Frostveil Tundra"), east: None, ground: [E::GlacialYeti, E::RimeGolem], shelf: E::FrostWisp, high: E::RimeGolem, levels: (35, 40), seed: 15, label: "", sign: "" },
+    WildSpec { key: "emberfall_caldera", name: "Emberfall Caldera", theme: Theme::Ember, width: 5600.0, west: ("skyreach_citadel", 4600.0, "To Skyreach Citadel"), east: Some(("cinderspire_wastes", 220.0, "East: Cinderspire Wastes (Lv 45-50)")), ground: [E::CinderSalamander, E::MagmaCrab], shelf: E::AshenStump, high: E::EmberGolem, levels: (40, 45), seed: 16, label: "East: Emberfall Caldera (Lv 40-45)", sign: "East: Emberfall Caldera, Lv 40-45. Salamanders spit fire - and the ground is hot." },
+    WildSpec { key: "cinderspire_wastes", name: "Cinderspire Wastes", theme: Theme::Ember, width: 5600.0, west: ("emberfall_caldera", 5400.0, "To Emberfall Caldera"), east: None, ground: [E::LavaSalamander, E::FlameScorpion], shelf: E::ObsidianGolem, high: E::ObsidianGolem, levels: (45, 50), seed: 17, label: "", sign: "" },
+    WildSpec { key: "stormcrown_isles", name: "Stormcrown Isles", theme: Theme::Sky, width: 5600.0, west: ("skyreach_citadel", 1750.0, "To Skyreach Citadel"), east: Some(("shattered_heavens", 220.0, "East: The Shattered Heavens (Lv 55-60)")), ground: [E::Stormbeak, E::CloudRam], shelf: E::ZephyrWyrmling, high: E::ThunderGolem, levels: (50, 55), seed: 18, label: "Skybridge: Stormcrown Isles (Lv 50-55)", sign: "The Skybridge: the Stormcrown Isles, Lv 50-55. Don't look down." },
+    WildSpec { key: "shattered_heavens", name: "The Shattered Heavens", theme: Theme::Sky, width: 5600.0, west: ("stormcrown_isles", 5400.0, "To Stormcrown Isles"), east: None, ground: [E::StarWyrmling, E::VoidScorpion], shelf: E::StarWyrmling, high: E::AstralGolem, levels: (55, 60), seed: 19, label: "", sign: "" },
     WildSpec { key: "shattered_observatory", name: "Shattered Observatory", theme: Theme::Arcane, width: 5000.0, west: ("starfall_spire", 3700.0, "To Starfall Spire"), east: None, ground: [E::AstralCrab, E::Starwool], shelf: E::Voidgust, high: E::AstralCrab, levels: (21, 24), seed: 10, label: "Hunting Ground: Shattered Observatory (Lv 21-24)", sign: "East: the Shattered Observatory hunting ground, Lv 21-24. Something fell from the stars." },
 ];
 
@@ -1216,6 +1290,8 @@ pub fn town_road(town: &str) -> &'static str {
         "ironhold" => "ironhold_road",
         "shadowmere" => "shadowmere_road",
         "tempest_monastery" => "tempest_road",
+        "dustwind_gulch" => "dustwind_road",
+        "skyreach_citadel" => "cloudstep_pass",
         "leafwhisper" => "leafwhisper_road",
         _ => "starfall_road",
     }
@@ -1226,6 +1302,8 @@ pub fn town_hunt(town: &str) -> &'static str {
         "ironhold" => "old_quarry",
         "shadowmere" => "mournful_marsh",
         "tempest_monastery" => "thunder_peaks",
+        "dustwind_gulch" => "rattlesnake_mesa",
+        "skyreach_citadel" => "frostveil_tundra",
         "leafwhisper" => "canopy_heights",
         _ => "shattered_observatory",
     }
@@ -1236,6 +1314,8 @@ fn road_back_label(town: &str) -> &'static str {
         "ironhold" => "West: Ironhold Road",
         "shadowmere" => "West: Duskwood Path",
         "tempest_monastery" => "West: Monastery Steps",
+        "dustwind_gulch" => "West: Sunscorch Trail",
+        "skyreach_citadel" => "West: Cloudstep Pass",
         "leafwhisper" => "West: Greenway Trail",
         _ => "West: Starlit Causeway",
     }
@@ -1249,12 +1329,14 @@ pub fn waystone_id(map: &str) -> &'static str {
         "shadowmere" => "waystone_shadowmere",
         "tempest_monastery" => "waystone_tempest_monastery",
         "leafwhisper" => "waystone_leafwhisper",
+        "dustwind_gulch" => "waystone_dustwind_gulch",
+        "skyreach_citadel" => "waystone_skyreach_citadel",
         _ => "waystone_starfall_spire",
     }
 }
 
 /// All maps with a waystone, in travel-menu order.
-pub const WAYSTONES: &[&str] = &["breezehollow", "ironhold", "shadowmere", "tempest_monastery", "leafwhisper", "starfall_spire"];
+pub const WAYSTONES: &[&str] = &["breezehollow", "ironhold", "shadowmere", "tempest_monastery", "leafwhisper", "starfall_spire", "dustwind_gulch", "skyreach_citadel"];
 
 fn climb_kind(theme: Theme) -> ClimbKind {
     match theme {
@@ -1375,37 +1457,58 @@ pub enum NodeKind {
     Dungeon,
 }
 
-/// A location on the world map. `pos` is in a 960x560 map space.
+/// A location on the world map. `pos` is in a 960x560 map space; each
+/// region (0 the Gale Lowlands, 1 the Skyreach Highlands) has its own.
 pub struct WorldNode {
     pub key: &'static str,
     pub pos: (f32, f32),
     pub levels: Option<(u32, u32)>,
     pub kind: NodeKind,
+    pub region: u8,
 }
 
+/// World map regions.
+pub const REGIONS: &[&str] = &["Gale Lowlands", "Skyreach Highlands"];
+
 pub const WORLD: &[WorldNode] = &[
-    WorldNode { key: "dawnwind_glade", pos: (110.0, 500.0), levels: Some((1, 7)), kind: NodeKind::Field },
-    WorldNode { key: "breezehollow", pos: (310.0, 500.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: "whistling_fields", pos: (510.0, 500.0), levels: Some((5, 8)), kind: NodeKind::Field },
-    WorldNode { key: "thornvale_woods", pos: (700.0, 500.0), levels: Some((9, 12)), kind: NodeKind::Field },
-    WorldNode { key: "windcrag_cliffs", pos: (880.0, 500.0), levels: Some((12, 16)), kind: NodeKind::Field },
-    WorldNode { key: "wayfarers_crossroads", pos: (500.0, 390.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: VAULT_MAP, pos: (690.0, 390.0), levels: Some((20, 25)), kind: NodeKind::Dungeon },
-    WorldNode { key: "ironhold_road", pos: (130.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field },
-    WorldNode { key: "ironhold", pos: (110.0, 180.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: "old_quarry", pos: (110.0, 70.0), levels: Some((17, 20)), kind: NodeKind::Hunting },
-    WorldNode { key: "shadowmere_road", pos: (310.0, 290.0), levels: Some((11, 13)), kind: NodeKind::Field },
-    WorldNode { key: "shadowmere", pos: (300.0, 180.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: "mournful_marsh", pos: (300.0, 70.0), levels: Some((18, 21)), kind: NodeKind::Hunting },
-    WorldNode { key: "tempest_road", pos: (500.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field },
-    WorldNode { key: "tempest_monastery", pos: (500.0, 180.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: "thunder_peaks", pos: (500.0, 70.0), levels: Some((19, 22)), kind: NodeKind::Hunting },
-    WorldNode { key: "leafwhisper_road", pos: (690.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field },
-    WorldNode { key: "leafwhisper", pos: (700.0, 180.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: "canopy_heights", pos: (700.0, 70.0), levels: Some((16, 19)), kind: NodeKind::Hunting },
-    WorldNode { key: "starfall_road", pos: (870.0, 290.0), levels: Some((12, 13)), kind: NodeKind::Field },
-    WorldNode { key: "starfall_spire", pos: (880.0, 180.0), levels: None, kind: NodeKind::Town },
-    WorldNode { key: "shattered_observatory", pos: (870.0, 70.0), levels: Some((21, 24)), kind: NodeKind::Hunting },
+    // the Gale Lowlands
+    WorldNode { key: "dawnwind_glade", pos: (110.0, 500.0), levels: Some((1, 7)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "breezehollow", pos: (310.0, 500.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "whistling_fields", pos: (510.0, 500.0), levels: Some((5, 8)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "thornvale_woods", pos: (700.0, 500.0), levels: Some((9, 12)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "windcrag_cliffs", pos: (880.0, 500.0), levels: Some((12, 16)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "wayfarers_crossroads", pos: (480.0, 390.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: VAULT_MAP, pos: (660.0, 390.0), levels: Some((20, 25)), kind: NodeKind::Dungeon, region: 0 },
+    WorldNode { key: "ironhold_road", pos: (90.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "ironhold", pos: (90.0, 180.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "old_quarry", pos: (90.0, 70.0), levels: Some((17, 20)), kind: NodeKind::Hunting, region: 0 },
+    WorldNode { key: "shadowmere_road", pos: (250.0, 290.0), levels: Some((11, 13)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "shadowmere", pos: (250.0, 180.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "mournful_marsh", pos: (250.0, 70.0), levels: Some((18, 21)), kind: NodeKind::Hunting, region: 0 },
+    WorldNode { key: "tempest_road", pos: (410.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "tempest_monastery", pos: (410.0, 180.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "thunder_peaks", pos: (410.0, 70.0), levels: Some((19, 22)), kind: NodeKind::Hunting, region: 0 },
+    WorldNode { key: "leafwhisper_road", pos: (570.0, 290.0), levels: Some((10, 12)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "leafwhisper", pos: (570.0, 180.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "canopy_heights", pos: (570.0, 70.0), levels: Some((16, 19)), kind: NodeKind::Hunting, region: 0 },
+    WorldNode { key: "starfall_road", pos: (730.0, 290.0), levels: Some((12, 13)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "starfall_spire", pos: (730.0, 180.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "shattered_observatory", pos: (730.0, 70.0), levels: Some((21, 24)), kind: NodeKind::Hunting, region: 0 },
+    WorldNode { key: "dustwind_road", pos: (890.0, 290.0), levels: Some((11, 13)), kind: NodeKind::Field, region: 0 },
+    WorldNode { key: "dustwind_gulch", pos: (890.0, 180.0), levels: None, kind: NodeKind::Town, region: 0 },
+    WorldNode { key: "rattlesnake_mesa", pos: (890.0, 70.0), levels: Some((18, 21)), kind: NodeKind::Hunting, region: 0 },
+    // the Skyreach Highlands
+    WorldNode { key: "cloudstep_pass", pos: (110.0, 480.0), levels: Some((28, 31)), kind: NodeKind::Field, region: 1 },
+    WorldNode { key: "skyreach_citadel", pos: (330.0, 380.0), levels: None, kind: NodeKind::Town, region: 1 },
+    WorldNode { key: "frostveil_tundra", pos: (130.0, 250.0), levels: Some((31, 35)), kind: NodeKind::Hunting, region: 1 },
+    WorldNode { key: "glacier_hollow", pos: (110.0, 90.0), levels: Some((35, 40)), kind: NodeKind::Hunting, region: 1 },
+    WorldNode { key: "frozen_throne", pos: (290.0, 150.0), levels: Some((35, 40)), kind: NodeKind::Dungeon, region: 1 },
+    WorldNode { key: "emberfall_caldera", pos: (560.0, 470.0), levels: Some((40, 45)), kind: NodeKind::Hunting, region: 1 },
+    WorldNode { key: "cinderspire_wastes", pos: (820.0, 470.0), levels: Some((45, 50)), kind: NodeKind::Hunting, region: 1 },
+    WorldNode { key: "cinder_sanctum", pos: (700.0, 340.0), levels: Some((45, 50)), kind: NodeKind::Dungeon, region: 1 },
+    WorldNode { key: "stormcrown_isles", pos: (520.0, 210.0), levels: Some((50, 55)), kind: NodeKind::Hunting, region: 1 },
+    WorldNode { key: "shattered_heavens", pos: (760.0, 110.0), levels: Some((55, 60)), kind: NodeKind::Hunting, region: 1 },
+    WorldNode { key: "celestial_spire", pos: (880.0, 250.0), levels: Some((55, 60)), kind: NodeKind::Dungeon, region: 1 },
 ];
 
 /// The world-map node for a map (shop interiors belong to their town).
@@ -1487,6 +1590,7 @@ mod tests {
         use crate::classes::ALL_CLASSES;
         for &c in ALL_CLASSES {
             let town = load_map(c.info().town).unwrap_or_else(|| panic!("no town for {:?}", c));
+            assert!(WAYSTONES.contains(&town.key));
             let instructor = town.npcs.iter().find(|n| crate::quests::instructor_class(n.id) == Some(c));
             assert!(instructor.is_some(), "{} has no {:?} instructor", town.key, c);
             assert!(town.npcs.iter().any(|n| n.id.starts_with("inn_")), "{} has no inn", town.key);
@@ -1506,6 +1610,10 @@ mod tests {
     }
 }
 
+#[path = "world_highlands.rs"]
+pub mod highlands;
+pub use highlands::{dungeon, dungeon_for_npc, is_dungeon, is_dungeon_boss, DungeonSpec, CITADEL, DUNGEONS};
+
 // ------------------------------------------------------------------ 0.13.0: house and dungeon
 
 /// Story flag set when you own a house.
@@ -1518,8 +1626,12 @@ pub const VAULT_NPC: &str = "delver_maren";
 pub const VAULT_LEVEL: u32 = 20;
 /// Set when the Gatekeeper falls: opens the inner vault (reset each run).
 pub const VAULT_GATE_FLAG: &str = "vault_gate";
-/// Where the inner gate stands.
-pub const VAULT_GATE_X: f32 = 3480.0;
+/// Where the inner gate stands (the right wall of the Gatekeeper's arena).
+pub const VAULT_GATE_X: f32 = 3960.0;
+/// Middle of each boss arena (where the boss stands).
+pub const GK_ARENA_X: f32 = 3300.0;
+pub const SW_ARENA_X: f32 = 7000.0;
+const VAULT_WIDTH: f32 = 8800.0;
 
 /// Your house: one long room with furniture spots (see `housing::SPOTS`).
 fn player_house() -> Map {
@@ -1565,80 +1677,124 @@ fn player_house() -> Map {
     }
 }
 
-/// The Tempest Vault: a co-op dungeon in three parts. The Hall of Wisps
-/// leads to the Gatekeeper, whose defeat opens the inner gate; the Vault
-/// leads to the Stormwarden. Monsters don't respawn, and each party gets
-/// its own copy of the vault.
+/// The Tempest Vault: a co-op dungeon. The Hall of Wisps (steps, a
+/// sunken crypt, flyers overhead) leads to the Gatekeeper's arena; its
+/// defeat opens the inner gate. The Vault (a sunken gallery and terraces)
+/// leads to the Stormwarden's arena. Each boss is walled into its arena
+/// (pillars you climb over) and has platforms for its mechanics. Monsters
+/// don't respawn, and each party gets its own copy of the vault.
 fn tempest_vault() -> Map {
     use DecoKind::*;
     let g = GROUND;
-    let w = 7000.0;
+    let w = VAULT_WIDTH;
+    let pillar = |x: f32| Aabb::new(x, g - 230.0, 60.0, 230.0);
     let solids = vec![
-        ground(0.0, 2400.0, g),
-        ground(2400.0, 2600.0, g - 60.0),
-        ground(2600.0, 3600.0, g),
-        ground(3600.0, 5600.0, g),
-        ground(5600.0, 7000.0, g),
+        // Hall of Wisps: entrance, two steps up, a sunken crypt, the approach
+        ground(0.0, 800.0, g),
+        ground(800.0, 1000.0, g - 70.0),
+        ground(1000.0, 1500.0, g - 140.0),
+        ground(1500.0, 1950.0, g + 90.0),
+        ground(1950.0, 2700.0, g),
+        // the Gatekeeper's arena (left wall pillar; the inner gate on the right)
+        pillar(GK_ARENA_X - 660.0),
+        ground(2700.0, 3960.0, g),
+        // the Vault: a sunken gallery, then terraces
+        ground(3960.0, 4400.0, g),
+        ground(4400.0, 4900.0, g + 150.0),
+        ground(4900.0, 5300.0, g),
+        ground(5300.0, 5900.0, g - 100.0),
+        ground(5900.0, 6360.0, g),
+        // the Stormwarden's arena, walled by two pillars, then the victory hall
+        pillar(SW_ARENA_X - 700.0),
+        ground(6360.0, 7700.0, g),
+        pillar(SW_ARENA_X + 700.0),
+        ground(7700.0, w, g),
         Aabb::new(-40.0, 0.0, 40.0, 900.0),
         Aabb::new(w, 0.0, 40.0, 900.0),
     ];
     let platforms = vec![
-        plat(700.0, g - 140.0, 200.0),
-        plat(1100.0, g - 220.0, 200.0),
-        plat(1500.0, g - 140.0, 200.0),
-        plat(1900.0, g - 200.0, 220.0),
-        plat(2800.0, g - 160.0, 200.0),
-        plat(3200.0, g - 160.0, 200.0),
-        plat(3900.0, g - 150.0, 200.0),
-        plat(4350.0, g - 230.0, 220.0),
-        plat(4800.0, g - 150.0, 200.0),
-        plat(5250.0, g - 220.0, 200.0),
-        plat(6000.0, g - 170.0, 200.0),
-        plat(6500.0, g - 170.0, 200.0),
+        // Hall of Wisps
+        plat(560.0, g - 130.0, 180.0),
+        plat(1150.0, g - 270.0, 200.0),
+        plat(1560.0, g - 40.0, 160.0),
+        plat(1760.0, g - 40.0, 160.0),
+        plat(2150.0, g - 150.0, 200.0),
+        // over the arena wall
+        plat(2440.0, g - 120.0, 150.0),
+        // the Gatekeeper's arena: ledges to get over (and behind) it
+        plat(2760.0, g - 120.0, 160.0),
+        plat(3200.0, g - 170.0, 200.0),
+        plat(3720.0, g - 120.0, 160.0),
+        // the Vault
+        plat(4120.0, g - 150.0, 180.0),
+        plat(4470.0, g + 30.0, 160.0),
+        plat(4720.0, g + 30.0, 160.0),
+        plat(4560.0, g - 110.0, 200.0),
+        plat(5080.0, g - 150.0, 180.0),
+        plat(5560.0, g - 250.0, 200.0),
+        plat(6120.0, g - 120.0, 150.0),
+        // the Stormwarden's arena: refuges for when the floor is live
+        plat(6420.0, g - 120.0, 180.0),
+        plat(6700.0, g - 220.0, 180.0),
+        plat(6930.0, g - 120.0, 160.0),
+        plat(7140.0, g - 220.0, 180.0),
+        plat(7470.0, g - 120.0, 180.0),
+        plat(7790.0, g - 120.0, 150.0),
     ];
     let gates = vec![Gate { solid: Aabb::new(VAULT_GATE_X, g - 400.0, 40.0, 400.0), open_flag: VAULT_GATE_FLAG }];
     let fixed_enemies = vec![
-        // Hall of Wisps
-        (EnemyKind::Cryptling, 700.0, g),
-        (EnemyKind::Cryptling, 900.0, g),
-        (EnemyKind::Galewraith, 1150.0, g - 60.0),
-        (EnemyKind::Vaultbeak, 1400.0, g),
-        (EnemyKind::Cryptling, 1650.0, g),
-        (EnemyKind::Galewraith, 1900.0, g - 60.0),
-        (EnemyKind::Vaultbeak, 2150.0, g),
-        // the Gatekeeper's hall
-        (EnemyKind::Gatekeeper, 3100.0, g),
+        // Hall of Wisps (flyers drift over the steps and the crypt)
+        (EnemyKind::Cryptling, 650.0, g),
+        (EnemyKind::VaultWisp, 900.0, g - 70.0),
+        (EnemyKind::Cryptling, 1150.0, g - 140.0),
+        (EnemyKind::Stormkite, 1380.0, g - 140.0),
+        (EnemyKind::Cryptling, 1620.0, g + 90.0),
+        (EnemyKind::Galewraith, 1720.0, g + 90.0),
+        (EnemyKind::Cryptling, 1850.0, g + 90.0),
+        (EnemyKind::Vaultbeak, 2100.0, g),
+        (EnemyKind::VaultWisp, 2300.0, g),
+        (EnemyKind::Stormkite, 2480.0, g),
+        // the Gatekeeper's arena
+        (EnemyKind::Gatekeeper, GK_ARENA_X, g),
         // the Vault
-        (EnemyKind::Ruinstump, 3850.0, g),
-        (EnemyKind::Vaultcrab, 4150.0, g),
-        (EnemyKind::Galewraith, 4400.0, g - 60.0),
-        (EnemyKind::Vaultbeak, 4650.0, g),
-        (EnemyKind::Ruinstump, 4950.0, g),
-        (EnemyKind::Vaultcrab, 5250.0, g),
-        (EnemyKind::Galewraith, 5450.0, g - 60.0),
-        // the Stormwarden's chamber
-        (EnemyKind::Stormwarden, 6350.0, g),
+        (EnemyKind::Ruinstump, 4150.0, g),
+        (EnemyKind::Stormkite, 4300.0, g),
+        (EnemyKind::Vaultcrab, 4600.0, g + 150.0),
+        (EnemyKind::Galewraith, 4700.0, g + 150.0),
+        (EnemyKind::Vaultbeak, 5100.0, g),
+        (EnemyKind::VaultWisp, 5200.0, g),
+        (EnemyKind::Ruinstump, 5500.0, g - 100.0),
+        (EnemyKind::Stormkite, 5720.0, g - 100.0),
+        (EnemyKind::Vaultcrab, 6000.0, g),
+        (EnemyKind::Galewraith, 6150.0, g),
+        // the Stormwarden's arena
+        (EnemyKind::Stormwarden, SW_ARENA_X, g),
     ];
     let portals = vec![
         portal(40.0, g, "wayfarers_crossroads", 4300.0, "Leave the Vault", None, ""),
-        portal(6860.0, g, "wayfarers_crossroads", 4300.0, "Leave the Vault (victory!)", None, ""),
+        portal(w - 160.0, g, "wayfarers_crossroads", 4300.0, "Leave the Vault (victory!)", None, ""),
     ];
     let signs = vec![
-        Sign { x: 260.0, y: g, text: "The Tempest Vault. Monsters here don't come back - clear the halls together. The Gatekeeper guards the inner gate." },
-        Sign { x: 3380.0, y: g, text: "The inner gate opens when the Gatekeeper falls." },
-        Sign { x: 5650.0, y: g, text: "The Stormwarden's chamber. Everyone who fights it takes home a Vault Cache." },
+        Sign { x: 260.0, y: g, text: "The Tempest Vault. Monsters here don't come back - clear the halls together. Watch the air: storm-flyers nest in here." },
+        Sign { x: 2360.0, y: g, text: "The Gatekeeper's arena. When it raises its shield, get behind it. When spikes rattle in the ceiling, find a gap!" },
+        Sign { x: 3880.0, y: g, text: "The inner gate opens when the Gatekeeper falls." },
+        Sign { x: 6000.0, y: g, text: "The Stormwarden's arena. Run from its vortex, and climb the ledges when the floor crackles. Everyone who fights it takes home a Vault Cache." },
     ];
     let mut decos = vec![];
-    for i in 0..14 {
-        let x = 300.0 + i as f32 * 480.0;
-        decos.push(deco(if i % 2 == 0 { Crystal } else { LanternPost }, x, g, 1.0, 1));
+    for x in [300.0, 700.0, 1250.0, 2000.0, 2300.0, 4050.0, 5000.0, 5450.0, 6050.0, 7900.0, 8250.0] {
+        let y = solids.iter().filter(|s| s.x <= x && x < s.x + s.w && s.y > g - 200.0).map(|s| s.y).fold(f32::MAX, f32::min);
+        decos.push(deco(if (x as i32 / 100) % 2 == 0 { Crystal } else { LanternPost }, x, y, 1.0, 1));
     }
+    decos.push(deco(Gravestone, 1650.0, g + 90.0, 1.0, 1));
+    decos.push(deco(Gravestone, 1880.0, g + 90.0, 0.9, 1));
     decos.push(deco(VaultDoor, 120.0, g, 1.0, 0));
-    decos.push(deco(Banner, 2900.0, g, 1.2, 0));
-    decos.push(deco(Banner, 3300.0, g, 1.2, 0));
-    decos.push(deco(Banner, 6100.0, g, 1.3, 0));
-    decos.push(deco(Banner, 6600.0, g, 1.3, 0));
-    decos.push(deco(VaultDoor, 6900.0, g, 1.0, 0));
+    for x in [GK_ARENA_X - 520.0, GK_ARENA_X - 200.0, GK_ARENA_X + 200.0, GK_ARENA_X + 520.0] {
+        decos.push(deco(Banner, x, g, 1.2, 0));
+    }
+    for x in [SW_ARENA_X - 560.0, SW_ARENA_X - 280.0, SW_ARENA_X + 280.0, SW_ARENA_X + 560.0] {
+        decos.push(deco(Banner, x, g, 1.3, 0));
+    }
+    decos.push(deco(VaultDoor, w - 100.0, g, 1.0, 0));
     Map {
         key: VAULT_MAP,
         name: "Tempest Vault",
@@ -1657,7 +1813,7 @@ fn tempest_vault() -> Map {
         decos,
         regions: vec![],
         bosses: vec![],
-        checkpoints: vec![200.0, 2700.0, 3700.0, 5700.0],
+        checkpoints: vec![200.0, 2380.0, 4050.0, 6000.0],
         climbs: vec![],
         kill_y: 1100.0,
     }

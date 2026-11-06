@@ -2,6 +2,7 @@
 //! inventory/equipment model and shop catalogues.
 
 use crate::classes::ClassId;
+use crate::jobs::Job;
 use crate::stats::{MainStats, StatMods};
 
 pub const INVENTORY_SLOTS: usize = 24;
@@ -9,7 +10,7 @@ pub const STACK_MAX: u32 = 99;
 /// Shops buy items back for this fraction of their base price.
 pub const SELL_RATE: f32 = 0.4;
 /// Everything costs this many times its base price to buy from a shop
-/// (0.13.0: prices went up by 800%). What shops pay you is unchanged.
+/// What shops pay you is unchanged.
 pub const PRICE_MULT: u32 = 5;
 /// The tutorial outfitter's potions: this many purchases are discounted...
 pub const TRAINEE_DISCOUNT_BUYS: u32 = 10;
@@ -244,6 +245,8 @@ pub struct ItemDef {
     pub level: u32,
     /// Only this class may equip it (weapons).
     pub class: Option<ClassId>,
+    /// Only this advanced class may equip it (0.15.0 advanced-class weapons).
+    pub job: Option<Job>,
     pub mods: StatMods,
     pub look: Look,
     /// Rarity: 0 common, 1 uncommon, 2 rare, 3 epic, 4 Gold, 5 Red
@@ -262,6 +265,10 @@ impl ItemDef {
     }
     /// What a shop charges for one (see [`PRICE_MULT`]).
     pub fn buy_price(&self) -> u32 {
+        // Pets have a fixed price of their own (see `pets::PET_SHOP_PRICE`).
+        if let ItemKind::Special(Special::Pet(_)) = self.kind {
+            return crate::pets::PET_SHOP_PRICE;
+        }
         self.price.saturating_mul(PRICE_MULT)
     }
     /// The rarity's name.
@@ -350,25 +357,30 @@ const Z: StatMods = StatMods {
 };
 
 const fn material(id: &'static str, name: &'static str, desc: &'static str, price: u32, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Material, price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Material, price, level: 1, class: None, job: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 const fn consumable(id: &'static str, name: &'static str, desc: &'static str, price: u32, level: u32, effect: Effect, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Consumable(effect), price, level, class: None, mods: Z, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Consumable(effect), price, level, class: None, job: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 #[allow(clippy::too_many_arguments)]
 const fn weapon(id: &'static str, name: &'static str, desc: &'static str, class: ClassId, price: u32, level: u32, mods: StatMods, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Equip(GearKind::Weapon), price, level, class: Some(class), mods, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Equip(GearKind::Weapon), price, level, class: Some(class), job: None, mods, look: Look::None, tier, bound: false }
+}
+
+#[allow(clippy::too_many_arguments)]
+const fn jweapon(id: &'static str, name: &'static str, desc: &'static str, job: Job, class: ClassId, price: u32, level: u32, mods: StatMods, tier: u8) -> ItemDef {
+    ItemDef { id, name, desc, kind: ItemKind::Equip(GearKind::Weapon), price, level, class: Some(class), job: Some(job), mods, look: Look::None, tier, bound: false }
 }
 
 #[allow(clippy::too_many_arguments)]
 const fn gear(id: &'static str, name: &'static str, desc: &'static str, slot: GearKind, price: u32, level: u32, mods: StatMods, look: Look, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Equip(slot), price, level, class: None, mods, look, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Equip(slot), price, level, class: None, job: None, mods, look, tier, bound: false }
 }
 
 const fn special(id: &'static str, name: &'static str, desc: &'static str, price: u32, kind: Special, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Special(kind), price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Special(kind), price, level: 1, class: None, job: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 /// Mark an item as bound (no selling, trading or dropping).
@@ -390,11 +402,11 @@ const fn def(p: f32, m: f32, hp: f32) -> StatMods {
 
 #[allow(clippy::too_many_arguments)]
 const fn food(id: &'static str, name: &'static str, desc: &'static str, price: u32, mods: StatMods, mins: f32, hp_regen: f32, mp_regen: f32, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Consumable(Effect::Food { mods, secs: mins * 60.0, hp_regen, mp_regen }), price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Consumable(Effect::Food { mods, secs: mins * 60.0, hp_regen, mp_regen }), price, level: 1, class: None, job: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 const fn furn(id: &'static str, name: &'static str, desc: &'static str, price: u32, f: Furniture, tier: u8) -> ItemDef {
-    ItemDef { id, name, desc, kind: ItemKind::Furniture(f), price, level: 1, class: None, mods: Z, look: Look::None, tier, bound: false }
+    ItemDef { id, name, desc, kind: ItemKind::Furniture(f), price, level: 1, class: None, job: None, mods: Z, look: Look::None, tier, bound: false }
 }
 
 /// The name of a rarity tier.
@@ -413,14 +425,172 @@ pub fn tier_name(tier: u8) -> &'static str {
 pub const GOLD_LOOT: &[&str] = &[
     "galeheart_blade", "galeheart_fangs", "galeheart_knuckles", "galeheart_longbow", "galeheart_staff",
     "galeheart_helm", "galeheart_cuirass", "galeheart_tassets", "galeheart_treads", "galeheart_mantle",
-    "galeheart_ring", "galeheart_earring", "galeheart_amulet",
+    "galeheart_ring", "galeheart_earring", "galeheart_amulet", "galeheart_pistols",
 ];
 /// Red-tier gear: only from the Tempest Vault's caches.
 pub const RED_LOOT: &[&str] = &[
     "crimson_tempest_blade", "crimson_tempest_fangs", "crimson_tempest_knuckles", "crimson_tempest_bow", "crimson_tempest_staff",
     "crimson_tempest_helm", "crimson_tempest_cuirass", "crimson_tempest_greaves", "crimson_tempest_sabatons", "crimson_tempest_cloak",
-    "crimson_tempest_ring", "crimson_tempest_earring", "crimson_tempest_amulet",
+    "crimson_tempest_ring", "crimson_tempest_earring", "crimson_tempest_amulet", "crimson_tempest_pistols",
 ];
+
+/// Frozen Throne caches: Rimeheart (Gold, Lv 38).
+pub const RIME_LOOT: &[&str] = &[
+    "rimeheart_blade",
+    "rimeheart_fangs",
+    "rimeheart_knuckles",
+    "rimeheart_longbow",
+    "rimeheart_staff",
+    "rimeheart_pistols",
+    "rimeheart_helm",
+    "rimeheart_cuirass",
+    "rimeheart_legguards",
+    "rimeheart_boots",
+    "rimeheart_cloak",
+    "rimeheart_ring",
+    "rimeheart_earring",
+    "rimeheart_amulet",
+];
+/// Cinder Sanctum caches: Cinderforged (Red, Lv 48).
+pub const CINDER_LOOT: &[&str] = &[
+    "cinderwrath_greatsword",
+    "cinderwall_greatshield",
+    "cinderlink_nunchucks",
+    "cinderbrand_warstaff",
+    "cinderedge_katana",
+    "cinderhook_kusarigama",
+    "cinderbolt_crossbow",
+    "cinderhorn_greatbow",
+    "cinderstar_orbs",
+    "cinder_deck",
+    "cinderblast_cannon",
+    "cindersight_rifle",
+    "cinderforged_helm",
+    "cinderforged_cuirass",
+    "cinderforged_legguards",
+    "cinderforged_boots",
+    "cinderforged_cloak",
+    "cinderforged_ring",
+    "cinderforged_earring",
+    "cinderforged_amulet",
+];
+/// Celestial Spire caches: Celestial (Red, Lv 58).
+pub const CELESTIAL_LOOT: &[&str] = &[
+    "celestial_greatsword",
+    "celestial_aegis",
+    "celestial_nunchucks",
+    "celestial_warstaff",
+    "celestial_katana",
+    "celestial_kusarigama",
+    "celestial_crossbow",
+    "celestial_greatbow",
+    "celestial_orbs",
+    "celestial_deck",
+    "celestial_cannon",
+    "celestial_rifle",
+    "celestial_helm",
+    "celestial_cuirass",
+    "celestial_legguards",
+    "celestial_boots",
+    "celestial_cloak",
+    "celestial_ring",
+    "celestial_earring",
+    "celestial_amulet",
+];
+/// The Skyreach Citadel weapon shop.
+pub const SKYREACH_WEAPONS: &[&str] = &[
+    "skyreach_broadsword",
+    "frostforged_blade",
+    "emberheart_sword",
+    "skyreach_stilettos",
+    "frostbite_fangs",
+    "cinderfang_daggers",
+    "skyreach_knuckles",
+    "glacier_gauntlets",
+    "magmafist_gauntlets",
+    "skyreach_longbow",
+    "frostwind_bow",
+    "ashfire_warbow",
+    "skyreach_staff",
+    "frostglass_staff",
+    "emberstar_staff",
+    "skyreach_sixshooters",
+    "frostbore_pistols",
+    "hellfire_pistols",
+    "wyrmsplitter",
+    "titanbreaker",
+    "bastion_of_dawn",
+    "aegis_of_kings",
+    "thunderlink_nunchucks",
+    "stormchain_nunchucks",
+    "ironoak_warstaff",
+    "conquerors_staff",
+    "moonshadow_katana",
+    "nightfall_katana",
+    "gravechain_kusarigama",
+    "soulrend_kusarigama",
+    "silverbolt_crossbow",
+    "hexbreaker_crossbow",
+    "wildheart_greatbow",
+    "alphas_greatbow",
+    "moonlit_orbs",
+    "orbs_of_fate",
+    "marked_deck",
+    "royal_flush_deck",
+    "boomforge_cannon",
+    "siegebreaker_cannon",
+    "longsight_rifle",
+    "horizon_rifle",
+];
+/// The Skyreach Citadel armour shop.
+pub const SKYREACH_ARMOR: &[&str] = &[
+    "skyreach_helm",
+    "skyreach_hood",
+    "skyreach_hat",
+    "skyreach_plate",
+    "skyreach_jacket",
+    "skyreach_robe",
+    "skyreach_greaves",
+    "skyreach_leggings",
+    "skyreach_hakama",
+    "skyreach_sabatons",
+    "skyreach_treads",
+    "skyreach_amulet",
+    "skyreach_ring",
+    "skyreach_earring",
+    "skyreach_mantle",
+    "frostguard_helm",
+    "frostguard_hood",
+    "frostguard_hat",
+    "frostguard_plate",
+    "frostguard_jacket",
+    "frostguard_robe",
+    "frostguard_greaves",
+    "frostguard_leggings",
+    "frostguard_hakama",
+    "frostguard_sabatons",
+    "frostguard_treads",
+    "frostguard_amulet",
+    "frostguard_ring",
+    "frostguard_earring",
+    "frostguard_mantle",
+    "emberweave_helm",
+    "emberweave_hood",
+    "emberweave_hat",
+    "emberweave_plate",
+    "emberweave_jacket",
+    "emberweave_robe",
+    "emberweave_greaves",
+    "emberweave_leggings",
+    "emberweave_hakama",
+    "emberweave_sabatons",
+    "emberweave_treads",
+    "emberweave_amulet",
+    "emberweave_ring",
+    "emberweave_earring",
+    "emberweave_mantle",
+];
+
 
 use ClassId::*;
 use GearKind::*;
@@ -626,6 +796,195 @@ pub const ITEMS: &[ItemDef] = &[
     furn("furn_banner", "Gale Banner", "Furniture. Flaps in a breeze that isn't there.", 80, Furniture::Banner, 1),
     furn("furn_lamp", "Standing Lamp", "Furniture.", 50, Furniture::Lamp, 0),
     furn("furn_trophy", "Stormwarden Trophy", "Furniture. Proof you beat the Stormwarden. Rarely found in Tempest Vault caches.", 500, Furniture::Trophy, 5),
+    // ---------------------------------------------------------------- 0.15.0: Gunslinger weapons (Lv 10-24)
+    weapon("worn_revolvers", "Worn Revolvers", "A matched pair of trail revolvers. Scuffed, reliable.", Gunslinger, 0, 10, StatMods { patk: 12.0, crit: 3.0, ..Z }, 1),
+    weapon("brass_revolvers", "Brass Revolvers", "Polished brass frames that never jam.", Gunslinger, 260, 14, StatMods { patk: 20.0, crit: 4.0, ..Z }, 2),
+    weapon("sidewinder_pistols", "Sidewinder Pistols", "Barrels etched with coiled snakes. Quick as a strike.", Gunslinger, 620, 18, StatMods { main: ms(0, 3, 0, 1), patk: 29.0, crit: 6.0, ..Z }, 3),
+    weapon("galeheart_pistols", "Galeheart Pistols", "Gold tier. Every shot rides a gust.", Gunslinger, 1400, 22, StatMods { main: ms(0, 5, 0, 2), patk: 40.0, crit: 8.0, ..Z }, 4),
+    weapon("crimson_tempest_pistols", "Crimson Tempest Pistols", "Red tier. They fire red lightning.", Gunslinger, 3000, 24, StatMods { main: ms(0, 7, 0, 3), patk: 53.0, crit: 11.0, ..Z }, 5),
+    // ---------------------------------------------------------------- 0.15.0: class weapons (Lv 30-50, Rimeheart Gold Lv 38)
+    weapon("skyreach_broadsword", "Skyreach Broadsword", "Citadel steel, forged above the clouds.", Vanguard, 1100, 30, StatMods { patk: 52.0, pdef: 17.0, hp: 114.0, ..Z }, 2),
+    weapon("frostforged_blade", "Frostforged Blade", "Forged in the frost of the Glacier Hollow.", Vanguard, 2000, 40, StatMods { patk: 74.0, pdef: 24.0, hp: 163.0, ..Z }, 3),
+    weapon("emberheart_sword", "Emberheart Sword", "Quenched in the lava of Emberfall Caldera.", Vanguard, 3400, 50, StatMods { patk: 98.0, pdef: 32.0, hp: 216.0, ..Z }, 3),
+    weapon("rimeheart_blade", "Rimeheart Blade", "Gold tier. Frozen Throne treasure: cold enough to burn.", Vanguard, 2600, 38, StatMods { patk: 84.0, pdef: 28.0, hp: 185.0, ..Z }, 4),
+    weapon("skyreach_stilettos", "Skyreach Stilettos", "Citadel steel, forged above the clouds.", Duskblade, 1100, 30, StatMods { patk: 48.0, crit: 7.0, crit_dmg: 26.0, ..Z }, 2),
+    weapon("frostbite_fangs", "Frostbite Fangs", "Forged in the frost of the Glacier Hollow.", Duskblade, 2000, 40, StatMods { patk: 68.0, crit: 10.0, crit_dmg: 37.0, ..Z }, 3),
+    weapon("cinderfang_daggers", "Cinderfang Daggers", "Quenched in the lava of Emberfall Caldera.", Duskblade, 3400, 50, StatMods { patk: 90.0, crit: 13.0, crit_dmg: 49.0, ..Z }, 3),
+    weapon("rimeheart_fangs", "Rimeheart Fangs", "Gold tier. Frozen Throne treasure: cold enough to burn.", Duskblade, 2600, 38, StatMods { patk: 77.0, crit: 11.0, crit_dmg: 42.0, ..Z }, 4),
+    weapon("skyreach_knuckles", "Skyreach Knuckles", "Citadel steel, forged above the clouds.", Stormfist, 1100, 30, StatMods { patk: 50.0, crit: 4.0, speed_pct: 0.08, ..Z }, 2),
+    weapon("glacier_gauntlets", "Glacier Gauntlets", "Forged in the frost of the Glacier Hollow.", Stormfist, 2000, 40, StatMods { patk: 71.0, crit: 5.0, speed_pct: 0.1, ..Z }, 3),
+    weapon("magmafist_gauntlets", "Magmafist Gauntlets", "Quenched in the lava of Emberfall Caldera.", Stormfist, 3400, 50, StatMods { patk: 94.0, crit: 7.0, speed_pct: 0.11, ..Z }, 3),
+    weapon("rimeheart_knuckles", "Rimeheart Knuckles", "Gold tier. Frozen Throne treasure: cold enough to burn.", Stormfist, 2600, 38, StatMods { patk: 81.0, crit: 6.0, speed_pct: 0.1, ..Z }, 4),
+    weapon("skyreach_longbow", "Skyreach Longbow", "Citadel steel, forged above the clouds.", Windrunner, 1100, 30, StatMods { main: ms(0, 6, 0, 0), patk: 49.0, crit: 5.0, ..Z }, 2),
+    weapon("frostwind_bow", "Frostwind Bow", "Forged in the frost of the Glacier Hollow.", Windrunner, 2000, 40, StatMods { main: ms(0, 9, 0, 0), patk: 70.0, crit: 7.0, ..Z }, 3),
+    weapon("ashfire_warbow", "Ashfire Warbow", "Quenched in the lava of Emberfall Caldera.", Windrunner, 3400, 50, StatMods { main: ms(0, 12, 0, 0), patk: 93.0, crit: 10.0, ..Z }, 3),
+    weapon("rimeheart_longbow", "Rimeheart Longbow", "Gold tier. Frozen Throne treasure: cold enough to burn.", Windrunner, 2600, 38, StatMods { main: ms(0, 10, 0, 0), patk: 80.0, crit: 8.0, ..Z }, 4),
+    weapon("skyreach_staff", "Skyreach Staff", "Citadel steel, forged above the clouds.", Aethermancer, 1100, 30, StatMods { main: ms(0, 0, 6, 0), matk: 56.0, mp: 73.0, ..Z }, 2),
+    weapon("frostglass_staff", "Frostglass Staff", "Forged in the frost of the Glacier Hollow.", Aethermancer, 2000, 40, StatMods { main: ms(0, 0, 9, 0), matk: 80.0, mp: 104.0, ..Z }, 3),
+    weapon("emberstar_staff", "Emberstar Staff", "Quenched in the lava of Emberfall Caldera.", Aethermancer, 3400, 50, StatMods { main: ms(0, 0, 12, 0), matk: 106.0, mp: 137.0, ..Z }, 3),
+    weapon("rimeheart_staff", "Rimeheart Staff", "Gold tier. Frozen Throne treasure: cold enough to burn.", Aethermancer, 2600, 38, StatMods { main: ms(0, 0, 10, 0), matk: 91.0, mp: 118.0, ..Z }, 4),
+    weapon("skyreach_sixshooters", "Skyreach Six-Shooters", "Citadel steel, forged above the clouds.", Gunslinger, 1100, 30, StatMods { main: ms(0, 4, 0, 3), patk: 48.0, crit: 6.0, ..Z }, 2),
+    weapon("frostbore_pistols", "Frostbore Pistols", "Forged in the frost of the Glacier Hollow.", Gunslinger, 2000, 40, StatMods { main: ms(0, 6, 0, 4), patk: 69.0, crit: 8.0, ..Z }, 3),
+    weapon("hellfire_pistols", "Hellfire Pistols", "Quenched in the lava of Emberfall Caldera.", Gunslinger, 3400, 50, StatMods { main: ms(0, 8, 0, 6), patk: 91.0, crit: 11.0, ..Z }, 3),
+    weapon("rimeheart_pistols", "Rimeheart Pistols", "Gold tier. Frozen Throne treasure: cold enough to burn.", Gunslinger, 2600, 38, StatMods { main: ms(0, 7, 0, 5), patk: 78.0, crit: 9.0, ..Z }, 4),
+    // ---------------------------------------------------------------- 0.15.0: advanced-class weapons (Lv 30-58)
+    jweapon("berserker_greatsword", "Berserker's Greatsword", "Handed to you when you advanced.", Job::Berserker, Vanguard, 0, 30, StatMods { patk: 63.0, crit_dmg: 20.0, hp: 84.0, ..Z }, 2),
+    jweapon("wyrmsplitter", "Wyrmsplitter", "A master's weapon, sold in Skyreach Citadel.", Job::Berserker, Vanguard, 2200, 40, StatMods { patk: 90.0, crit_dmg: 28.0, hp: 120.0, ..Z }, 3),
+    jweapon("titanbreaker", "Titanbreaker", "A legend's weapon, sold in Skyreach Citadel.", Job::Berserker, Vanguard, 3700, 50, StatMods { patk: 119.0, crit_dmg: 37.0, hp: 159.0, ..Z }, 3),
+    jweapon("cinderwrath_greatsword", "Cinderwrath Greatsword", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Berserker, Vanguard, 5200, 48, StatMods { patk: 132.0, crit_dmg: 41.0, hp: 177.0, ..Z }, 5),
+    jweapon("celestial_greatsword", "Celestial Greatsword", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Berserker, Vanguard, 8000, 58, StatMods { patk: 159.0, crit_dmg: 50.0, hp: 213.0, ..Z }, 5),
+    jweapon("paladin_greatshield", "Paladin's Greatshield", "Handed to you when you advanced.", Job::Paladin, Vanguard, 0, 30, StatMods { patk: 48.0, pdef: 34.0, mdef: 25.0, hp: 179.0, ..Z }, 2),
+    jweapon("bastion_of_dawn", "Bastion of Dawn", "A master's weapon, sold in Skyreach Citadel.", Job::Paladin, Vanguard, 2200, 40, StatMods { patk: 68.0, pdef: 48.0, mdef: 36.0, hp: 256.0, ..Z }, 3),
+    jweapon("aegis_of_kings", "Aegis of Kings", "A legend's weapon, sold in Skyreach Citadel.", Job::Paladin, Vanguard, 3700, 50, StatMods { patk: 90.0, pdef: 64.0, mdef: 48.0, hp: 339.0, ..Z }, 3),
+    jweapon("cinderwall_greatshield", "Cinderwall Greatshield", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Paladin, Vanguard, 5200, 48, StatMods { patk: 100.0, pdef: 71.0, mdef: 53.0, hp: 378.0, ..Z }, 5),
+    jweapon("celestial_aegis", "Celestial Aegis", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Paladin, Vanguard, 8000, 58, StatMods { patk: 121.0, pdef: 85.0, mdef: 64.0, hp: 454.0, ..Z }, 5),
+    jweapon("surge_nunchucks", "Surge Nunchucks", "Handed to you when you advanced.", Job::SurgeMonk, Stormfist, 0, 30, StatMods { patk: 53.0, crit: 6.0, speed_pct: 0.1, ..Z }, 2),
+    jweapon("thunderlink_nunchucks", "Thunderlink Nunchucks", "A master's weapon, sold in Skyreach Citadel.", Job::SurgeMonk, Stormfist, 2200, 40, StatMods { patk: 76.0, crit: 8.0, speed_pct: 0.11, ..Z }, 3),
+    jweapon("stormchain_nunchucks", "Stormchain Nunchucks", "A legend's weapon, sold in Skyreach Citadel.", Job::SurgeMonk, Stormfist, 3700, 50, StatMods { patk: 101.0, crit: 11.0, speed_pct: 0.12, ..Z }, 3),
+    jweapon("cinderlink_nunchucks", "Cinderlink Nunchucks", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::SurgeMonk, Stormfist, 5200, 48, StatMods { patk: 112.0, crit: 12.0, speed_pct: 0.12, ..Z }, 5),
+    jweapon("celestial_nunchucks", "Celestial Nunchucks", "Red tier. Starlight from the Celestial Spire, made solid.", Job::SurgeMonk, Stormfist, 8000, 58, StatMods { patk: 135.0, crit: 14.0, speed_pct: 0.14, ..Z }, 5),
+    jweapon("warlord_staff", "Warlord's War Staff", "Handed to you when you advanced.", Job::Warlord, Stormfist, 0, 30, StatMods { patk: 59.0, pdef: 14.0, hp: 101.0, ..Z }, 2),
+    jweapon("ironoak_warstaff", "Ironoak War Staff", "A master's weapon, sold in Skyreach Citadel.", Job::Warlord, Stormfist, 2200, 40, StatMods { patk: 84.0, pdef: 20.0, hp: 144.0, ..Z }, 3),
+    jweapon("conquerors_staff", "Conqueror's Staff", "A legend's weapon, sold in Skyreach Citadel.", Job::Warlord, Stormfist, 3700, 50, StatMods { patk: 111.0, pdef: 26.0, hp: 191.0, ..Z }, 3),
+    jweapon("cinderbrand_warstaff", "Cinderbrand War Staff", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Warlord, Stormfist, 5200, 48, StatMods { patk: 124.0, pdef: 30.0, hp: 212.0, ..Z }, 5),
+    jweapon("celestial_warstaff", "Celestial War Staff", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Warlord, Stormfist, 8000, 58, StatMods { patk: 149.0, pdef: 36.0, hp: 256.0, ..Z }, 5),
+    jweapon("umbral_katana", "Umbral Katana", "Handed to you when you advanced.", Job::UmbralNinja, Duskblade, 0, 30, StatMods { patk: 56.0, crit: 8.0, crit_dmg: 25.0, ..Z }, 2),
+    jweapon("moonshadow_katana", "Moonshadow Katana", "A master's weapon, sold in Skyreach Citadel.", Job::UmbralNinja, Duskblade, 2200, 40, StatMods { patk: 80.0, crit: 11.0, crit_dmg: 36.0, ..Z }, 3),
+    jweapon("nightfall_katana", "Nightfall Katana", "A legend's weapon, sold in Skyreach Citadel.", Job::UmbralNinja, Duskblade, 3700, 50, StatMods { patk: 106.0, crit: 15.0, crit_dmg: 48.0, ..Z }, 3),
+    jweapon("cinderedge_katana", "Cinderedge Katana", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::UmbralNinja, Duskblade, 5200, 48, StatMods { patk: 118.0, crit: 17.0, crit_dmg: 53.0, ..Z }, 5),
+    jweapon("celestial_katana", "Celestial Katana", "Red tier. Starlight from the Celestial Spire, made solid.", Job::UmbralNinja, Duskblade, 8000, 58, StatMods { patk: 142.0, crit: 20.0, crit_dmg: 64.0, ..Z }, 5),
+    jweapon("reaper_kusarigama", "Reaper's Kusarigama", "Handed to you when you advanced.", Job::SoulReaper, Duskblade, 0, 30, StatMods { patk: 55.0, crit: 7.0, speed_pct: 0.06, ..Z }, 2),
+    jweapon("gravechain_kusarigama", "Gravechain Kusarigama", "A master's weapon, sold in Skyreach Citadel.", Job::SoulReaper, Duskblade, 2200, 40, StatMods { patk: 78.0, crit: 10.0, speed_pct: 0.07, ..Z }, 3),
+    jweapon("soulrend_kusarigama", "Soulrend Kusarigama", "A legend's weapon, sold in Skyreach Citadel.", Job::SoulReaper, Duskblade, 3700, 50, StatMods { patk: 104.0, crit: 13.0, speed_pct: 0.08, ..Z }, 3),
+    jweapon("cinderhook_kusarigama", "Cinderhook Kusarigama", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::SoulReaper, Duskblade, 5200, 48, StatMods { patk: 116.0, crit: 14.0, speed_pct: 0.08, ..Z }, 5),
+    jweapon("celestial_kusarigama", "Celestial Kusarigama", "Red tier. Starlight from the Celestial Spire, made solid.", Job::SoulReaper, Duskblade, 8000, 58, StatMods { patk: 139.0, crit: 17.0, speed_pct: 0.09, ..Z }, 5),
+    jweapon("hunter_crossbow", "Hunter's Crossbow", "Handed to you when you advanced.", Job::WitchHunter, Windrunner, 0, 30, StatMods { main: ms(0, 7, 0, 0), patk: 57.0, crit: 6.0, ..Z }, 2),
+    jweapon("silverbolt_crossbow", "Silverbolt Crossbow", "A master's weapon, sold in Skyreach Citadel.", Job::WitchHunter, Windrunner, 2200, 40, StatMods { main: ms(0, 10, 0, 0), patk: 82.0, crit: 9.0, ..Z }, 3),
+    jweapon("hexbreaker_crossbow", "Hexbreaker Crossbow", "A legend's weapon, sold in Skyreach Citadel.", Job::WitchHunter, Windrunner, 3700, 50, StatMods { main: ms(0, 13, 0, 0), patk: 108.0, crit: 12.0, ..Z }, 3),
+    jweapon("cinderbolt_crossbow", "Cinderbolt Crossbow", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::WitchHunter, Windrunner, 5200, 48, StatMods { main: ms(0, 14, 0, 0), patk: 120.0, crit: 13.0, ..Z }, 5),
+    jweapon("celestial_crossbow", "Celestial Crossbow", "Red tier. Starlight from the Celestial Spire, made solid.", Job::WitchHunter, Windrunner, 8000, 58, StatMods { main: ms(0, 17, 0, 0), patk: 145.0, crit: 16.0, ..Z }, 5),
+    jweapon("beast_greatbow", "Beast Master's Greatbow", "Handed to you when you advanced.", Job::BeastMaster, Windrunner, 0, 30, StatMods { main: ms(3, 6, 0, 0), patk: 59.0, hp: 67.0, ..Z }, 2),
+    jweapon("wildheart_greatbow", "Wildheart Greatbow", "A master's weapon, sold in Skyreach Citadel.", Job::BeastMaster, Windrunner, 2200, 40, StatMods { main: ms(5, 8, 0, 0), patk: 85.0, hp: 96.0, ..Z }, 3),
+    jweapon("alphas_greatbow", "Alpha's Greatbow", "A legend's weapon, sold in Skyreach Citadel.", Job::BeastMaster, Windrunner, 3700, 50, StatMods { main: ms(6, 11, 0, 0), patk: 112.0, hp: 127.0, ..Z }, 3),
+    jweapon("cinderhorn_greatbow", "Cinderhorn Greatbow", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::BeastMaster, Windrunner, 5200, 48, StatMods { main: ms(7, 12, 0, 0), patk: 125.0, hp: 142.0, ..Z }, 5),
+    jweapon("celestial_greatbow", "Celestial Greatbow", "Red tier. Starlight from the Celestial Spire, made solid.", Job::BeastMaster, Windrunner, 8000, 58, StatMods { main: ms(9, 14, 0, 0), patk: 151.0, hp: 170.0, ..Z }, 5),
+    jweapon("oracle_orbs", "Oracle's Orbs", "Handed to you when you advanced.", Job::Oracle, Aethermancer, 0, 30, StatMods { main: ms(0, 0, 7, 0), matk: 62.0, mp: 101.0, mdef: 17.0, ..Z }, 2),
+    jweapon("moonlit_orbs", "Moonlit Orbs", "A master's weapon, sold in Skyreach Citadel.", Job::Oracle, Aethermancer, 2200, 40, StatMods { main: ms(0, 0, 10, 0), matk: 88.0, mp: 144.0, mdef: 24.0, ..Z }, 3),
+    jweapon("orbs_of_fate", "Orbs of Fate", "A legend's weapon, sold in Skyreach Citadel.", Job::Oracle, Aethermancer, 3700, 50, StatMods { main: ms(0, 0, 13, 0), matk: 117.0, mp: 191.0, mdef: 32.0, ..Z }, 3),
+    jweapon("cinderstar_orbs", "Cinderstar Orbs", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Oracle, Aethermancer, 5200, 48, StatMods { main: ms(0, 0, 14, 0), matk: 130.0, mp: 212.0, mdef: 35.0, ..Z }, 5),
+    jweapon("celestial_orbs", "Celestial Orbs", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Oracle, Aethermancer, 8000, 58, StatMods { main: ms(0, 0, 17, 0), matk: 156.0, mp: 256.0, mdef: 43.0, ..Z }, 5),
+    jweapon("gambler_deck", "Gambler's Deck", "Handed to you when you advanced.", Job::Gambler, Aethermancer, 0, 30, StatMods { main: ms(0, 0, 4, 4), matk: 63.0, crit: 7.0, ..Z }, 2),
+    jweapon("marked_deck", "Marked Deck", "A master's weapon, sold in Skyreach Citadel.", Job::Gambler, Aethermancer, 2200, 40, StatMods { main: ms(0, 0, 6, 6), matk: 90.0, crit: 10.0, ..Z }, 3),
+    jweapon("royal_flush_deck", "Royal Flush Deck", "A legend's weapon, sold in Skyreach Citadel.", Job::Gambler, Aethermancer, 3700, 50, StatMods { main: ms(0, 0, 8, 8), matk: 119.0, crit: 13.0, ..Z }, 3),
+    jweapon("cinder_deck", "Cinder Deck", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Gambler, Aethermancer, 5200, 48, StatMods { main: ms(0, 0, 9, 9), matk: 132.0, crit: 14.0, ..Z }, 5),
+    jweapon("celestial_deck", "Celestial Deck", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Gambler, Aethermancer, 8000, 58, StatMods { main: ms(0, 0, 11, 11), matk: 159.0, crit: 17.0, ..Z }, 5),
+    jweapon("engineer_cannon", "Engineer's Hand-Cannon", "Handed to you when you advanced.", Job::Engineer, Gunslinger, 0, 30, StatMods { main: ms(0, 6, 0, 0), patk: 59.0, pdef: 11.0, ..Z }, 2),
+    jweapon("boomforge_cannon", "Boomforge Cannon", "A master's weapon, sold in Skyreach Citadel.", Job::Engineer, Gunslinger, 2200, 40, StatMods { main: ms(0, 8, 0, 0), patk: 84.0, pdef: 16.0, ..Z }, 3),
+    jweapon("siegebreaker_cannon", "Siegebreaker Cannon", "A legend's weapon, sold in Skyreach Citadel.", Job::Engineer, Gunslinger, 3700, 50, StatMods { main: ms(0, 11, 0, 0), patk: 111.0, pdef: 21.0, ..Z }, 3),
+    jweapon("cinderblast_cannon", "Cinderblast Cannon", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Engineer, Gunslinger, 5200, 48, StatMods { main: ms(0, 12, 0, 0), patk: 124.0, pdef: 24.0, ..Z }, 5),
+    jweapon("celestial_cannon", "Celestial Hand-Cannon", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Engineer, Gunslinger, 8000, 58, StatMods { main: ms(0, 14, 0, 0), patk: 149.0, pdef: 28.0, ..Z }, 5),
+    jweapon("sniper_rifle", "Sniper's Omni-Rifle", "Handed to you when you advanced.", Job::Sniper, Gunslinger, 0, 30, StatMods { patk: 62.0, crit: 7.0, crit_dmg: 17.0, ..Z }, 2),
+    jweapon("longsight_rifle", "Longsight Rifle", "A master's weapon, sold in Skyreach Citadel.", Job::Sniper, Gunslinger, 2200, 40, StatMods { patk: 88.0, crit: 10.0, crit_dmg: 24.0, ..Z }, 3),
+    jweapon("horizon_rifle", "Horizon Omni-Rifle", "A legend's weapon, sold in Skyreach Citadel.", Job::Sniper, Gunslinger, 3700, 50, StatMods { patk: 117.0, crit: 14.0, crit_dmg: 32.0, ..Z }, 3),
+    jweapon("cindersight_rifle", "Cindersight Rifle", "Red tier. Forged in the Cinder Sanctum's dragonfire.", Job::Sniper, Gunslinger, 5200, 48, StatMods { patk: 130.0, crit: 15.0, crit_dmg: 35.0, ..Z }, 5),
+    jweapon("celestial_rifle", "Celestial Omni-Rifle", "Red tier. Starlight from the Celestial Spire, made solid.", Job::Sniper, Gunslinger, 8000, 58, StatMods { patk: 156.0, crit: 18.0, crit_dmg: 43.0, ..Z }, 5),
+    // ---------------------------------------------------------------- 0.15.0: armour (Lv 30-58)
+    gear("skyreach_helm", "Skyreach Helm", "Citadel issue, made for the high roads.", Helmet, 900, 30, StatMods { pdef: 19.0, mdef: 8.0, hp: 68.0, ..Z }, Look::Hat(4), 2),
+    gear("skyreach_hood", "Skyreach Hood", "Citadel issue, made for the high roads.", Helmet, 900, 30, StatMods { pdef: 13.0, mdef: 11.0, crit: 3.0, ..Z }, Look::Hat(6), 2),
+    gear("skyreach_hat", "Skyreach Hat", "Citadel issue, made for the high roads.", Helmet, 900, 30, StatMods { pdef: 8.0, mdef: 21.0, mp: 57.0, ..Z }, Look::Hat(3), 2),
+    gear("skyreach_plate", "Skyreach Plate", "Citadel issue, made for the high roads.", Torso, 900, 30, StatMods { pdef: 49.0, mdef: 23.0, hp: 133.0, ..Z }, Look::Top(5, 1), 2),
+    gear("skyreach_jacket", "Skyreach Jacket", "Citadel issue, made for the high roads.", Torso, 900, 30, StatMods { pdef: 32.0, mdef: 25.0, crit: 4.0, ..Z }, Look::Top(6, 1), 2),
+    gear("skyreach_robe", "Skyreach Robe", "Citadel issue, made for the high roads.", Torso, 900, 30, StatMods { pdef: 19.0, mdef: 49.0, mp: 86.0, ..Z }, Look::Top(4, 1), 2),
+    gear("skyreach_greaves", "Skyreach Legplates", "Citadel issue, made for the high roads.", Legs, 900, 30, StatMods { pdef: 30.0, mdef: 13.0, hp: 86.0, ..Z }, Look::Bottom(1, 1), 2),
+    gear("skyreach_leggings", "Skyreach Leggings", "Citadel issue, made for the high roads.", Legs, 900, 30, StatMods { pdef: 21.0, mdef: 17.0, crit: 2.0, ..Z }, Look::Bottom(6, 1), 2),
+    gear("skyreach_hakama", "Skyreach Hakama", "Citadel issue, made for the high roads.", Legs, 900, 30, StatMods { pdef: 11.0, mdef: 30.0, mp: 48.0, ..Z }, Look::Bottom(5, 1), 2),
+    gear("skyreach_sabatons", "Skyreach Sabatons", "Citadel issue, made for the high roads.", Boots, 900, 30, StatMods { pdef: 23.0, mdef: 10.0, hp: 48.0, ..Z }, Look::Shoes(3), 2),
+    gear("skyreach_treads", "Skyreach Treads", "Citadel issue, made for the high roads.", Boots, 900, 30, StatMods { pdef: 13.0, mdef: 10.0, speed_pct: 0.05, ..Z }, Look::Shoes(5), 2),
+    gear("skyreach_amulet", "Skyreach Amulet", "Citadel issue, made for the high roads.", Necklace, 900, 30, StatMods { main: ms(4, 4, 4, 4), atk_pct: 0.06, ..Z }, Look::None, 2),
+    gear("skyreach_ring", "Skyreach Ring", "Citadel issue, made for the high roads.", Ring, 900, 30, StatMods { main: ms(4, 4, 4, 4), crit: 3.0, ..Z }, Look::None, 2),
+    gear("skyreach_earring", "Skyreach Earring", "Citadel issue, made for the high roads.", Earring, 900, 30, StatMods { main: ms(0, 3, 3, 5), crit_dmg: 15.0, mp: 28.0, ..Z }, Look::None, 2),
+    gear("skyreach_mantle", "Skyreach Mantle", "Citadel issue, made for the high roads.", Back, 900, 30, StatMods { main: ms(0, 3, 3, 0), pdef: 10.0, mdef: 15.0, speed_pct: 0.04, ..Z }, Look::Back(2), 2),
+    gear("frostguard_helm", "Frostguard Helm", "Lined with yeti fur against the tundra wind.", Helmet, 1600, 40, StatMods { pdef: 26.0, mdef: 10.0, hp: 94.0, ..Z }, Look::Hat(4), 3),
+    gear("frostguard_hood", "Frostguard Hood", "Lined with yeti fur against the tundra wind.", Helmet, 1600, 40, StatMods { pdef: 18.0, mdef: 16.0, crit: 4.0, ..Z }, Look::Hat(6), 3),
+    gear("frostguard_hat", "Frostguard Hat", "Lined with yeti fur against the tundra wind.", Helmet, 1600, 40, StatMods { pdef: 10.0, mdef: 29.0, mp: 78.0, ..Z }, Look::Hat(7), 3),
+    gear("frostguard_plate", "Frostguard Plate", "Lined with yeti fur against the tundra wind.", Torso, 1600, 40, StatMods { pdef: 68.0, mdef: 31.0, hp: 182.0, ..Z }, Look::Top(5, 6), 3),
+    gear("frostguard_jacket", "Frostguard Jacket", "Lined with yeti fur against the tundra wind.", Torso, 1600, 40, StatMods { pdef: 44.0, mdef: 34.0, crit: 5.0, ..Z }, Look::Top(6, 6), 3),
+    gear("frostguard_robe", "Frostguard Robe", "Lined with yeti fur against the tundra wind.", Torso, 1600, 40, StatMods { pdef: 26.0, mdef: 68.0, mp: 117.0, ..Z }, Look::Top(4, 6), 3),
+    gear("frostguard_greaves", "Frostguard Legplates", "Lined with yeti fur against the tundra wind.", Legs, 1600, 40, StatMods { pdef: 42.0, mdef: 18.0, hp: 117.0, ..Z }, Look::Bottom(1, 6), 3),
+    gear("frostguard_leggings", "Frostguard Leggings", "Lined with yeti fur against the tundra wind.", Legs, 1600, 40, StatMods { pdef: 29.0, mdef: 23.0, crit: 3.0, ..Z }, Look::Bottom(6, 6), 3),
+    gear("frostguard_hakama", "Frostguard Hakama", "Lined with yeti fur against the tundra wind.", Legs, 1600, 40, StatMods { pdef: 16.0, mdef: 42.0, mp: 65.0, ..Z }, Look::Bottom(5, 6), 3),
+    gear("frostguard_sabatons", "Frostguard Sabatons", "Lined with yeti fur against the tundra wind.", Boots, 1600, 40, StatMods { pdef: 31.0, mdef: 13.0, hp: 65.0, ..Z }, Look::Shoes(3), 3),
+    gear("frostguard_treads", "Frostguard Treads", "Lined with yeti fur against the tundra wind.", Boots, 1600, 40, StatMods { pdef: 18.0, mdef: 13.0, speed_pct: 0.06, ..Z }, Look::Shoes(5), 3),
+    gear("frostguard_amulet", "Frostguard Amulet", "Lined with yeti fur against the tundra wind.", Necklace, 1600, 40, StatMods { main: ms(5, 5, 5, 5), atk_pct: 0.07, ..Z }, Look::None, 3),
+    gear("frostguard_ring", "Frostguard Ring", "Lined with yeti fur against the tundra wind.", Ring, 1600, 40, StatMods { main: ms(5, 5, 5, 5), crit: 4.0, ..Z }, Look::None, 3),
+    gear("frostguard_earring", "Frostguard Earring", "Lined with yeti fur against the tundra wind.", Earring, 1600, 40, StatMods { main: ms(0, 4, 4, 6), crit_dmg: 21.0, mp: 39.0, ..Z }, Look::None, 3),
+    gear("frostguard_mantle", "Frostguard Mantle", "Lined with yeti fur against the tundra wind.", Back, 1600, 40, StatMods { main: ms(0, 4, 4, 0), pdef: 13.0, mdef: 21.0, speed_pct: 0.05, ..Z }, Look::Back(1), 3),
+    gear("emberweave_helm", "Emberweave Helm", "Woven with salamander scale. It never burns.", Helmet, 2700, 50, StatMods { pdef: 33.0, mdef: 13.0, hp: 119.0, ..Z }, Look::Hat(4), 3),
+    gear("emberweave_hood", "Emberweave Hood", "Woven with salamander scale. It never burns.", Helmet, 2700, 50, StatMods { pdef: 23.0, mdef: 20.0, crit: 5.0, ..Z }, Look::Hat(6), 3),
+    gear("emberweave_hat", "Emberweave Hat", "Woven with salamander scale. It never burns.", Helmet, 2700, 50, StatMods { pdef: 13.0, mdef: 36.0, mp: 99.0, ..Z }, Look::Hat(3), 3),
+    gear("emberweave_plate", "Emberweave Plate", "Woven with salamander scale. It never burns.", Torso, 2700, 50, StatMods { pdef: 86.0, mdef: 40.0, hp: 231.0, ..Z }, Look::Top(5, 2), 3),
+    gear("emberweave_jacket", "Emberweave Jacket", "Woven with salamander scale. It never burns.", Torso, 2700, 50, StatMods { pdef: 56.0, mdef: 43.0, crit: 7.0, ..Z }, Look::Top(6, 2), 3),
+    gear("emberweave_robe", "Emberweave Robe", "Woven with salamander scale. It never burns.", Torso, 2700, 50, StatMods { pdef: 33.0, mdef: 86.0, mp: 148.0, ..Z }, Look::Top(4, 2), 3),
+    gear("emberweave_greaves", "Emberweave Legplates", "Woven with salamander scale. It never burns.", Legs, 2700, 50, StatMods { pdef: 53.0, mdef: 23.0, hp: 148.0, ..Z }, Look::Bottom(1, 2), 3),
+    gear("emberweave_leggings", "Emberweave Leggings", "Woven with salamander scale. It never burns.", Legs, 2700, 50, StatMods { pdef: 36.0, mdef: 30.0, crit: 3.0, ..Z }, Look::Bottom(6, 2), 3),
+    gear("emberweave_hakama", "Emberweave Hakama", "Woven with salamander scale. It never burns.", Legs, 2700, 50, StatMods { pdef: 20.0, mdef: 53.0, mp: 82.0, ..Z }, Look::Bottom(5, 2), 3),
+    gear("emberweave_sabatons", "Emberweave Sabatons", "Woven with salamander scale. It never burns.", Boots, 2700, 50, StatMods { pdef: 40.0, mdef: 16.0, hp: 82.0, ..Z }, Look::Shoes(3), 3),
+    gear("emberweave_treads", "Emberweave Treads", "Woven with salamander scale. It never burns.", Boots, 2700, 50, StatMods { pdef: 23.0, mdef: 16.0, speed_pct: 0.07, ..Z }, Look::Shoes(5), 3),
+    gear("emberweave_amulet", "Emberweave Amulet", "Woven with salamander scale. It never burns.", Necklace, 2700, 50, StatMods { main: ms(7, 7, 7, 7), atk_pct: 0.08, ..Z }, Look::None, 3),
+    gear("emberweave_ring", "Emberweave Ring", "Woven with salamander scale. It never burns.", Ring, 2700, 50, StatMods { main: ms(7, 7, 7, 7), crit: 5.0, ..Z }, Look::None, 3),
+    gear("emberweave_earring", "Emberweave Earring", "Woven with salamander scale. It never burns.", Earring, 2700, 50, StatMods { main: ms(0, 5, 5, 8), crit_dmg: 26.0, mp: 50.0, ..Z }, Look::None, 3),
+    gear("emberweave_mantle", "Emberweave Mantle", "Woven with salamander scale. It never burns.", Back, 2700, 50, StatMods { main: ms(0, 5, 5, 0), pdef: 16.0, mdef: 26.0, speed_pct: 0.05, ..Z }, Look::Back(2), 3),
+    // ---------------------------------------------------------------- 0.15.0: dungeon sets
+    gear("rimeheart_helm", "Rimeheart Helm", "Gold tier. Frozen Throne treasure.", Helmet, 2400, 38, StatMods { main: ms(4, 4, 4, 4), pdef: 26.0, mdef: 23.0, hp: 91.0, ..Z }, Look::Hat(7), 4),
+    gear("rimeheart_cuirass", "Rimeheart Cuirass", "Gold tier. Frozen Throne treasure.", Torso, 2400, 38, StatMods { pdef: 57.0, mdef: 42.0, hp: 169.0, atk_pct: 0.03, ..Z }, Look::Top(5, 6), 4),
+    gear("rimeheart_legguards", "Rimeheart Legguards", "Gold tier. Frozen Throne treasure.", Legs, 2400, 38, StatMods { pdef: 36.0, mdef: 26.0, hp: 109.0, ..Z }, Look::Bottom(5, 6), 4),
+    gear("rimeheart_boots", "Rimeheart Boots", "Gold tier. Frozen Throne treasure.", Boots, 2400, 38, StatMods { pdef: 21.0, mdef: 16.0, speed_pct: 0.08, ..Z }, Look::Shoes(3), 4),
+    gear("rimeheart_cloak", "Rimeheart Cloak", "Gold tier. Frozen Throne treasure.", Back, 2400, 38, StatMods { main: ms(0, 5, 5, 0), pdef: 13.0, mdef: 21.0, speed_pct: 0.06, ..Z }, Look::Back(2), 4),
+    gear("rimeheart_ring", "Rimeheart Ring", "Gold tier. Frozen Throne treasure.", Ring, 2400, 38, StatMods { main: ms(5, 5, 5, 5), crit: 6.0, ..Z }, Look::None, 4),
+    gear("rimeheart_earring", "Rimeheart Earring", "Gold tier. Frozen Throne treasure.", Earring, 2400, 38, StatMods { main: ms(0, 4, 4, 6), crit_dmg: 29.0, mp: 52.0, ..Z }, Look::None, 4),
+    gear("rimeheart_amulet", "Rimeheart Amulet", "Gold tier. Frozen Throne treasure.", Necklace, 2400, 38, StatMods { main: ms(5, 5, 5, 5), atk_pct: 0.07, crit: 5.0, ..Z }, Look::None, 4),
+    gear("cinderforged_helm", "Cinderforged Helm", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Helmet, 5000, 48, StatMods { main: ms(5, 5, 5, 5), pdef: 34.0, mdef: 31.0, hp: 119.0, ..Z }, Look::Hat(4), 5),
+    gear("cinderforged_cuirass", "Cinderforged Cuirass", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Torso, 5000, 48, StatMods { pdef: 75.0, mdef: 54.0, hp: 221.0, atk_pct: 0.04, ..Z }, Look::Top(5, 2), 5),
+    gear("cinderforged_legguards", "Cinderforged Legguards", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Legs, 5000, 48, StatMods { pdef: 48.0, mdef: 34.0, hp: 143.0, ..Z }, Look::Bottom(1, 2), 5),
+    gear("cinderforged_boots", "Cinderforged Boots", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Boots, 5000, 48, StatMods { pdef: 27.0, mdef: 20.0, speed_pct: 0.09, ..Z }, Look::Shoes(3), 5),
+    gear("cinderforged_cloak", "Cinderforged Cloak", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Back, 5000, 48, StatMods { main: ms(0, 7, 7, 0), pdef: 17.0, mdef: 27.0, speed_pct: 0.06, ..Z }, Look::Back(6), 5),
+    gear("cinderforged_ring", "Cinderforged Ring", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Ring, 5000, 48, StatMods { main: ms(7, 7, 7, 7), crit: 8.0, ..Z }, Look::None, 5),
+    gear("cinderforged_earring", "Cinderforged Earring", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Earring, 5000, 48, StatMods { main: ms(0, 5, 5, 8), crit_dmg: 37.0, mp: 68.0, ..Z }, Look::None, 5),
+    gear("cinderforged_amulet", "Cinderforged Amulet", "Red tier. Forged in dragonfire in the Cinder Sanctum.", Necklace, 5000, 48, StatMods { main: ms(7, 7, 7, 7), atk_pct: 0.07, crit: 7.0, ..Z }, Look::None, 5),
+    gear("celestial_helm", "Celestial Crown", "Red tier. Starlight from the Celestial Spire, made solid.", Helmet, 7800, 58, StatMods { main: ms(6, 6, 6, 6), pdef: 43.0, mdef: 39.0, hp: 150.0, ..Z }, Look::Hat(10), 5),
+    gear("celestial_cuirass", "Celestial Cuirass", "Red tier. Starlight from the Celestial Spire, made solid.", Torso, 7800, 58, StatMods { pdef: 95.0, mdef: 69.0, hp: 280.0, atk_pct: 0.04, ..Z }, Look::Top(5, 4), 5),
+    gear("celestial_legguards", "Celestial Legguards", "Red tier. Starlight from the Celestial Spire, made solid.", Legs, 7800, 58, StatMods { pdef: 60.0, mdef: 43.0, hp: 181.0, ..Z }, Look::Bottom(5, 4), 5),
+    gear("celestial_boots", "Celestial Boots", "Red tier. Starlight from the Celestial Spire, made solid.", Boots, 7800, 58, StatMods { pdef: 34.0, mdef: 26.0, speed_pct: 0.1, ..Z }, Look::Shoes(5), 5),
+    gear("celestial_cloak", "Celestial Wings", "Red tier. Starlight from the Celestial Spire, made solid.", Back, 7800, 58, StatMods { main: ms(0, 9, 9, 0), pdef: 22.0, mdef: 34.0, speed_pct: 0.07, ..Z }, Look::Back(5), 5),
+    gear("celestial_ring", "Celestial Ring", "Red tier. Starlight from the Celestial Spire, made solid.", Ring, 7800, 58, StatMods { main: ms(9, 9, 9, 9), crit: 11.0, ..Z }, Look::None, 5),
+    gear("celestial_earring", "Celestial Earring", "Red tier. Starlight from the Celestial Spire, made solid.", Earring, 7800, 58, StatMods { main: ms(0, 6, 6, 11), crit_dmg: 47.0, mp: 86.0, ..Z }, Look::None, 5),
+    gear("celestial_amulet", "Celestial Amulet", "Red tier. Starlight from the Celestial Spire, made solid.", Necklace, 7800, 58, StatMods { main: ms(9, 9, 9, 9), atk_pct: 0.08, crit: 9.0, ..Z }, Look::None, 5),
+    // ---------------------------------------------------------------- 0.15.0: consumables, materials and caches
+    consumable("hp_potion_grand", "Grand Healing Draught", "Restores 90% of your HP.", 110, 30, Effect::Restore { hp: 0.90, mp: 0.0 }, 2),
+    consumable("mp_potion_grand", "Grand Ether", "Restores 90% of your Mana.", 130, 30, Effect::Restore { hp: 0.0, mp: 0.90 }, 2),
+    consumable("elixir_grand", "Skyreach Elixir", "Restores 80% of HP and Mana.", 300, 35, Effect::Restore { hp: 0.80, mp: 0.80 }, 3),
+    consumable("titan_tonic", "Titan Tonic", "+25% attack for 90 seconds.", 220, 30, Effect::Buff { mods: StatMods { atk_pct: 0.25, ..Z }, secs: 90.0 }, 2),
+    material("cactus_spine", "Cactus Spine", "Sharp enough to sew leather.", 12, 0),
+    material("scorpion_stinger", "Scorpion Stinger", "Still drips a little.", 24, 1),
+    material("dust_devil_core", "Dust Devil Core", "A pocket-sized sandstorm.", 30, 1),
+    material("frost_pelt", "Frost Pelt", "Thick white fur. Warm even when wet.", 60, 1),
+    material("rime_crystal", "Rime Crystal", "Never melts.", 70, 2),
+    material("ice_sprite_dust", "Ice Sprite Dust", "Sparkles and stings.", 64, 1),
+    material("yeti_horn", "Yeti Horn", "Curled like a ram's.", 90, 2),
+    material("golem_core", "Golem Core", "A heart of runed stone.", 110, 2),
+    material("salamander_scale", "Salamander Scale", "Warm to the touch.", 100, 2),
+    material("magma_shell", "Magma Shell", "Glows from inside.", 120, 2),
+    material("obsidian_shard", "Obsidian Shard", "Black glass from the Cinderspire.", 140, 2),
+    material("storm_feather", "Storm Feather", "Crackles when you stroke it.", 150, 2),
+    material("wyrm_scale", "Wyrmling Scale", "Hums with the wind.", 170, 3),
+    material("void_essence", "Void Essence", "A piece of the night sky.", 200, 3),
+    material("astral_core", "Astral Core", "A star, cooled.", 230, 3),
+    material("rime_shard", "Rime Shard", "Frozen Throne treasure. Used for crafting and trading.", 400, 4),
+    material("ember_shard", "Ember Shard", "Cinder Sanctum treasure. Used for crafting and trading.", 650, 4),
+    material("star_shard", "Star Shard", "Celestial Spire treasure. Used for crafting and trading.", 900, 5),
+    special("frozen_cache", "Frozen Throne Cache", "Glacia's hoard. Use it to open: Rime Shards and a chance of Rimeheart Gold gear.", 0, Special::Cache, 4),
+    special("cinder_cache", "Cinder Sanctum Cache", "Ignaroth's hoard. Use it to open: Ember Shards and a chance of Cinderforged Red gear.", 0, Special::Cache, 5),
+    special("celestial_cache", "Celestial Spire Cache", "The Twins' hoard. Use it to open: Star Shards and a chance of Celestial Red gear.", 0, Special::Cache, 5),
 ];
 
 /// What a weapon looks like in the character's hand.
@@ -635,7 +994,13 @@ pub fn weapon_art(id: &str) -> Option<crate::classes::Weapon> {
         "gnarled_stick" => Weapon::Stick,
         "wood_sword" | "novice_sword" | "ironwood_blade" => Weapon::WoodSword,
         "wood_club" | "oak_club" | "ironbound_cudgel" => Weapon::Club,
-        other => item(other)?.class?.info().weapon,
+        other => {
+            let d = item(other)?;
+            match d.job {
+                Some(j) => j.info().weapon,
+                None => d.class?.info().weapon,
+            }
+        }
     })
 }
 
@@ -652,6 +1017,7 @@ pub fn starter_weapon(class: ClassId) -> &'static str {
         Stormfist => "storm_wraps",
         Windrunner => "ash_bow",
         Aethermancer => "apprentice_staff",
+        Gunslinger => "worn_revolvers",
     }
 }
 
@@ -846,7 +1212,16 @@ pub const SHOPS: &[ShopDef] = &[
     ShopDef { id: "starfall_general", name: "Aether Alchemy", kind: ShopKind::General, stock: GENERAL_STOCK },
     ShopDef { id: "starfall_weapons", name: "The Staff Gallery", kind: ShopKind::Weapons, stock: &["runed_staff", "starfall_staff", "oak_club"] },
     ShopDef { id: "starfall_armor", name: "Glyphwoven Garments", kind: ShopKind::Armor, stock: ARMOR_STOCK },
+    // 0.15.0
+    ShopDef { id: "dustwind_general", name: "The Thirsty Cactus", kind: ShopKind::General, stock: GENERAL_STOCK },
+    ShopDef { id: "dustwind_weapons", name: "Sixgun Smithy", kind: ShopKind::Weapons, stock: &["brass_revolvers", "sidewinder_pistols", "oak_club"] },
+    ShopDef { id: "dustwind_armor", name: "Saddle & Spur", kind: ShopKind::Armor, stock: ARMOR_STOCK },
+    ShopDef { id: "skyreach_general", name: "Cloudtop Remedies", kind: ShopKind::General, stock: SKYREACH_GENERAL },
+    ShopDef { id: "skyreach_weapons", name: "The Grand Armoury", kind: ShopKind::Weapons, stock: SKYREACH_WEAPONS },
+    ShopDef { id: "skyreach_armor", name: "Highwind Outfitters", kind: ShopKind::Armor, stock: SKYREACH_ARMOR },
 ];
+
+const SKYREACH_GENERAL: &[&str] = &["hp_potion_big", "mp_potion_big", "elixir", "hp_potion_grand", "mp_potion_grand", "elixir_grand", "might_tonic", "titan_tonic", "iron_tonic", "lucky_clover", "revive_scroll", "flour", "fresh_milk", "spice_pouch"];
 
 /// Price of buying `n` of an item, given how many discounted trainee
 /// purchases the character has left. Returns (gold, discounted units used).
@@ -889,6 +1264,16 @@ mod tests {
         for &c in crate::classes::EVERY_CLASS {
             assert_eq!(item(starter_weapon(c)).unwrap().class, Some(c));
         }
+        for &j in crate::jobs::ALL_JOBS {
+            let d = item(j.info().starter).unwrap();
+            assert_eq!((d.class, d.job), (Some(j.base()), Some(j)));
+            assert_eq!(weapon_art(d.id), Some(j.info().weapon));
+        }
+        for list in [RIME_LOOT, CINDER_LOOT, CELESTIAL_LOOT, GOLD_LOOT, RED_LOOT] {
+            for id in list {
+                assert!(item(id).and_then(|d| d.slot()).is_some(), "{} isn't gear", id);
+            }
+        }
         // The tutorial outfitter sells bound potions and Lv 8 Novice gear.
         let glade = shop(GLADE_SHOP).unwrap();
         for id in TRAINEE_POTIONS {
@@ -909,13 +1294,16 @@ mod tests {
     #[test]
     fn trainee_discount() {
         let red = item("trainee_hp_potion").unwrap();
-        // 15g base, x9 = 135g, 40% off = 81g
-        assert_eq!(red.buy_price(), 135);
-        assert_eq!(discounted_price(red), 81);
-        assert_eq!(purchase_cost("trainee_hp_potion", 3, 10), Some((243, 3)));
+        // 15g base, x5 = 75g, 40% off = 45g
+        assert_eq!(red.buy_price(), 15 * PRICE_MULT);
+        assert_eq!(red.buy_price(), 75);
+        assert_eq!(discounted_price(red), 45);
+        assert_eq!(purchase_cost("trainee_hp_potion", 3, 10), Some((135, 3)));
         // 2 discounted + 3 full price
-        assert_eq!(purchase_cost("trainee_hp_potion", 5, 2), Some((2 * 81 + 3 * 135, 2)));
-        assert_eq!(purchase_cost("hp_potion", 5, 10), Some((675, 0)));
+        assert_eq!(purchase_cost("trainee_hp_potion", 5, 2), Some((2 * 45 + 3 * 75, 2)));
+        assert_eq!(purchase_cost("hp_potion", 5, 10), Some((375, 0)));
+        // pets are a flat 15,000
+        assert_eq!(item("pet_puffling").unwrap().buy_price(), 15_000);
         // selling back still pays 40% of the base price
         assert_eq!(item("hp_potion").unwrap().sell_price(), 6);
     }

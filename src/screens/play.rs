@@ -40,6 +40,7 @@ enum MenuItem {
     Achievements,
     Settings,
     Graphics,
+    Admin,
     Select,
     Logout,
     Quit,
@@ -232,7 +233,7 @@ impl PlayScreen {
         for m in n.poll() {
             match m {
                 // kicked: signed in elsewhere, or the server is shutting down
-                ServerMsg::Error { text } if text.contains("another computer") || text.contains("shutting down") => {
+                ServerMsg::Error { text } if text.contains("another computer") || text.contains("shutting down") || text.starts_with("You were kicked") => {
                     app.net = None;
                     app.account = None;
                     return Some(Go::To(Screen::Login(LoginScreen::with_error(app, text))));
@@ -375,8 +376,24 @@ impl PlayScreen {
         if lower.starts_with("/a ") {
             return Some(ClientMsg::Chat { text: rest(3) });
         }
+        if lower.starts_with("/duel ") {
+            return Some(ClientMsg::Social(S::DuelRequest { name: rest(6) }));
+        }
+        if lower == "/yield" || lower == "/forfeit" {
+            self.sim.duel_yield();
+            return None;
+        }
+        if galebound_core::admin::is_admin_line(t) {
+            if self.sim.am_admin() {
+                return Some(ClientMsg::Admin { cmd: t[1..].trim().to_string() });
+            }
+            if !lower.starts_with("/help") {
+                self.sim.sys_line("That's an admin command.".into());
+                return None;
+            }
+        }
         if t.starts_with('/') {
-            self.sim.sys_line("Chat commands: /w Name message, /r message, /p party, /g guild, /a everyone".into());
+            self.sim.sys_line("Chat commands: /w Name message, /r message, /p party, /g guild, /a everyone, /duel Name, /yield".into());
             return None;
         }
         Some(match self.chat_tab {
@@ -420,6 +437,8 @@ impl PlayScreen {
             }
         }
         let me = self.sim.save.name.clone();
+        let admins = self.sim.admins.clone();
+        let gm = |n: &str| if admins.iter().any(|a| a.eq_ignore_ascii_case(n)) { "[GM] " } else { "" };
         for (i, l) in lines.iter().enumerate() {
             let a = if self.chat_open { 1.0 } else { ((CHAT_FADE - l.age) / 2.0).clamp(0.0, 1.0) };
             let y = bottom - (i + 1) as f32 * 22.0;
@@ -427,10 +446,10 @@ impl PlayScreen {
             let line = match l.channel {
                 _ if l.from.is_empty() => l.text.clone(),
                 net::CH_WHISPER if l.from.eq_ignore_ascii_case(&me) => format!("To {}: {}", l.to, l.text),
-                net::CH_WHISPER => format!("From {}: {}", l.from, l.text),
-                net::CH_PARTY => format!("[Party] {}: {}", l.from, l.text),
-                net::CH_GUILD => format!("[Guild] {}: {}", l.from, l.text),
-                _ => format!("{}: {}", l.from, l.text),
+                net::CH_WHISPER => format!("From {}{}: {}", gm(&l.from), l.from, l.text),
+                net::CH_PARTY => format!("[Party] {}{}: {}", gm(&l.from), l.from, l.text),
+                net::CH_GUILD => format!("[Guild] {}{}: {}", gm(&l.from), l.from, l.text),
+                _ => format!("{}{}: {}", gm(&l.from), l.from, l.text),
             };
             let line = gfx::wrap(&line, w - 16.0, 14.0).into_iter().next().unwrap_or_default();
             gfx::text_outlined(&line, x + 8.0, y, 14.0, gfx::alpha(col, a));
@@ -491,6 +510,9 @@ impl PlayScreen {
         }
         if is_key_pressed(KeyCode::F3) {
             self.show_hitboxes = !self.show_hitboxes;
+        }
+        if is_key_pressed(KeyCode::F9) && !self.chat_open && !self.social.typing() && self.sim.am_admin() {
+            self.social.toggle_admin(&mut self.sim);
         }
 
         // Window toggles
@@ -611,6 +633,7 @@ impl PlayScreen {
             render::hitboxes(&self.sim, &cam);
         }
         render::projectiles(&self.sim, &cam);
+        render::magic(&self.sim, &cam);
         render::particles(&self.sim, &cam);
         render::decos(&self.sim, &cam, 2, time);
         render::lighting(&self.sim, &cam, time);
@@ -682,7 +705,7 @@ impl PlayScreen {
         gfx::text_outlined("GALEBOUND", x + 34.0, 40.0, 26.0, rgb(255, 236, 170));
         gfx::text(&format!("{}  -  Lv.{} {}", self.sim.save.name, self.sim.save.level, self.sim.player.info.name), x + 36.0, 80.0, 14.0, rgb(190, 200, 225));
         gfx::rect(x + 34.0, 106.0, w - 68.0, 1.0, rgba(255, 255, 255, 50));
-        let items: [(&str, MenuItem); 14] = [
+        let mut items: Vec<(&str, MenuItem)> = vec![
             ("Resume", MenuItem::Resume),
             ("World Map", MenuItem::Map),
             ("Inventory", MenuItem::Inventory),
@@ -698,6 +721,11 @@ impl PlayScreen {
             ("Log Out", MenuItem::Logout),
             ("Quit Game", MenuItem::Quit),
         ];
+        if self.sim.am_admin() {
+            items.insert(11, ("Admin Panel  (F9)", MenuItem::Admin));
+        }
+        let split = items.iter().position(|i| i.1 == MenuItem::Select).unwrap_or(11);
+        self.menu_sel = self.menu_sel.min(items.len() - 1);
         // keyboard navigation
         if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) || crate::pad::nav_down() {
             self.menu_sel = (self.menu_sel + 1) % items.len();
@@ -711,11 +739,11 @@ impl PlayScreen {
         }
         let mut y = 122.0;
         for (i, (label, item)) in items.iter().enumerate() {
-            if i == 11 {
+            if i == split {
                 y += 12.0;
                 gfx::rect(x + 34.0, y - 7.0, w - 68.0, 1.0, rgba(255, 255, 255, 40));
             }
-            let h = 33.0;
+            let h = if items.len() > 14 { 31.0 } else { 33.0 };
             let hover = gfx::mouse_in(x, y, w, h);
             if hover {
                 self.menu_sel = i;
@@ -779,6 +807,12 @@ impl PlayScreen {
             }
             Some(MenuItem::Settings) => self.menu = Menu::Settings,
             Some(MenuItem::Graphics) => self.menu = Menu::Graphics,
+            Some(MenuItem::Admin) => {
+                self.menu = Menu::Closed;
+                if !self.social.admin {
+                    self.social.toggle_admin(&mut self.sim);
+                }
+            }
             Some(MenuItem::Select) => {
                 self.save_now(app);
                 if let Some(n) = app.net.as_mut() {
@@ -814,14 +848,30 @@ impl PlayScreen {
         let ui = Ui::begin();
         let mut changed = false;
         gfx::rect(0.0, 0.0, gfx::VW, gfx::VH, rgba(10, 14, 30, 160));
-        let (w, h) = (560.0, 500.0);
+        let (w, h) = (1040.0, 610.0);
+        let lw = 600.0;
         let (x, y) = ((gfx::VW - w) * 0.5, (gfx::VH - h) * 0.5);
         widgets::panel(x, y, w, h);
         widgets::title("Graphics", x + w * 0.5, y + 22.0, 28.0);
+        let fx_tip = self.effects_options(&ui, x + lw, y, &mut changed);
+        // world zoom: how much of the world you can see
+        gfx::text("Zoom", x + 40.0, y + 474.0, 18.0, widgets::ink());
+        let zw = (lw - 80.0 - 5.0 * 8.0) / gfx::ZOOMS.len() as f32;
+        let mut zoom_hover = false;
+        let cur_zoom = gfx::zoom();
+        for (i, &(z, label)) in gfx::ZOOMS.iter().enumerate() {
+            let bx = x + 40.0 + i as f32 * (zw + 8.0);
+            let on = (cur_zoom - z).abs() < 0.001;
+            let style = if on { widgets::ButtonStyle::Primary } else { widgets::ButtonStyle::Secondary };
+            if widgets::button(&ui, bx, y + 500.0, zw, 40.0, label, style, true) && !on {
+                crate::display::set_zoom(z);
+            }
+            zoom_hover |= gfx::mouse_in(bx, y + 500.0, zw, 40.0);
+        }
         // render resolution
         gfx::text("Resolution", x + 40.0, y + 74.0, 18.0, widgets::ink());
         let cur_res = gfx::resolution();
-        let bw = (w - 80.0 - 2.0 * 12.0) / gfx::RESOLUTIONS.len() as f32;
+        let bw = (lw - 80.0 - 2.0 * 12.0) / gfx::RESOLUTIONS.len() as f32;
         let mut res_hover = false;
         for (i, &(rw, rh)) in gfx::RESOLUTIONS.iter().enumerate() {
             let bx = x + 40.0 + i as f32 * (bw + 12.0);
@@ -844,29 +894,81 @@ impl PlayScreen {
             let by = y + 104.0 + i as f32 * 56.0;
             let cur = self.sim.settings.display == m;
             let style = if cur { widgets::ButtonStyle::Primary } else { widgets::ButtonStyle::Secondary };
-            if widgets::button(&ui, x + 40.0, by, w - 80.0, 44.0, m.name(), style, true) && !cur {
+            if widgets::button(&ui, x + 40.0, by, lw - 80.0, 44.0, m.name(), style, true) && !cur {
                 self.sim.settings.display = m;
                 crate::display::apply(m);
                 changed = true;
             }
-            if gfx::mouse_in(x + 40.0, by, w - 80.0, 44.0) {
+            if gfx::mouse_in(x + 40.0, by, lw - 80.0, 44.0) {
                 hovered = Some(i);
             }
         }
         let cur = DISPLAY_MODES.iter().position(|m| *m == self.sim.settings.display).unwrap_or(0);
         let y = y - 100.0;
-        let tip = if res_hover {
+        let tip = if let Some(t) = fx_tip {
+            t
+        } else if zoom_hover {
+            "How much of the world you can see. Below 100% zooms out to show more of the map; above 100% zooms in for bigger characters."
+        } else if res_hover {
             "How finely the game is drawn. Higher looks smoother and sharper on big screens; the view and pixel art stay the same."
         } else {
             help[hovered.unwrap_or(cur)]
         };
-        gfx::text_wrapped(tip, x + 40.0, y + h - 82.0, w - 200.0, 14.0, widgets::ink_soft());
-        let back = widgets::button(&ui, x + w - 150.0, y + h - 70.0, 110.0, 40.0, "Back", widgets::ButtonStyle::Secondary, true);
+        gfx::text_wrapped(tip, x + 40.0, y + 404.0, lw - 80.0, 14.0, widgets::ink_soft());
+        gfx::line(x + lw, y + 70.0, x + lw, y + h - 80.0, 1.0, rgba(120, 100, 80, 80));
+        let back = widgets::button(&ui, x + w - 150.0, y + h - 56.0, 110.0, 40.0, "Back", widgets::ButtonStyle::Secondary, true);
         if back || is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back) || crate::pad::nav_back() {
             self.menu = Menu::Pause;
             self.menu_anim = 1.0;
         }
         changed
+    }
+
+    /// Effect visibility (0.15.1): companions, ability and weapon effects -
+    /// everyone's, only yours, or none. Returns a tip while hovering.
+    fn effects_options(&mut self, ui: &Ui, x: f32, y: f32, changed: &mut bool) -> Option<&'static str> {
+        use galebound_core::save::{FX_ALL, FX_MINE, FX_OFF};
+        gfx::text("Effects", x + 30.0, y + 74.0, 18.0, widgets::ink());
+        let rows: [(&str, &str, u8); 3] = [
+            ("Companions", "Turrets, spirit hawks and orbiting stars.", self.sim.settings.fx_companions),
+            ("Ability effects", "Ability shots, lightning, explosions and auras, and ability names over players.", self.sim.settings.fx_skills),
+            ("Weapon effects", "Basic attack swings, shots and cannon blasts. Monsters' attacks always show.", self.sim.settings.fx_weapons),
+        ];
+        let opts = [(FX_ALL, "Everyone"), (FX_MINE, "Only mine"), (FX_OFF, "Off")];
+        let mut tip = None;
+        for (r, (name, help, cur)) in rows.iter().enumerate() {
+            let ry = y + 108.0 + r as f32 * 100.0;
+            gfx::text(name, x + 30.0, ry, 16.0, widgets::ink());
+            let bw = 114.0;
+            for (i, (v, label)) in opts.iter().enumerate() {
+                let bx = x + 30.0 + i as f32 * (bw + 8.0);
+                let on = *cur == *v;
+                let style = if on { widgets::ButtonStyle::Primary } else { widgets::ButtonStyle::Secondary };
+                if widgets::button(ui, bx, ry + 26.0, bw, 40.0, label, style, true) && !on {
+                    match r {
+                        0 => self.sim.settings.fx_companions = *v,
+                        1 => self.sim.settings.fx_skills = *v,
+                        _ => self.sim.settings.fx_weapons = *v,
+                    }
+                    *changed = true;
+                }
+                if gfx::mouse_in(bx, ry + 26.0, bw, 40.0) {
+                    tip = Some(*help);
+                }
+            }
+            if gfx::mouse_in(x + 30.0, ry, 3.0 * (bw + 8.0), 70.0) && tip.is_none() {
+                tip = Some(*help);
+            }
+        }
+        gfx::text_wrapped(
+            "Hiding effects only changes what you see - abilities, turrets and hawks still work the same. Turn them down if a busy fight gets hard to read.",
+            x + 30.0,
+            y + 420.0,
+            380.0,
+            13.0,
+            widgets::ink_soft(),
+        );
+        tip
     }
 
     /// Shown while you lie as a tombstone: Respawn, or read a Revive Scroll.

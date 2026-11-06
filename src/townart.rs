@@ -43,6 +43,8 @@ pub fn palette(theme: Theme) -> Palette {
         Theme::Woods => Palette { wall: rgb(92, 78, 112), trim: rgb(52, 42, 66), roof: rgb(46, 90, 104), window: rgb(255, 196, 110), door: rgb(70, 46, 50), roof_style: Roof::Gable, stone: false },
         Theme::Cliffs => Palette { wall: rgb(236, 220, 196), trim: rgb(176, 58, 54), roof: rgb(62, 112, 92), window: rgb(255, 224, 160), door: rgb(150, 50, 46), roof_style: Roof::Pagoda, stone: false },
         Theme::Glade => Palette { wall: rgb(170, 122, 80), trim: rgb(116, 78, 48), roof: rgb(92, 168, 84), window: rgb(200, 236, 170), door: rgb(110, 70, 42), roof_style: Roof::Leaf, stone: false },
+        Theme::Desert => Palette { wall: rgb(222, 184, 136), trim: rgb(140, 92, 56), roof: rgb(170, 90, 58), window: rgb(255, 220, 150), door: rgb(110, 70, 42), roof_style: Roof::Gable, stone: false },
+        Theme::Sky => Palette { wall: rgb(240, 238, 248), trim: rgb(170, 150, 90), roof: rgb(70, 110, 190), window: rgb(170, 220, 255), door: rgb(96, 80, 140), roof_style: Roof::Spire, stone: true },
         _ => Palette { wall: rgb(226, 222, 240), trim: rgb(132, 112, 186), roof: rgb(98, 72, 168), window: rgb(140, 236, 255), door: rgb(78, 60, 130), roof_style: Roof::Spire, stone: true },
     }
 }

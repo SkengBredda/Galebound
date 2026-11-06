@@ -14,15 +14,18 @@ pub enum ClassId {
     Stormfist,
     Windrunner,
     Aethermancer,
+    /// Dual pistols and acrobatics (0.15.0).
+    Gunslinger,
 }
 
-/// The five advanced classes you can change into at level 10.
+/// The six classes you can change into at level 10.
 pub const ALL_CLASSES: &[ClassId] = &[
     ClassId::Vanguard,
     ClassId::Duskblade,
     ClassId::Stormfist,
     ClassId::Windrunner,
     ClassId::Aethermancer,
+    ClassId::Gunslinger,
 ];
 
 /// Every class including Novice.
@@ -33,7 +36,11 @@ pub const EVERY_CLASS: &[ClassId] = &[
     ClassId::Stormfist,
     ClassId::Windrunner,
     ClassId::Aethermancer,
+    ClassId::Gunslinger,
 ];
+
+/// The highest level a character can reach (0.15.0: raised from 30-ish content to 60).
+pub const LEVEL_CAP: u32 = 60;
 
 /// Level at which a Novice may change class.
 pub const CLASS_CHANGE_LEVEL: u32 = 10;
@@ -69,9 +76,9 @@ impl MainStat {
     pub fn help(self) -> &'static str {
         match self {
             MainStat::Str => "+Max HP, +Physical DEF. Main attack stat for Vanguards and Novices.",
-            MainStat::Dex => "+Crit Chance. Main attack stat for Windrunners and Stormfists.",
+            MainStat::Dex => "+Crit Chance. Main attack stat for Windrunners, Stormfists and Gunslingers.",
             MainStat::Int => "+Max Mana, +Magical DEF, +MP regen. Main attack stat for Aethermancers.",
-            MainStat::Luk => "+Crit Chance, +Crit Damage. Main attack stat for Duskblades.",
+            MainStat::Luk => "+Crit Chance, +Crit Damage. Main attack stat for Duskblades (and second stat for Gunslingers).",
         }
     }
 }
@@ -87,6 +94,20 @@ pub enum Weapon {
     Gauntlets,
     Bow,
     Staff,
+    // 0.15.0
+    DualPistols,
+    Greatsword,
+    Greatshield,
+    Nunchucks,
+    WarStaff,
+    Katana,
+    Kusarigama,
+    Crossbow,
+    Greatbow,
+    CosmicOrbs,
+    Cards,
+    HandCannon,
+    OmniRifle,
 }
 
 #[derive(Clone, Debug)]
@@ -96,7 +117,7 @@ pub struct ClassInfo {
     pub blurb: &'static str,
     pub weapon: Weapon,
     pub weapon_name: &'static str,
-    /// Later class advancement paths (level 10), shown in the creator.
+    /// The two advanced classes this class can become at level 30.
     pub advancements: [&'static str; 2],
     pub base_hp: f32,
     pub base_mp: f32,
@@ -128,6 +149,7 @@ impl ClassId {
             ClassId::Stormfist => "stormfist",
             ClassId::Windrunner => "windrunner",
             ClassId::Aethermancer => "aethermancer",
+            ClassId::Gunslinger => "gunslinger",
         }
     }
     pub fn from_key(s: &str) -> Option<ClassId> {
@@ -164,7 +186,7 @@ impl ClassId {
                 blurb: "A sword-and-shield bruiser who soaks hits and answers with crushing swings.",
                 weapon: Weapon::SwordShield,
                 weapon_name: "Sword & Shield",
-                advancements: ["Ravager", "Bulwark"],
+                advancements: ["Berserker", "Paladin"],
                 base_hp: 180.0,
                 base_mp: 40.0,
                 hp_per_level: 22.0,
@@ -186,7 +208,7 @@ impl ClassId {
                 blurb: "Twin daggers, triple jumps and blink-fast strikes. Hits soft, hits often.",
                 weapon: Weapon::TwinDaggers,
                 weapon_name: "Twin Daggers",
-                advancements: ["Nightstalker", "Snarewright"],
+                advancements: ["Umbral Ninja", "Soul Reaper"],
                 base_hp: 120.0,
                 base_mp: 60.0,
                 hp_per_level: 14.0,
@@ -208,7 +230,7 @@ impl ClassId {
                 blurb: "Gauntleted brawler of the wind temples. Combos, launchers and thunderous palms.",
                 weapon: Weapon::Gauntlets,
                 weapon_name: "Storm Gauntlets",
-                advancements: ["Riposte Sect", "Tempest Sect"],
+                advancements: ["Surge Monk", "Warlord"],
                 base_hp: 150.0,
                 base_mp: 50.0,
                 hp_per_level: 18.0,
@@ -230,7 +252,7 @@ impl ClassId {
                 blurb: "A nimble bow-wielder who controls space with piercing and arcing arrows.",
                 weapon: Weapon::Bow,
                 weapon_name: "Longbow",
-                advancements: ["Skyhunter", "Beastwarden"],
+                advancements: ["Witch Hunter", "Beast Master"],
                 base_hp: 125.0,
                 base_mp: 70.0,
                 hp_per_level: 15.0,
@@ -252,7 +274,7 @@ impl ClassId {
                 blurb: "Bends wind and starlight through a runed staff. Slow, fragile, devastating.",
                 weapon: Weapon::Staff,
                 weapon_name: "Runed Staff",
-                advancements: ["Galecaller", "Runesage"],
+                advancements: ["Oracle", "Gambler"],
                 base_hp: 110.0,
                 base_mp: 120.0,
                 hp_per_level: 12.0,
@@ -267,6 +289,28 @@ impl ClassId {
                 secondary: MainStat::Luk,
                 magic: true,
                 town: "starfall_spire",
+            },
+            ClassId::Gunslinger => ClassInfo {
+                name: "Gunslinger",
+                role: "Acrobatic Sharpshooter",
+                blurb: "Twin pistols, cartwheels and backflips. Never stops moving, never stops shooting.",
+                weapon: Weapon::DualPistols,
+                weapon_name: "Dual Pistols",
+                advancements: ["Engineer", "Sniper"],
+                base_hp: 130.0,
+                base_mp: 65.0,
+                hp_per_level: 15.0,
+                mp_per_level: 6.0,
+                run_speed: 300.0,
+                jump_speed: 730.0,
+                air_jumps: 2,
+                weight: 0.9,
+                power: 0.95,
+                ratings: [3, 2, 5, 4, 3],
+                primary: MainStat::Dex,
+                secondary: MainStat::Luk,
+                magic: false,
+                town: "dustwind_gulch",
             },
         }
     }
@@ -386,12 +430,35 @@ pub enum ProjStyle {
     Caltrop,
     Shockwave,
     Star,
+    /// A bolt from the sky (Arcane Bolt): falls onto targets and bursts.
+    Lightning,
+    /// A falling meteor that explodes (Meteor).
+    Meteor,
+    /// An iron spike dropped from the ceiling (the Gatekeeper's portcullis).
+    Spike,
+    // 0.15.0
+    /// A pistol / rifle round.
+    Bullet,
+    /// A thrown playing card (Gambler).
+    Card,
+    /// An exploding cannonball (Engineer).
+    Cannonball,
+    /// A snowball rolling along the floor.
+    Snowball,
+    /// An icicle dropping from the ceiling.
+    Icicle,
+    /// A lobbed glob of fire / magma.
+    Fireball,
+    /// A lingering pool of lava.
+    LavaPool,
+    /// A gout of dragon fire.
+    Flame,
 }
 
 impl ProjStyle {
     pub fn from_u32(i: u32) -> ProjStyle {
         use ProjStyle::*;
-        [Arrow, Knife, Orb, Bolt, Caltrop, Shockwave, Star].get(i as usize).copied().unwrap_or(Orb)
+        [Arrow, Knife, Orb, Bolt, Caltrop, Shockwave, Star, Lightning, Meteor, Spike, Bullet, Card, Cannonball, Snowball, Icicle, Fireball, LavaPool, Flame].get(i as usize).copied().unwrap_or(Orb)
     }
 }
 
@@ -543,6 +610,14 @@ pub fn attack_def(class: ClassId, kind: AttackKind) -> AttackDef {
     d
 }
 
+/// The moveset for a class and (optional) advanced class: the advanced
+/// class's weapon reshapes the base moves (see `jobs::apply_moves`).
+pub fn attack_for(class: ClassId, job: Option<crate::jobs::Job>, kind: AttackKind) -> AttackDef {
+    let mut d = attack_def(class, kind);
+    crate::jobs::apply_moves(job, &mut d);
+    d
+}
+
 /// Projectile hit values with pacing applied.
 pub fn projectile_damage(class: ClassId, kind: AttackKind) -> (f32, f32, f32, f32) {
     use crate::physics::{PACE_H, PACE_V};
@@ -635,6 +710,34 @@ fn attack_def_raw(class: ClassId, kind: AttackKind) -> AttackDef {
                 .shoot(ProjectileDef { count: 3, spread: 260.0, life: 0.9, ..proj(200.0, 1000.0, 22.0, 22.0, ProjStyle::Star) })
                 .mp(12.0),
         },
+        Gunslinger => match kind {
+            LightNeutral => melee("Pistol Whip", 0.07, 0.08, 0.14, (20.0, -6.0, 40.0, 32.0), 7.0, (180.0, -150.0), 0.22),
+            LightSide => melee("Quick Draw", 0.08, 0.04, 0.14, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .shoot(ProjectileDef { life: 0.55, ..proj(1300.0, 0.0, 14.0, 5.0, ProjStyle::Bullet) }),
+            LightDown => melee("Sweep Kick", 0.08, 0.09, 0.18, (22.0, 20.0, 46.0, 18.0), 8.0, (140.0, -420.0), 0.28),
+            AirNeutral => melee("Aerial Spin", 0.07, 0.12, 0.14, (0.0, -4.0, 74.0, 56.0), 8.0, (220.0, -220.0), 0.24).both(),
+            AirSide => melee("Air Shot", 0.08, 0.04, 0.16, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .shoot(ProjectileDef { count: 2, spread: 90.0, life: 0.55, ..proj(1300.0, 60.0, 14.0, 5.0, ProjStyle::Bullet) }),
+            AirDown => melee("Gunfire Dive", 0.08, 0.04, 0.16, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .lunge(0.0, -260.0)
+                .shoot(ProjectileDef { count: 2, spread: 220.0, life: 0.5, ..proj(160.0, 1200.0, 5.0, 14.0, ProjStyle::Bullet) }),
+            HeavyNeutral => melee("Twin Volley", 0.14, 0.05, 0.24, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .shoot(ProjectileDef { count: 4, spread: 140.0, life: 0.6, ..proj(1250.0, 0.0, 14.0, 5.0, ProjStyle::Bullet) })
+                .mp(6.0),
+            HeavySide => melee("Cartwheel Shot", 0.06, 0.05, 0.24, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .lunge(620.0, -180.0)
+                .invuln()
+                .shoot(ProjectileDef { count: 2, spread: 60.0, pierce: true, life: 0.6, ..proj(1400.0, 0.0, 16.0, 6.0, ProjStyle::Bullet) })
+                .mp(8.0),
+            HeavyDown => melee("Backflip Shot", 0.08, 0.05, 0.24, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .lunge(-460.0, -600.0)
+                .shoot(ProjectileDef { count: 3, spread: 160.0, life: 0.6, ..proj(1200.0, 100.0, 14.0, 5.0, ProjStyle::Bullet) })
+                .mp(6.0),
+            AirHeavyNeutral => melee("Corkscrew Leap", 0.06, 0.18, 0.24, (0.0, -10.0, 76.0, 70.0), 12.0, (180.0, -620.0), 0.34).lunge(120.0, -860.0).both(),
+            AirHeavyDown => melee("Bullet Rain", 0.12, 0.05, 0.28, (0.0, 0.0, 0.0, 0.0), 0.0, (0.0, 0.0), 0.0)
+                .shoot(ProjectileDef { count: 5, spread: 300.0, life: 0.7, ..proj(240.0, 1100.0, 5.0, 14.0, ProjStyle::Bullet) })
+                .mp(8.0),
+        },
     }
 }
 
@@ -654,6 +757,13 @@ fn projectile_damage_raw(class: ClassId, kind: AttackKind) -> (f32, f32, f32, f3
         (ClassId::Aethermancer, HeavyNeutral) => (14.0, 260.0, -420.0, 0.35),
         (ClassId::Aethermancer, HeavySide) => (24.0, 560.0, -260.0, 0.42),
         (ClassId::Aethermancer, AirHeavyDown) => (16.0, 120.0, 260.0, 0.35),
+        (ClassId::Gunslinger, LightSide) => (9.0, 200.0, -110.0, 0.2),
+        (ClassId::Gunslinger, AirSide) => (7.0, 180.0, -110.0, 0.2),
+        (ClassId::Gunslinger, AirDown) => (7.0, 80.0, 260.0, 0.24),
+        (ClassId::Gunslinger, HeavyNeutral) => (8.0, 200.0, -160.0, 0.24),
+        (ClassId::Gunslinger, HeavySide) => (13.0, 380.0, -200.0, 0.3),
+        (ClassId::Gunslinger, HeavyDown) => (9.0, 260.0, -200.0, 0.26),
+        (ClassId::Gunslinger, AirHeavyDown) => (8.0, 80.0, 220.0, 0.28),
         _ => (8.0, 200.0, -200.0, 0.25),
     }
 }

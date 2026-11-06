@@ -7,6 +7,260 @@ so the whole history is in one place.
 
 ---
 
+## 0.15.1 – Everyone's effects, and options to hide them
+*6 November 2026*
+
+Main game. Works with 0.15.0 servers and players (the network protocol
+hasn't changed), but update everyone to see each other's new effects.
+
+**Changed: you now see other players' effects**
+- Other players' **turrets**, **spirit hawks** and **orbiting stars** now
+  show on your screen. They're just for show on your side: only their
+  owner's copy hurts monsters or heals.
+- **Mender Turrets** send their healing sparks to their owner.
+- **Thunder Palm's** lightning now leaps between monsters when other
+  players use it too.
+- **Engineers'** cannon shots explode for everyone to see.
+- **Party abilities** (Sanctuary, Battle Standard, Starlight Blessing) flash
+  a holy ring around the player who used them.
+
+**Added: Effects options** (Settings → Graphics)
+- Three new rows:
+  - **Companions:** turrets, hawks and orbiting stars;
+  - **Ability effects:** ability shots, lightning, explosions, auras, and
+    ability names over other players;
+  - **Weapon effects:** basic attack swings, shots and cannon blasts.
+- Each one can be **Everyone**, **Only mine** or **Off**.
+- Hiding effects only changes what you see: abilities still hit, and
+  turrets and hawks still work. Monsters' attacks always show.
+- Your choice is saved with your other settings.
+
+---
+
+## 0.15.0 – Gunslingers, advanced classes & the Skyreach Highlands
+*6 November 2026*
+
+Main game (the chibi art trial is still 0.12.1-trial and doesn't have
+these yet). Online play needs everyone on 0.15.0 (network protocol 6).
+
+**Added: the Gunslinger (6th class)**
+- Dual pistols and acrobatics. Main stats: DEX, then LUK. Triple jump.
+- Moves include Quick Draw, Cartwheel Shot (dash forward, can't be hurt),
+  Backflip Shot, Gunfire Dive, Corkscrew Leap and Bullet Rain.
+- Abilities: Ricochet (Lv 10), Acrobat's Flair (Lv 12), Bullet Dance (Lv 15)
+  and Dead Eye (Lv 20).
+- Taught in the new town of **Dustwind Gulch**. It's in the desert, at the
+  end of the **Sunscorch Trail** (the sixth road from Wayfarer's
+  Crossroads, Lv 11-13). The **Rattlesnake Mesa** hunting ground (Lv 18-21)
+  lies east of it.
+- Gunslinger weapons run from Lv 10 to the Gold and Red Tempest Vault tiers.
+
+**Added: advanced classes at level 30**
+- Every class can advance into one of two advanced classes. Talk to your
+  class instructor, or to Grandmaster Aldric in Skyreach Citadel. The choice
+  is permanent.
+- An advanced class keeps all of your old moves and abilities. You get:
+  - a new weapon type, which changes how your attacks feel (size, speed
+    and damage);
+  - 2 new abilities, at Lv 30 and Lv 40;
+  - 3 passive abilities, at Lv 30, 35 and 45. These are always on, and
+    they're shown in the Abilities window.
+- **Vanguard:**
+  - **Berserker** (Greatsword): Cataclysm Cleave, Blood Frenzy. Passives:
+    Bloodlust (stronger below half HP), Greatsword Mastery and Undying Fury
+    (heals you for part of the damage you deal).
+  - **Paladin** (Greatshield): Sanctuary (heals and shields the whole
+    party), Judgement Slam. Passives: Provoke (monsters target you first
+    online), Aegis (15% less damage) and Guardian's Oath.
+- **Stormfist:**
+  - **Surge Monk** (Nunchucks): Chain Surge, Thunder Rush. Passives: Flow
+    State (combo damage), Lightning Reflexes and Static Overload (crits arc
+    lightning).
+  - **Warlord** (War Staff): Battle Standard (buffs the party),
+    Earthshaker Sweep. Passives: Commanding Presence, Staff Mastery and
+    Warlord's Resolve (an emergency heal).
+- **Duskblade:**
+  - **Umbral Ninja** (Katana): Iaido, Shadow Clone. Passives: First Blood
+    (your first hit on every monster is a crit), Ninjutsu and Vanish (a
+    chance to dodge hits).
+  - **Soul Reaper** (Kusarigama): Chain Reap (drags monsters in), Death
+    Spiral. Passives: Reaper's Window (+35% damage after a dodge), Soul
+    Harvest (kills shorten your cooldowns) and Soul Siphon.
+- **Windrunner:**
+  - **Witch Hunter** (Crossbow, piercing bolts): Silver Volley, Hex Trap.
+    Passives: Hex Bane (+30% against bosses), Steady Hands and Executioner.
+  - **Beast Master** (Greatbow): Spirit Hawk (a companion that dives at
+    monsters), Stampede Arrow. Passives: Wild Instinct, Alpha Bond (your
+    pet's bonuses doubled) and Feral Volley (every 3rd shot fires twice).
+- **Aethermancer:**
+  - **Oracle** (Cosmic Orbs): Starlight Blessing (heals and buffs the
+    party), Cosmic Convergence. Passives: Orbiting Stars (orbs circle you
+    and burn monsters), Foresight and Astral Mind.
+  - **Gambler** (Deck of Cards): Wild Card (½× to 4× damage), Jackpot (one
+    of four random buffs). Passives: Lucky Streak, Loaded Dice and House
+    Edge (a chance of double damage).
+- **Gunslinger:**
+  - **Engineer** (Hand-Cannon, exploding shots): Sentry Turret (shoots
+    monsters), Mender Turret (heals you and the party). Passives: Heavy
+    Ordnance, Overclock and Field Plating.
+  - **Sniper** (Omni-Rifle, fast piercing rounds): Headshot, Suppressing
+    Fire. Passives: Steady Aim (+25% crit while standing still), Long Shot
+    (more damage at range) and Marksman.
+- Party abilities (Sanctuary, Battle Standard, Starlight Blessing and Mender
+  Turret pulses) reach party members on the same map nearby.
+
+**Added: levels 30-60 – the Skyreach Highlands**
+- **The level cap is now 60.** EXP needed per level is 30% higher from
+  level 20 onwards, so the 20s take longer.
+- **Cloudstep Pass** (Lv 28-31) climbs from the east end of Wayfarer's
+  Crossroads to **Skyreach Citadel**. The Citadel is the Highlands hub, with
+  shops for Lv 30-50 gear and weapons for every class and advanced class, an
+  inn, a pet shop and a waystone.
+- Six new hunting grounds:
+  - Frostveil Tundra (31-35) and Glacier Hollow (35-40);
+  - Emberfall Caldera (40-45) and Cinderspire Wastes (45-50);
+  - the Stormcrown Isles (50-55, over the Skybridge) and the Shattered
+    Heavens (55-60).
+- New snow, volcano, sky-isle and desert scenery.
+- **40 new monsters.** New kinds include Cactlings, scorpions, yetis,
+  golems, salamanders, wyrmlings and bats.
+- **Equipment:**
+  - Skyreach (Lv 30), Frostguard (Lv 40) and Emberweave (Lv 50) armour sets;
+  - class weapons at Lv 30, 40 and 50;
+  - 5 weapons for each advanced class;
+  - three dungeon sets: Rimeheart (Gold), Cinderforged (Red) and Celestial
+    (Red);
+  - Grand potions, the Skyreach Elixir and the Titan Tonic.
+- **Quests:**
+  - a Highlands story from Jory, Grandmaster Aldric, Captain Brannoch, Sage
+    Ilyra and Skywatcher Oriel;
+  - two Dustwind Gulch quests.
+- **New achievements:** Lv 40/50/60, advancing, and clearing each new
+  dungeon.
+
+**Added: three co-op dungeons** (enter through the Delvers in Skyreach
+Citadel; parties share a copy, like the Tempest Vault). Flying monsters live
+inside them.
+- **The Frozen Throne (Lv 35+):**
+  - **Rime Colossus:** Blizzard (stand still and you freeze solid – keep
+    moving) and Avalanche (snowballs roll in from both walls – jump them).
+  - **Glacia, the Frost Wyrm** (flies): Icicle Barrage aimed wherever you
+    stand. Ice Shield makes her immune until you smash her three Frost
+    Crystals, then she's stunned.
+- **The Cinder Sanctum (Lv 45+):**
+  - **Magmaw:** Overheat is a damage race – hurt it enough while it glows
+    and it's stunned; fail and it explodes in a supernova. Eruption leaves
+    lava pools.
+  - **Ignaroth, the Cinder Dragon:** Flame Breath sweeps the arena.
+    Inferno sets the half of the arena it faces on fire – cross to the
+    other half. Wing Gust pushes everyone back.
+- **The Celestial Spire (Lv 55+):**
+  - **Sol and Luna, the Aether Twins**, fought together: Solar Flare and
+    Lunar Rain.
+  - Kill one and the other goes into Eclipse. Finish it within 10 seconds,
+    or it brings its twin back at 40% HP.
+- Each clear gives that dungeon's cache: shards and a 35% chance of its
+  gear.
+
+**Changed: the world map**
+- The map now has two regions, the Gale Lowlands and the Skyreach
+  Highlands, with tabs to switch between them. The Lowlands were re-laid
+  out to fit Dustwind Gulch.
+
+**Notes**
+- Turrets, the spirit hawk and orbiting stars are only drawn on their
+  owner's screen. Their hits still count online.
+
+---
+
+## 0.14.0 – Admins, duels, new magic & boss arenas
+*6 November 2026*
+
+Main game (the chibi art trial is still 0.12.1-trial and doesn't have
+these yet). Online play needs everyone on 0.14.0 (network protocol 5).
+
+**Added: the admin role**
+- The server host gives someone the admin role by typing `admin <name>` in
+  the server window (`unadmin <name>` takes it away, `admins` lists them,
+  `kick <name>` disconnects someone). Admins can also make other admins.
+  The list is kept in `admins.txt`, so it survives restarts.
+- **In-game badge:** admins have a gold **GM** crown tag and a gold name
+  over their head, and a `[GM]` prefix in chat.
+- **Admin Panel (F9, or Admin in the pause menu):** a live player list
+  (level, class, map, muted), buttons for Go to, Summon, Heal, Mute/Unmute,
+  Kick and Make/Remove admin, give gold / set level / give items (with item
+  suggestions), God mode, Clear monsters, server-wide Announcements, Spawn
+  monsters (with suggestions), a free command line and a results log.
+- **Chat commands** for admins: `/help`, `/players`, `/announce`, `/goto`,
+  `/summon`, `/heal`, `/give`, `/gold`, `/level`, `/god`, `/spawn`, `/clear`,
+  `/mute`, `/unmute`, `/kick`, `/admin`, `/unadmin`. `me` means yourself.
+  Non-admins can't use them – the server checks every command.
+
+**Added: duels**
+- Right-click a nearby player → **Duel** (or type `/duel <name>`). They get
+  an invite; after a 3-second countdown you fight for up to 90 seconds.
+- Duel hits do reduced damage and **can't kill**: the first one knocked
+  down to 1 HP loses. `/yield` gives up. Leaving the map forfeits.
+- Your opponent's name turns red with crossed swords, and a timer shows at
+  the top of the screen.
+
+**Added: zoom**
+- Settings → Graphics → **Zoom** (70% to 130%) changes how much of the
+  world you can see. It's remembered between sessions.
+
+**Changed: skills**
+- **Aethermancer – Arcane Bolt:** now calls lightning down from the sky
+  onto up to 4 monsters in an area in front of you, each bolt bursting
+  where it lands.
+- **Aethermancer – Starfall is now Meteor:** a powerful meteor crashes down
+  diagonally onto the nearest monster and explodes, damaging everything in
+  a wide area. (Hotbars that had Starfall get Meteor automatically.)
+- **Stormfist – Thunder Palm:** now a lunging palm strike whose lightning
+  **chains** to up to 3 nearby monsters, with sparks crackling off your
+  hand.
+- **Stormfist – Hundred Fists:** a new animation – you can see the front
+  and back fist alternate on every one of the 6 hits.
+- **Ranged attacks aim in a cone:** arrows, knives, bolts and orbs curve
+  toward the nearest monster within about 38° of where you're facing, so
+  ranged characters can hit monsters above or below them.
+
+**Changed: Tempest Vault (co-op dungeon)**
+- **New layout:** steps, a sunken crypt, a sunken gallery and terraces
+  instead of one flat corridor, and a proper **arena for each boss**,
+  walled in by pillars (double jump over them) with ledges inside.
+- **The Gatekeeper** has two new mechanics:
+  - **Shield Up:** it plants a glowing shield and sends shockwaves along the
+    floor. Hits from the front only do 10% damage – get behind it (jump
+    over it or use the ledges). It won't turn round while shielded.
+  - **Portcullis:** iron spikes rattle down from the ceiling across the
+    whole arena. Look for the gaps.
+- **The Stormwarden** has two new mechanics:
+  - **Vortex:** a whirlwind drags everyone toward it, then bursts outwards
+    in a ring of bolts. Run!
+  - **Live Floor:** sparks crawl across the floor, then the whole arena
+    floor is electrified. Anyone standing on the ground gets shocked –
+    climb onto the ledges. Meanwhile it shoots at the people up high.
+- Both bosses use these more often once they're below half health, and
+  neither can be lured out of its arena.
+- **Flying monsters now live in the vault:** new **Stormkites** (they
+  screech and dive) and **Vault Wisps** (they hurl starfire) join the
+  Galewraiths.
+
+**Changed: no more flying monsters in the field**
+- Gustlings, Lanternwisps, Squallsprites, Gloomwisps and Voidgusts now walk
+  the ground and fire straight shots at you; Galehawks and Thunderhawks
+  stalk the ledges and charge. Quests and signs that mentioned them flying
+  were updated.
+
+**Changed: prices**
+- Pets now cost a flat **15,000 gold**. Everything else keeps the 5× prices.
+
+**Fixed**
+- Jumping left or right off a ladder into a platform or ledge no longer
+  teleports you to the other side of it.
+
+---
+
 ## 0.13.0 – Crafting, cooking, housing & the Tempest Vault
 *4 November 2026*
 

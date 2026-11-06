@@ -47,7 +47,8 @@ fn main() {
     println!(" Friends: log in with your playit.gg tunnel address, with its port,");
     println!("          e.g. galebound.playit.game:42311 (keep playit running)");
     println!();
-    println!(" Type 'help' for commands. 'stop' saves and shuts down.");
+    println!(" Type 'help' for commands. 'admin <name>' makes someone an admin.");
+    println!(" 'stop' saves and shuts down.");
     println!("==============================================================");
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -59,10 +60,18 @@ fn main() {
                 "list" | "who" => Command::List,
                 "say" => Command::Say(rest.to_string()),
                 "stop" | "quit" | "exit" => Command::Stop,
+                "admin" | "op" => Command::Admin(rest.to_string(), true),
+                "unadmin" | "deop" => Command::Admin(rest.to_string(), false),
+                "admins" => Command::Admins,
+                "kick" => Command::Kick(rest.to_string()),
                 "help" => {
-                    println!("  list         who's online and where");
-                    println!("  say <text>   message everyone");
-                    println!("  stop         shut the server down");
+                    println!("  list            who's online and where");
+                    println!("  say <text>      message everyone");
+                    println!("  admin <name>    give a character the admin role (F9 in game)");
+                    println!("  unadmin <name>  take the admin role away");
+                    println!("  admins          list the admins");
+                    println!("  kick <name>     disconnect a player");
+                    println!("  stop            shut the server down");
                     continue;
                 }
                 "" => continue,

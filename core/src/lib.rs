@@ -3,6 +3,7 @@
 //! authoritative game server.
 
 pub mod achievements;
+pub mod admin;
 pub mod appearance;
 pub mod auth;
 pub mod classes;
@@ -12,6 +13,7 @@ pub mod enemies;
 pub mod housing;
 pub mod input;
 pub mod items;
+pub mod jobs;
 pub mod math;
 pub mod net;
 pub mod pets;

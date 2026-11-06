@@ -8,9 +8,11 @@ use crate::sprites;
 use crate::widgets::{self, ButtonStyle, TextField, Ui};
 use galebound_core::achievements::{self, ACHIEVEMENTS, ATTENDANCE, COSMETICS};
 use galebound_core::appearance::Appearance;
-use galebound_core::classes::ClassId;
 use galebound_core::items::{self, EQUIP_SLOTS};
-use galebound_core::net::{SocialCmd, INV_FRIEND, INV_GUILD, INV_PARTY, INV_TRADE};
+use galebound_core::net::{SocialCmd, INV_DUEL, INV_FRIEND, INV_GUILD, INV_PARTY, INV_TRADE};
+
+#[path = "admin_ui.rs"]
+mod admin_ui;
 use galebound_core::social::{self, MemberNet, GUILD_BUFFS, RANK_LEADER, RANK_MEMBER, RANK_OFFICER};
 use galebound_core::sim::Sim;
 use macroquad::prelude::{is_key_down, is_mouse_button_pressed, mouse_wheel, Color, KeyCode, MouseButton};
@@ -26,6 +28,12 @@ enum Field {
     GuildInvite,
     Notice,
     TradeGold,
+    // Admin Panel
+    AdminAmount,
+    AdminItem,
+    AdminAnnounce,
+    AdminMonster,
+    AdminCmd,
 }
 
 /// Something you can do to another player, from the right-click menu.
@@ -35,6 +43,7 @@ enum Act {
     Profile,
     Party,
     Trade,
+    Duel,
     GuildInvite,
     AddFriend,
     RemoveFriend,
@@ -55,6 +64,7 @@ impl Act {
             Act::Profile => "View profile",
             Act::Party => "Invite to party",
             Act::Trade => "Trade",
+            Act::Duel => "Challenge to a duel",
             Act::GuildInvite => "Invite to guild",
             Act::AddFriend => "Add friend",
             Act::RemoveFriend => "Remove friend",
@@ -103,6 +113,15 @@ pub struct SocialUi {
     attendance_prompt: bool,
     /// Ask for a chat line to be started (e.g. "/w Name ").
     pub start_chat: Option<String>,
+    /// The Admin Panel (F9, admins only).
+    pub admin: bool,
+    admin_sel: Option<String>,
+    admin_amount: TextField,
+    admin_item: TextField,
+    admin_announce: TextField,
+    admin_monster: TextField,
+    admin_line: TextField,
+    admin_refresh: f32,
 }
 
 impl Default for SocialUi {
@@ -131,6 +150,14 @@ impl Default for SocialUi {
             trade_with: String::new(),
             attendance_prompt: true,
             start_chat: None,
+            admin: false,
+            admin_sel: None,
+            admin_amount: TextField::new("Amount", false, 9),
+            admin_item: TextField::new("Item id, e.g. elixir", false, 32),
+            admin_announce: TextField::new("Announcement for everyone", false, 120),
+            admin_monster: TextField::new("Monster, e.g. mossling", false, 24),
+            admin_line: TextField::new("Any command, e.g. give me elixir 5", false, 120),
+            admin_refresh: 0.0,
         }
     }
 }
@@ -144,7 +171,7 @@ fn px_color(p: crate::pixel::Px) -> Color {
 }
 
 fn class_name(key: &str) -> &'static str {
-    ClassId::from_key(key).map(|c| c.info().name).unwrap_or("Novice")
+    galebound_core::jobs::class_display(key)
 }
 
 fn map_name(key: &str) -> String {
@@ -199,7 +226,7 @@ impl SocialUi {
     }
 
     pub fn any_open(&self, sim: &Sim) -> bool {
-        self.social || self.guild || self.achievements || (self.profile && sim.profile.is_some()) || sim.trade.is_some() || self.menu.is_some()
+        self.social || self.guild || self.achievements || (self.profile && sim.profile.is_some()) || sim.trade.is_some() || self.menu.is_some() || self.admin
     }
 
     /// Esc closes the top-most social window.
@@ -216,6 +243,10 @@ impl SocialUi {
         if self.profile && sim.profile.is_some() {
             self.profile = false;
             sim.profile = None;
+            return true;
+        }
+        if self.admin {
+            self.admin = false;
             return true;
         }
         for w in [&mut self.achievements, &mut self.guild, &mut self.social] {
@@ -295,6 +326,9 @@ impl SocialUi {
         }
         if nearby {
             acts.push(Act::Trade);
+            if sim.duel.is_none() {
+                acts.push(Act::Duel);
+            }
         }
         if let Some(g) = &sim.guild {
             let my_rank = g.rank_of(me);
@@ -332,6 +366,7 @@ impl SocialUi {
             }
             Act::Party => sim.social_cmd(SocialCmd::PartyInvite { name: n }),
             Act::Trade => sim.social_cmd(SocialCmd::TradeRequest { name: n }),
+            Act::Duel => sim.social_cmd(SocialCmd::DuelRequest { name: n }),
             Act::GuildInvite => sim.social_cmd(SocialCmd::GuildInvite { name: n }),
             Act::AddFriend => sim.social_cmd(SocialCmd::FriendAdd { name: n }),
             Act::RemoveFriend => sim.social_cmd(SocialCmd::FriendRemove { name: n }),
@@ -374,6 +409,13 @@ impl SocialUi {
         }
         if self.profile {
             self.profile_window(sim, &ui_main);
+        }
+        if self.admin {
+            if sim.am_admin() {
+                self.admin_window(sim, &ui_main, dt);
+            } else {
+                self.admin = false;
+            }
         }
         self.trade_window(sim, &ui_main);
         self.invites(sim, &ui_main);
@@ -423,10 +465,15 @@ impl SocialUi {
             Field::GuildInvite => &mut self.guild_invite,
             Field::Notice => &mut self.notice,
             Field::TradeGold => &mut self.trade_gold,
+            Field::AdminAmount => &mut self.admin_amount,
+            Field::AdminItem => &mut self.admin_item,
+            Field::AdminAnnounce => &mut self.admin_announce,
+            Field::AdminMonster => &mut self.admin_monster,
+            Field::AdminCmd => &mut self.admin_line,
         };
         if focused {
             tf.type_into(ui);
-            if f == Field::TradeGold {
+            if f == Field::TradeGold || f == Field::AdminAmount {
                 tf.text.retain(|c| c.is_ascii_digit());
             }
         }
@@ -445,6 +492,11 @@ impl SocialUi {
             Field::GuildInvite => &mut self.guild_invite,
             Field::Notice => &mut self.notice,
             Field::TradeGold => &mut self.trade_gold,
+            Field::AdminAmount => &mut self.admin_amount,
+            Field::AdminItem => &mut self.admin_item,
+            Field::AdminAnnounce => &mut self.admin_announce,
+            Field::AdminMonster => &mut self.admin_monster,
+            Field::AdminCmd => &mut self.admin_line,
         };
         self.focus = None;
         std::mem::take(&mut tf.text).trim().to_string()
@@ -1130,6 +1182,7 @@ impl SocialUi {
                 INV_PARTY => format!("{} invites you to a party.", from),
                 INV_GUILD => format!("{} invites you to join {}.", from, extra),
                 INV_TRADE => format!("{} wants to trade with you.", from),
+                INV_DUEL => format!("{} challenges you to a duel!", from),
                 _ => format!("{} sent an invitation.", from),
             };
             gfx::text(&text, x + 16.0, y + 12.0, 15.0, rgb(240, 244, 255));
@@ -1146,6 +1199,7 @@ impl SocialUi {
                     INV_FRIEND => SocialCmd::FriendAnswer { name: from.clone(), accept },
                     INV_PARTY => SocialCmd::PartyAnswer { from: from.clone(), accept },
                     INV_GUILD => SocialCmd::GuildAnswer { guild: extra.clone(), accept },
+                    INV_DUEL => SocialCmd::DuelAnswer { from: from.clone(), accept },
                     _ => SocialCmd::TradeAnswer { from: from.clone(), accept },
                 };
                 sim.social_cmd(cmd);

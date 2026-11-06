@@ -369,6 +369,94 @@ fn weapon_icon(w: Weapon, accent: Px) -> Canvas {
                 c.disc(13.0, 4.0, 3.0, accent);
                 c.set(12, 3, rgb(255, 255, 255));
             }
+            // 0.15.0
+            Weapon::DualPistols => {
+                for (x, y) in [(2.0f32, 6.0f32), (7.0, 10.0)] {
+                    c.rect(x as i32, y as i32, 9, 3, rgb(70, 70, 84));
+                    c.rect(x as i32, y as i32 + 2, 3, 5, rgb(130, 84, 50));
+                    c.set(x as i32 + 4, y as i32 + 1, accent);
+                }
+            }
+            Weapon::Greatsword => {
+                c.taper((4.0, 15.0), (16.0, 1.0), 3.4, 1.2, steel);
+                c.line(2, 10, 9, 17, rgb(160, 60, 50));
+                c.line(1, 16, 3, 14, accent);
+            }
+            Weapon::Greatshield => {
+                c.ellipse(9.0, 9.0, 6.0, 8.0, rgb(150, 150, 168));
+                c.ellipse(9.0, 9.0, 5.0, 7.0, rgb(230, 230, 240));
+                c.rect(8, 4, 2, 10, accent);
+                c.rect(5, 7, 8, 2, accent);
+            }
+            Weapon::Nunchucks => {
+                c.taper((3.0, 15.0), (7.0, 7.0), 1.4, 1.4, rgb(70, 46, 40));
+                c.line(7, 7, 11, 5, rgb(200, 200, 210));
+                c.taper((11.0, 5.0), (16.0, 12.0), 1.4, 1.4, rgb(70, 46, 40));
+                c.set(7, 7, accent);
+            }
+            Weapon::WarStaff => {
+                c.taper((2.0, 16.0), (16.0, 2.0), 1.3, 1.3, rgb(96, 64, 40));
+                c.disc(2.5, 15.5, 1.8, steel);
+                c.disc(15.5, 2.5, 1.8, steel);
+                c.disc(9.0, 9.0, 1.4, accent);
+            }
+            Weapon::Katana => {
+                c.taper((5.0, 13.0), (15.0, 2.0), 1.7, 0.6, steel);
+                c.disc(5.0, 13.0, 1.6, rgb(40, 36, 44));
+                c.line(2, 16, 4, 14, accent);
+            }
+            Weapon::Kusarigama => {
+                c.taper((4.0, 14.0), (10.0, 6.0), 1.2, 1.2, rgb(70, 50, 40));
+                c.taper((10.0, 6.0), (15.0, 9.0), 1.4, 0.6, steel);
+                for i in 0..4 {
+                    c.set(3 - i / 2, 15 + i / 2, rgb(180, 184, 196));
+                }
+                c.set(10, 6, accent);
+            }
+            Weapon::Crossbow => {
+                c.rect(3, 8, 11, 3, rgb(110, 72, 44));
+                c.line(12, 3, 14, 9, rgb(70, 70, 84));
+                c.line(12, 15, 14, 10, rgb(70, 70, 84));
+                c.line(12, 3, 8, 9, rgb(236, 236, 236));
+                c.line(12, 15, 8, 10, rgb(236, 236, 236));
+                c.set(5, 9, accent);
+            }
+            Weapon::Greatbow => {
+                for i in 0..10 {
+                    let t = i as f32 / 9.0 * 2.0 - 1.0;
+                    let x = 4.0 + (1.0 - t * t) * 6.0;
+                    c.disc(x, 9.0 + t * 8.0, 1.4, rgb(84, 56, 40));
+                }
+                c.line(4, 1, 4, 17, rgb(240, 240, 240));
+                c.rect(9, 8, 2, 2, accent);
+            }
+            Weapon::CosmicOrbs => {
+                c.disc(6.0, 10.0, 3.5, rgb(150, 200, 255));
+                c.disc(12.0, 6.0, 2.8, rgb(255, 210, 120));
+                c.disc(13.0, 13.0, 2.0, accent);
+                c.set(5, 9, rgb(255, 255, 255));
+            }
+            Weapon::Cards => {
+                for (i, x) in [3, 7, 11].iter().enumerate() {
+                    c.rect(*x, 4 + i as i32, 5, 8, rgb(250, 248, 240));
+                    c.set(*x + 2, 7 + i as i32, if i == 1 { rgb(200, 40, 50) } else { rgb(30, 30, 40) });
+                }
+                c.rect(4, 13, 10, 2, accent);
+            }
+            Weapon::HandCannon => {
+                c.rect(3, 6, 12, 6, rgb(70, 72, 84));
+                c.rect(5, 6, 2, 6, rgb(200, 160, 70));
+                c.rect(10, 6, 2, 6, rgb(200, 160, 70));
+                c.disc(15.0, 9.0, 3.0, rgb(50, 50, 58));
+                c.rect(3, 11, 3, 5, rgb(120, 76, 44));
+            }
+            Weapon::OmniRifle => {
+                c.rect(1, 9, 7, 3, rgb(80, 70, 90));
+                c.rect(7, 9, 10, 2, rgb(150, 156, 176));
+                c.rect(6, 6, 5, 2, rgb(40, 40, 48));
+                c.set(5, 10, rgb(120, 230, 255));
+                c.rect(3, 11, 2, 4, accent);
+            }
         }
     })
 }
@@ -430,6 +518,28 @@ pub fn skill(s: &SkillDef) -> Canvas {
             c.rect(7, 3, 4, 12, col);
             c.rect(3, 7, 12, 4, col);
             c.rect(8, 4, 2, 10, white);
+        }
+        SkillEffect::Party { .. } => {
+            // three figures under a halo
+            for x in [4.0f32, 9.0, 14.0] {
+                c.disc(x, 9.0, 1.8, col);
+                c.rect(x as i32 - 1, 11, 3, 4, col);
+            }
+            c.ellipse(9.0, 4.5, 6.0, 1.6, white);
+        }
+        SkillEffect::Summon { .. } => {
+            // a little turret / companion
+            c.rect(5, 12, 8, 3, col);
+            c.rect(7, 7, 5, 5, light(col, 0.3));
+            c.rect(11, 8, 5, 2, white);
+            c.disc(9.0, 4.0, 1.5, white);
+        }
+        SkillEffect::Gamble => {
+            // a die
+            c.rect(4, 4, 10, 10, white);
+            for (x, y) in [(6, 6), (11, 6), (8, 9), (6, 12), (11, 12)] {
+                c.set(x, y, shadow(col, 0.2));
+            }
         }
     }
     c

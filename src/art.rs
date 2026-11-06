@@ -662,6 +662,22 @@ pub fn theme_art(theme: Theme) -> ThemeArt {
             stone: rgb(132, 88, 56), mortar: rgb(86, 56, 36), grass: rgb(150, 100, 64), grass_dk: rgb(110, 72, 46),
             sky_top: rgb(120, 80, 52), sky_bot: rgb(150, 104, 70), far: rgb(120, 80, 52), mid: rgb(120, 80, 52), near: rgb(96, 64, 42),
         },
+        Theme::Desert => ThemeArt {
+            stone: rgb(214, 160, 104), mortar: rgb(146, 96, 60), grass: rgb(226, 196, 128), grass_dk: rgb(190, 150, 92),
+            sky_top: rgb(104, 166, 232), sky_bot: rgb(252, 224, 168), far: rgb(222, 156, 118), mid: rgb(196, 132, 92), near: rgb(162, 104, 70),
+        },
+        Theme::Frost => ThemeArt {
+            stone: rgb(184, 200, 222), mortar: rgb(112, 132, 166), grass: rgb(244, 250, 255), grass_dk: rgb(196, 218, 240),
+            sky_top: rgb(118, 158, 220), sky_bot: rgb(222, 236, 250), far: rgb(192, 212, 238), mid: rgb(150, 180, 214), near: rgb(108, 144, 186),
+        },
+        Theme::Ember => ThemeArt {
+            stone: rgb(108, 84, 80), mortar: rgb(56, 36, 36), grass: rgb(140, 112, 96), grass_dk: rgb(98, 72, 64),
+            sky_top: rgb(48, 18, 24), sky_bot: rgb(214, 86, 46), far: rgb(118, 48, 42), mid: rgb(82, 34, 32), near: rgb(54, 24, 26),
+        },
+        Theme::Sky => ThemeArt {
+            stone: rgb(226, 222, 238), mortar: rgb(150, 142, 186), grass: rgb(168, 228, 178), grass_dk: rgb(118, 186, 146),
+            sky_top: rgb(84, 146, 238), sky_bot: rgb(228, 240, 255), far: rgb(204, 218, 248), mid: rgb(180, 200, 242), near: rgb(152, 178, 228),
+        },
     }
 }
 
@@ -801,7 +817,7 @@ pub fn bg_far(theme: Theme) -> Canvas {
     let (w, h) = (640, 170);
     let mut c = Canvas::new(w, h);
     let base = theme_art(theme).far;
-    let spiky = matches!(theme, Theme::Cliffs | Theme::Arcane);
+    let spiky = matches!(theme, Theme::Cliffs | Theme::Arcane | Theme::Ember);
     let peaks: &[(f32, f32, f32)] = if spiky {
         &[(40.0, 20.0, 50.0), (120.0, 60.0, 60.0), (200.0, 10.0, 45.0), (290.0, 50.0, 70.0), (380.0, 30.0, 40.0), (460.0, 70.0, 60.0), (540.0, 15.0, 55.0), (610.0, 55.0, 40.0)]
     } else {
@@ -820,6 +836,12 @@ pub fn bg_far(theme: Theme) -> Canvas {
             if theme == Theme::Arcane {
                 // glowing crystal tips on the spires
                 c.poly(&[(x - 5.0, py + 12.0), (x, py - 6.0), (x + 5.0, py + 12.0)], rgb(150, 236, 255));
+            } else if theme == Theme::Ember {
+                // a lava glow at each peak
+                c.poly(&[(x - 4.0, py + 10.0), (x, py), (x + 4.0, py + 10.0)], rgb(255, 150, 60));
+            } else if theme == Theme::Frost {
+                // thick snowcaps
+                c.poly(&[(x - 30.0, py + 34.0), (x, py), (x + 30.0, py + 34.0), (x + 10.0, py + 26.0), (x - 8.0, py + 30.0)], rgb(250, 252, 255));
             } else if theme != Theme::Woods {
                 let cap = if spiky { light(base, 0.35) } else { light(base, 0.6) };
                 let s = if spiky { 0.4 } else { 1.0 };
@@ -898,6 +920,77 @@ pub fn bg_trees(theme: Theme, near: bool) -> Canvas {
                     c.poly(&[(xx - tw * 0.7, top), (xx + tw * 0.7, top), (xx, top - tw * 1.4)], col);
                     for j in 0..3 {
                         c.rect(xx as i32 - 1, (top + 12.0 + j as f32 * 22.0) as i32, 3, 5, rgb(150, 230, 255));
+                    }
+                }
+            }
+        }
+        Theme::Desert => {
+            // flat-topped mesas and saguaro cacti
+            let n = if near { 5 } else { 8 };
+            for i in 0..n {
+                let x = (i as f32 + hash(i, 0, near as i32 + 20) * 0.5) * (w as f32 / n as f32);
+                for k in [-1.0f32, 0.0, 1.0] {
+                    let xx = x + k * w as f32;
+                    if i % 2 == 0 {
+                        let mw = if near { 70.0 } else { 46.0 };
+                        let mh = if near { 70.0 } else { 54.0 } + hash(i, 1, 21) * 30.0;
+                        c.poly(&[(xx - mw, ground_y as f32), (xx - mw * 0.7, ground_y as f32 - mh), (xx + mw * 0.7, ground_y as f32 - mh), (xx + mw, ground_y as f32)], col);
+                    } else {
+                        let ch = if near { 54.0 } else { 34.0 };
+                        let cw = if near { 7.0 } else { 4.5 };
+                        c.rect((xx - cw * 0.5) as i32, (ground_y as f32 - ch) as i32, cw as i32 + 1, ch as i32 + 1, shadow(col, 0.1));
+                        c.rect((xx - cw * 2.2) as i32, (ground_y as f32 - ch * 0.6) as i32, cw as i32, (ch * 0.25) as i32, shadow(col, 0.1));
+                        c.rect((xx - cw * 2.2) as i32, (ground_y as f32 - ch * 0.85) as i32, (cw * 0.7) as i32, (ch * 0.28) as i32, shadow(col, 0.1));
+                        c.rect((xx + cw * 0.9) as i32, (ground_y as f32 - ch * 0.5) as i32, cw as i32, (ch * 0.22) as i32, shadow(col, 0.1));
+                    }
+                }
+            }
+        }
+        Theme::Frost => {
+            // snowy pines
+            let n = if near { 11 } else { 18 };
+            for i in 0..n {
+                let x = (i as f32 + hash(i, 0, near as i32 + 30) * 0.6) * (w as f32 / n as f32);
+                let ht = if near { 64.0 + hash(i, 1, 31) * 40.0 } else { 40.0 + hash(i, 1, 32) * 30.0 };
+                for k in [-1.0f32, 0.0, 1.0] {
+                    let xx = x + k * w as f32;
+                    for l in 0..3 {
+                        let lw = 15.0 - l as f32 * 4.0;
+                        let ly = ground_y as f32 - l as f32 * ht * 0.24;
+                        c.poly(&[(xx - lw, ly), (xx + lw, ly), (xx, ly - ht * 0.36)], col);
+                        c.poly(&[(xx - lw * 0.45, ly - ht * 0.2), (xx + lw * 0.45, ly - ht * 0.2), (xx, ly - ht * 0.36)], rgb(246, 250, 255));
+                    }
+                }
+            }
+        }
+        Theme::Ember => {
+            // jagged basalt with lava seams
+            let n = if near { 8 } else { 13 };
+            for i in 0..n {
+                let x = (i as f32 + hash(i, 0, near as i32 + 40) * 0.6) * (w as f32 / n as f32);
+                let ht = if near { 60.0 + hash(i, 1, 41) * 50.0 } else { 40.0 + hash(i, 1, 42) * 40.0 };
+                for k in [-1.0f32, 0.0, 1.0] {
+                    let xx = x + k * w as f32;
+                    c.poly(&[(xx - 22.0, ground_y as f32), (xx - 6.0, ground_y as f32 - ht), (xx + 4.0, ground_y as f32 - ht * 0.7), (xx + 20.0, ground_y as f32)], col);
+                    c.line(xx as i32 - 4, (ground_y as f32 - ht * 0.6) as i32, xx as i32 + 2, ground_y - 4, rgb(255, 120, 40));
+                }
+            }
+        }
+        Theme::Sky => {
+            // banks of cloud with little floating isles
+            let n = if near { 6 } else { 9 };
+            for i in 0..n {
+                let x = (i as f32 + hash(i, 0, near as i32 + 50) * 0.5) * (w as f32 / n as f32);
+                for k in [-1.0f32, 0.0, 1.0] {
+                    let xx = x + k * w as f32;
+                    let r = if near { 30.0 } else { 20.0 } + hash(i, 1, 51) * 14.0;
+                    c.disc(xx, ground_y as f32 - r * 0.4, r, light(col, 0.25));
+                    c.disc(xx - r, ground_y as f32 - r * 0.1, r * 0.7, light(col, 0.25));
+                    c.disc(xx + r, ground_y as f32 - r * 0.1, r * 0.75, light(col, 0.25));
+                    if i % 3 == 0 {
+                        let iy = ground_y as f32 - r * 2.6;
+                        c.poly(&[(xx - r * 0.8, iy), (xx + r * 0.8, iy), (xx, iy + r * 0.9)], shadow(col, 0.15));
+                        c.rect((xx - r * 0.8) as i32, (iy - 3.0) as i32, (r * 1.6) as i32, 4, rgb(150, 210, 150));
                     }
                 }
             }

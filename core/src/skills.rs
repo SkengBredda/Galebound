@@ -3,6 +3,7 @@
 //! hotbar (keys 1-8). Each has a Mana cost and a cooldown.
 
 use crate::classes::{self, AttackDef, AttackKind, ClassId, ProjStyle, ProjectileDef};
+use crate::jobs::Job;
 use crate::stats::StatMods;
 
 pub const HOTBAR_SLOTS: usize = 8;
@@ -40,6 +41,26 @@ pub enum SkillEffect {
     },
     Buff { mods: StatMods, secs: f32 },
     Heal { hp: f32, mp: f32 },
+    /// Heals (fraction of max HP) and buffs you and every party member near
+    /// you (0.15.0).
+    Party { mods: StatMods, secs: f32, hp: f32 },
+    /// Calls up a turret or a companion for `secs` seconds. `damage` is per
+    /// hit (a Mender turret heals that fraction of max HP instead), every
+    /// `period` seconds.
+    Summon { kind: SummonKind, secs: f32, damage: f32, period: f32 },
+    /// Roll the dice: one random buff out of four (the Gambler's Jackpot).
+    Gamble,
+}
+
+/// What a Summon ability calls up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SummonKind {
+    /// Shoots the nearest monster.
+    Turret,
+    /// Heals you and your party nearby.
+    Mender,
+    /// A spirit hawk that dives at monsters near you.
+    Hawk,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +68,8 @@ pub struct SkillDef {
     pub id: &'static str,
     pub name: &'static str,
     pub class: ClassId,
+    /// Only this advanced class may use it.
+    pub job: Option<Job>,
     pub level: u32,
     pub mp: f32,
     pub cooldown: f32,
@@ -62,6 +85,9 @@ impl SkillDef {
             SkillEffect::Strike { .. } => "Melee",
             SkillEffect::Buff { .. } => "Buff",
             SkillEffect::Heal { .. } => "Heal",
+            SkillEffect::Party { .. } => "Party",
+            SkillEffect::Summon { .. } => "Summon",
+            SkillEffect::Gamble => "Gamble",
         }
     }
 }
@@ -105,6 +131,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "power_strike",
         name: "Power Strike",
         class: Novice,
+        job: None,
         level: 1,
         mp: 6.0,
         cooldown: 4.0,
@@ -116,6 +143,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "second_wind",
         name: "Second Wind",
         class: Novice,
+        job: None,
         level: 3,
         mp: 12.0,
         cooldown: 25.0,
@@ -127,6 +155,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "brace",
         name: "Brace",
         class: Novice,
+        job: None,
         level: 6,
         mp: 10.0,
         cooldown: 30.0,
@@ -139,6 +168,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "shield_slam",
         name: "Shield Slam",
         class: Vanguard,
+        job: None,
         level: 10,
         mp: 10.0,
         cooldown: 5.0,
@@ -150,6 +180,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "war_cry",
         name: "War Cry",
         class: Vanguard,
+        job: None,
         level: 12,
         mp: 20.0,
         cooldown: 45.0,
@@ -161,6 +192,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "whirlwind",
         name: "Whirlwind",
         class: Vanguard,
+        job: None,
         level: 15,
         mp: 18.0,
         cooldown: 8.0,
@@ -172,6 +204,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "iron_bastion",
         name: "Iron Bastion",
         class: Vanguard,
+        job: None,
         level: 20,
         mp: 25.0,
         cooldown: 60.0,
@@ -184,6 +217,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "shadow_flurry",
         name: "Shadow Flurry",
         class: Duskblade,
+        job: None,
         level: 10,
         mp: 8.0,
         cooldown: 4.0,
@@ -195,6 +229,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "fan_of_knives",
         name: "Fan of Knives",
         class: Duskblade,
+        job: None,
         level: 12,
         mp: 12.0,
         cooldown: 6.0,
@@ -206,6 +241,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "nightveil",
         name: "Nightveil",
         class: Duskblade,
+        job: None,
         level: 15,
         mp: 18.0,
         cooldown: 40.0,
@@ -217,6 +253,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "assassinate",
         name: "Assassinate",
         class: Duskblade,
+        job: None,
         level: 20,
         mp: 22.0,
         cooldown: 12.0,
@@ -229,21 +266,23 @@ pub const SKILLS: &[SkillDef] = &[
         id: "thunder_palm",
         name: "Thunder Palm",
         class: Stormfist,
+        job: None,
         level: 10,
         mp: 8.0,
         cooldown: 4.0,
-        desc: "A crackling palm strike that sends foes flying.",
-        effect: SkillEffect::Strike { anim: HeavyNeutral, damage: 26.0, hits: 1, reach: 1.25, both_sides: false, lunge: Some((200.0, 0.0)), kb: Some((620.0, -460.0)), crit_bonus: 0.0, invuln: false, proj: None },
+        desc: "A palm strike charged with lightning: it sends foes flying, and the lightning leaps to 3 more nearby (60% damage).",
+        effect: SkillEffect::Strike { anim: LightSide, damage: 28.0, hits: 1, reach: 1.3, both_sides: false, lunge: Some((260.0, 0.0)), kb: Some((620.0, -460.0)), crit_bonus: 0.0, invuln: false, proj: None },
         fx: SkillFx::Storm,
     },
     SkillDef {
         id: "hundred_fists",
         name: "Hundred Fists",
         class: Stormfist,
+        job: None,
         level: 12,
         mp: 14.0,
         cooldown: 7.0,
-        desc: "A blur of 6 rapid punches.",
+        desc: "A blur of 6 rapid punches, left and right.",
         effect: strike(LightNeutral, 6.5, 6, 1.35),
         fx: SkillFx::Impact,
     },
@@ -251,6 +290,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "focus_chi",
         name: "Focus Chi",
         class: Stormfist,
+        job: None,
         level: 15,
         mp: 16.0,
         cooldown: 40.0,
@@ -262,6 +302,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "typhoon_kick",
         name: "Typhoon Kick",
         class: Stormfist,
+        job: None,
         level: 20,
         mp: 22.0,
         cooldown: 10.0,
@@ -274,6 +315,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "piercing_arrow",
         name: "Piercing Arrow",
         class: Windrunner,
+        job: None,
         level: 10,
         mp: 8.0,
         cooldown: 4.0,
@@ -285,6 +327,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "multishot",
         name: "Multishot",
         class: Windrunner,
+        job: None,
         level: 12,
         mp: 12.0,
         cooldown: 6.0,
@@ -296,6 +339,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "hawkeye",
         name: "Hawkeye",
         class: Windrunner,
+        job: None,
         level: 15,
         mp: 18.0,
         cooldown: 45.0,
@@ -307,6 +351,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "storm_arrow",
         name: "Storm Arrow",
         class: Windrunner,
+        job: None,
         level: 20,
         mp: 24.0,
         cooldown: 12.0,
@@ -319,17 +364,20 @@ pub const SKILLS: &[SkillDef] = &[
         id: "arcane_bolt",
         name: "Arcane Bolt",
         class: Aethermancer,
+        job: None,
         level: 10,
         mp: 10.0,
         cooldown: 2.5,
-        desc: "A fast bolt of pure aether.",
-        effect: shot(LightSide, 24.0, pr(980.0, 0.0, 18.0, 18.0, 0.8, false, 1, 0.0, 0.0, ProjStyle::Bolt), (300.0, -200.0)),
+        desc: "Call lightning down from the sky onto up to 4 foes in front of you. Each bolt bursts on impact.",
+        // Lightning: vy = fall speed, spread = burst radius (see sim_combat)
+        effect: shot(HeavyNeutral, 22.0, pr(0.0, 2400.0, 26.0, 70.0, 0.6, true, 1, 70.0, 0.0, ProjStyle::Lightning), (220.0, -260.0)),
         fx: SkillFx::Arcane,
     },
     SkillDef {
         id: "cyclone",
         name: "Cyclone",
         class: Aethermancer,
+        job: None,
         level: 12,
         mp: 18.0,
         cooldown: 7.0,
@@ -341,6 +389,7 @@ pub const SKILLS: &[SkillDef] = &[
         id: "aether_ward",
         name: "Aether Ward",
         class: Aethermancer,
+        job: None,
         level: 15,
         mp: 20.0,
         cooldown: 45.0,
@@ -349,15 +398,356 @@ pub const SKILLS: &[SkillDef] = &[
         fx: SkillFx::Arcane,
     },
     SkillDef {
-        id: "starfall",
-        name: "Starfall",
+        id: "meteor",
+        name: "Meteor",
         class: Aethermancer,
+        job: None,
+        level: 20,
+        mp: 32.0,
+        cooldown: 12.0,
+        desc: "Call down a blazing meteor onto the nearest foe in front of you. It explodes, hitting everything nearby.",
+        // Meteor: vx = fall speed, spread = blast radius (see sim_combat)
+        effect: shot(HeavyNeutral, 62.0, pr(1050.0, 0.0, 56.0, 56.0, 1.4, true, 1, 170.0, 0.0, ProjStyle::Meteor), (520.0, -560.0)),
+        fx: SkillFx::Arcane,
+    },
+
+    // ---------------------------------------------------------------- Gunslinger (0.15.0)
+    SkillDef {
+        id: "ricochet",
+        name: "Ricochet",
+        class: Gunslinger,
+        job: None,
+        level: 10,
+        mp: 10.0,
+        cooldown: 5.0,
+        desc: "A trick shot that punches through every monster in a line.",
+        effect: shot(LightSide, 26.0, pr(1500.0, 0.0, 16.0, 6.0, 0.7, true, 1, 0.0, 0.0, ProjStyle::Bullet), (300.0, -180.0)),
+        fx: SkillFx::Impact,
+    },
+    SkillDef {
+        id: "acrobats_flair",
+        name: "Acrobat's Flair",
+        class: Gunslinger,
+        job: None,
+        level: 12,
+        mp: 18.0,
+        cooldown: 40.0,
+        desc: "Showboat: +15% move speed and +8% crit chance for 30 seconds.",
+        effect: SkillEffect::Buff { mods: StatMods { speed_pct: 0.15, crit: 8.0, ..z() }, secs: 30.0 },
+        fx: SkillFx::Wind,
+    },
+    SkillDef {
+        id: "bullet_dance",
+        name: "Bullet Dance",
+        class: Gunslinger,
+        job: None,
+        level: 15,
+        mp: 18.0,
+        cooldown: 8.0,
+        desc: "Spin on the spot firing both pistols, hitting everything around you 6 times. You can't be hurt mid-spin.",
+        effect: SkillEffect::Strike { anim: AirNeutral, damage: 10.0, hits: 6, reach: 1.4, both_sides: true, lunge: None, kb: Some((160.0, -140.0)), crit_bonus: 0.0, invuln: true, proj: None },
+        fx: SkillFx::Impact,
+    },
+    SkillDef {
+        id: "dead_eye",
+        name: "Dead Eye",
+        class: Gunslinger,
+        job: None,
         level: 20,
         mp: 30.0,
         cooldown: 12.0,
-        desc: "Call down a spray of 5 falling stars.",
-        effect: shot(HeavyNeutral, 22.0, pr(520.0, -420.0, 22.0, 22.0, 1.6, true, 5, 520.0, 900.0, ProjStyle::Star), (260.0, -360.0)),
+        desc: "Take a breath and fire one perfect shot: huge damage and +40% crit chance.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 70.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((520.0, -260.0)), crit_bonus: 40.0, invuln: false, proj: Some(pr(1800.0, 0.0, 22.0, 7.0, 0.8, true, 1, 0.0, 0.0, ProjStyle::Bullet)) },
+        fx: SkillFx::Impact,
+    },
+    // ---------------------------------------------------------------- advanced classes (0.15.0)
+    SkillDef {
+        id: "cataclysm_cleave",
+        name: "Cataclysm Cleave",
+        class: Vanguard,
+        job: Some(Job::Berserker),
+        level: 30,
+        mp: 26.0,
+        cooldown: 9.0,
+        desc: "Heave the greatsword through everything in front of you for massive damage.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 80.0, hits: 1, reach: 1.6, both_sides: false, lunge: Some((420.0, 0.0)), kb: Some((700.0, -420.0)), crit_bonus: 10.0, invuln: false, proj: None },
+        fx: SkillFx::Impact,
+    },
+    SkillDef {
+        id: "blood_frenzy",
+        name: "Blood Frenzy",
+        class: Vanguard,
+        job: Some(Job::Berserker),
+        level: 40,
+        mp: 30.0,
+        cooldown: 50.0,
+        desc: "Lose yourself: +35% attack and +10% move speed, but -20% P.DEF, for 20 seconds.",
+        effect: SkillEffect::Buff { mods: StatMods { atk_pct: 0.35, speed_pct: 0.1, pdef_pct: -0.2, ..z() }, secs: 20.0 },
+        fx: SkillFx::Impact,
+    },
+    SkillDef {
+        id: "sanctuary",
+        name: "Sanctuary",
+        class: Vanguard,
+        job: Some(Job::Paladin),
+        level: 30,
+        mp: 35.0,
+        cooldown: 45.0,
+        desc: "Raise your greatshield and bless everyone nearby: heals you and your party 35% and gives +25% P.DEF and M.DEF for 15 seconds.",
+        effect: SkillEffect::Party { mods: StatMods { pdef_pct: 0.25, mdef_pct: 0.25, ..z() }, secs: 15.0, hp: 0.35 },
+        fx: SkillFx::Holy,
+    },
+    SkillDef {
+        id: "judgement_slam",
+        name: "Judgement Slam",
+        class: Vanguard,
+        job: Some(Job::Paladin),
+        level: 40,
+        mp: 28.0,
+        cooldown: 10.0,
+        desc: "Slam the greatshield down, hurling back everything around you. You can't be hurt mid-slam.",
+        effect: SkillEffect::Strike { anim: HeavyDown, damage: 62.0, hits: 1, reach: 1.6, both_sides: true, lunge: None, kb: Some((500.0, -560.0)), crit_bonus: 0.0, invuln: true, proj: None },
+        fx: SkillFx::Holy,
+    },
+    SkillDef {
+        id: "chain_surge",
+        name: "Chain Surge",
+        class: Stormfist,
+        job: Some(Job::SurgeMonk),
+        level: 30,
+        mp: 22.0,
+        cooldown: 7.0,
+        desc: "Dash forward whirling the nunchucks: 8 lightning-fast hits.",
+        effect: SkillEffect::Strike { anim: LightSide, damage: 9.0, hits: 8, reach: 1.25, both_sides: false, lunge: Some((380.0, 0.0)), kb: Some((120.0, -100.0)), crit_bonus: 0.0, invuln: false, proj: None },
+        fx: SkillFx::Storm,
+    },
+    SkillDef {
+        id: "thunder_rush",
+        name: "Thunder Rush",
+        class: Stormfist,
+        job: Some(Job::SurgeMonk),
+        level: 40,
+        mp: 30.0,
+        cooldown: 10.0,
+        desc: "Become lightning and tear through a line of monsters 5 times. You can't be hurt during the rush.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 18.0, hits: 5, reach: 1.3, both_sides: false, lunge: Some((900.0, 0.0)), kb: Some((300.0, -260.0)), crit_bonus: 0.0, invuln: true, proj: None },
+        fx: SkillFx::Storm,
+    },
+    SkillDef {
+        id: "battle_standard",
+        name: "Battle Standard",
+        class: Stormfist,
+        job: Some(Job::Warlord),
+        level: 30,
+        mp: 35.0,
+        cooldown: 50.0,
+        desc: "Plant your war banner: you and your party nearby get +20% attack and +10% P.DEF for 25 seconds.",
+        effect: SkillEffect::Party { mods: StatMods { atk_pct: 0.2, pdef_pct: 0.1, ..z() }, secs: 25.0, hp: 0.0 },
+        fx: SkillFx::Steel,
+    },
+    SkillDef {
+        id: "earthshaker",
+        name: "Earthshaker Sweep",
+        class: Stormfist,
+        job: Some(Job::Warlord),
+        level: 40,
+        mp: 30.0,
+        cooldown: 10.0,
+        desc: "Sweep the war staff in a full circle, hitting everything around you.",
+        effect: SkillEffect::Strike { anim: HeavyDown, damage: 64.0, hits: 1, reach: 1.8, both_sides: true, lunge: None, kb: Some((520.0, -600.0)), crit_bonus: 0.0, invuln: false, proj: None },
+        fx: SkillFx::Impact,
+    },
+    SkillDef {
+        id: "iaido",
+        name: "Iaido",
+        class: Duskblade,
+        job: Some(Job::UmbralNinja),
+        level: 30,
+        mp: 26.0,
+        cooldown: 9.0,
+        desc: "Draw and cut in one motion: a dash slash with +30% crit chance. You can't be hurt during the draw.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 92.0, hits: 1, reach: 1.5, both_sides: false, lunge: Some((760.0, 0.0)), kb: Some((460.0, -300.0)), crit_bonus: 30.0, invuln: true, proj: None },
+        fx: SkillFx::Shadow,
+    },
+    SkillDef {
+        id: "shadow_clone",
+        name: "Shadow Clone",
+        class: Duskblade,
+        job: Some(Job::UmbralNinja),
+        level: 40,
+        mp: 32.0,
+        cooldown: 12.0,
+        desc: "Split into shadows that cut through a line of monsters 6 times.",
+        effect: SkillEffect::Strike { anim: LightSide, damage: 14.0, hits: 6, reach: 1.4, both_sides: false, lunge: Some((900.0, 0.0)), kb: Some((160.0, -120.0)), crit_bonus: 10.0, invuln: true, proj: None },
+        fx: SkillFx::Shadow,
+    },
+    SkillDef {
+        id: "chain_reap",
+        name: "Chain Reap",
+        class: Duskblade,
+        job: Some(Job::SoulReaper),
+        level: 30,
+        mp: 22.0,
+        cooldown: 7.0,
+        desc: "Fling the sickle out on its chain and drag monsters back to you, hitting 3 times.",
+        effect: SkillEffect::Strike { anim: LightSide, damage: 20.0, hits: 3, reach: 2.2, both_sides: false, lunge: None, kb: Some((-460.0, -160.0)), crit_bonus: 0.0, invuln: false, proj: None },
+        fx: SkillFx::Shadow,
+    },
+    SkillDef {
+        id: "death_spiral",
+        name: "Death Spiral",
+        class: Duskblade,
+        job: Some(Job::SoulReaper),
+        level: 40,
+        mp: 32.0,
+        cooldown: 11.0,
+        desc: "Whirl the kusarigama around you, hitting everything nearby 6 times. You can't be hurt mid-spiral.",
+        effect: SkillEffect::Strike { anim: AirNeutral, damage: 15.0, hits: 6, reach: 1.6, both_sides: true, lunge: Some((0.0, -300.0)), kb: Some((160.0, -160.0)), crit_bonus: 0.0, invuln: true, proj: None },
+        fx: SkillFx::Shadow,
+    },
+    SkillDef {
+        id: "silver_volley",
+        name: "Silver Volley",
+        class: Windrunner,
+        job: Some(Job::WitchHunter),
+        level: 30,
+        mp: 24.0,
+        cooldown: 7.0,
+        desc: "Fire five silver bolts in a fan. Each one pierces.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 22.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((300.0, -200.0)), crit_bonus: 0.0, invuln: false, proj: Some(pr(1700.0, 0.0, 30.0, 6.0, 0.8, true, 5, 200.0, 0.0, ProjStyle::Arrow)) },
+        fx: SkillFx::Holy,
+    },
+    SkillDef {
+        id: "hex_trap",
+        name: "Hex Trap",
+        class: Windrunner,
+        job: Some(Job::WitchHunter),
+        level: 40,
+        mp: 26.0,
+        cooldown: 12.0,
+        desc: "Toss three hex traps that hurt and launch any monster that walks over them.",
+        effect: SkillEffect::Strike { anim: HeavyDown, damage: 30.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((200.0, -460.0)), crit_bonus: 0.0, invuln: false, proj: Some(pr(160.0, -260.0, 16.0, 12.0, 4.0, true, 3, 0.0, 0.0, ProjStyle::Caltrop)) },
         fx: SkillFx::Arcane,
+    },
+    SkillDef {
+        id: "spirit_hawk",
+        name: "Spirit Hawk",
+        class: Windrunner,
+        job: Some(Job::BeastMaster),
+        level: 30,
+        mp: 30.0,
+        cooldown: 30.0,
+        desc: "Call a spirit hawk for 25 seconds. It dives at monsters near you.",
+        effect: SkillEffect::Summon { kind: SummonKind::Hawk, secs: 25.0, damage: 40.0, period: 1.2 },
+        fx: SkillFx::Nature,
+    },
+    SkillDef {
+        id: "stampede_arrow",
+        name: "Stampede Arrow",
+        class: Windrunner,
+        job: Some(Job::BeastMaster),
+        level: 40,
+        mp: 30.0,
+        cooldown: 10.0,
+        desc: "A giant arrow wrapped in a stampede of spirit beasts. Pierces everything.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 78.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((700.0, -320.0)), crit_bonus: 0.0, invuln: false, proj: Some(pr(1500.0, 0.0, 60.0, 20.0, 1.0, true, 1, 0.0, 0.0, ProjStyle::Arrow)) },
+        fx: SkillFx::Nature,
+    },
+    SkillDef {
+        id: "starlight_blessing",
+        name: "Starlight Blessing",
+        class: Aethermancer,
+        job: Some(Job::Oracle),
+        level: 30,
+        mp: 40.0,
+        cooldown: 40.0,
+        desc: "Call down starlight: heals you and your party nearby 40% and gives +15% attack for 20 seconds.",
+        effect: SkillEffect::Party { mods: StatMods { atk_pct: 0.15, ..z() }, secs: 20.0, hp: 0.4 },
+        fx: SkillFx::Holy,
+    },
+    SkillDef {
+        id: "cosmic_convergence",
+        name: "Cosmic Convergence",
+        class: Aethermancer,
+        job: Some(Job::Oracle),
+        level: 40,
+        mp: 36.0,
+        cooldown: 10.0,
+        desc: "Hurl three cosmic orbs that drift forward, burning through everything.",
+        effect: SkillEffect::Strike { anim: HeavyNeutral, damage: 40.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((320.0, -380.0)), crit_bonus: 0.0, invuln: false, proj: Some(pr(420.0, 0.0, 50.0, 50.0, 1.6, true, 3, 240.0, 0.0, ProjStyle::Orb)) },
+        fx: SkillFx::Arcane,
+    },
+    SkillDef {
+        id: "wild_card",
+        name: "Wild Card",
+        class: Aethermancer,
+        job: Some(Job::Gambler),
+        level: 30,
+        mp: 20.0,
+        cooldown: 5.0,
+        desc: "Throw a random card: anywhere from half to four times the damage. Pierces.",
+        effect: SkillEffect::Strike { anim: LightSide, damage: 34.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((320.0, -200.0)), crit_bonus: 0.0, invuln: false, proj: Some(pr(1400.0, 0.0, 20.0, 14.0, 0.7, true, 1, 0.0, 0.0, ProjStyle::Card)) },
+        fx: SkillFx::Arcane,
+    },
+    SkillDef {
+        id: "jackpot",
+        name: "Jackpot",
+        class: Aethermancer,
+        job: Some(Job::Gambler),
+        level: 40,
+        mp: 30.0,
+        cooldown: 35.0,
+        desc: "Roll the dice for one of four big buffs (30 seconds): attack, crits, speed or a fortress of defence.",
+        effect: SkillEffect::Gamble,
+        fx: SkillFx::Arcane,
+    },
+    SkillDef {
+        id: "sentry_turret",
+        name: "Sentry Turret",
+        class: Gunslinger,
+        job: Some(Job::Engineer),
+        level: 30,
+        mp: 30.0,
+        cooldown: 20.0,
+        desc: "Deploy a turret for 20 seconds that shoots the nearest monster.",
+        effect: SkillEffect::Summon { kind: SummonKind::Turret, secs: 20.0, damage: 22.0, period: 0.7 },
+        fx: SkillFx::Steel,
+    },
+    SkillDef {
+        id: "mender_turret",
+        name: "Mender Turret",
+        class: Gunslinger,
+        job: Some(Job::Engineer),
+        level: 40,
+        mp: 36.0,
+        cooldown: 35.0,
+        desc: "Deploy a repair turret for 18 seconds: every 2 seconds it heals you and your party nearby 6% HP.",
+        effect: SkillEffect::Summon { kind: SummonKind::Mender, secs: 18.0, damage: 0.06, period: 2.0 },
+        fx: SkillFx::Holy,
+    },
+    SkillDef {
+        id: "headshot",
+        name: "Headshot",
+        class: Gunslinger,
+        job: Some(Job::Sniper),
+        level: 30,
+        mp: 26.0,
+        cooldown: 9.0,
+        desc: "A charged rifle shot with +50% crit chance. Pierces.",
+        effect: SkillEffect::Strike { anim: HeavySide, damage: 110.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((520.0, -240.0)), crit_bonus: 50.0, invuln: false, proj: Some(pr(2400.0, 0.0, 20.0, 6.0, 0.9, true, 1, 0.0, 0.0, ProjStyle::Bullet)) },
+        fx: SkillFx::Impact,
+    },
+    SkillDef {
+        id: "suppressing_fire",
+        name: "Suppressing Fire",
+        class: Gunslinger,
+        job: Some(Job::Sniper),
+        level: 40,
+        mp: 30.0,
+        cooldown: 10.0,
+        desc: "Rake the area with six piercing rounds.",
+        effect: SkillEffect::Strike { anim: HeavyNeutral, damage: 24.0, hits: 1, reach: 1.0, both_sides: false, lunge: None, kb: Some((220.0, -120.0)), crit_bonus: 0.0, invuln: false, proj: Some(pr(2000.0, 0.0, 16.0, 6.0, 0.8, true, 6, 180.0, 0.0, ProjStyle::Bullet)) },
+        fx: SkillFx::Impact,
     },
 ];
 
@@ -365,23 +755,45 @@ pub fn skill(id: &str) -> Option<&'static SkillDef> {
     SKILLS.iter().find(|s| s.id == id)
 }
 
-/// Every skill a class can ever use (Novice skills included), in level order.
+/// Every skill a class can ever use (Novice skills included), in level
+/// order. Advanced-class skills only show for that advanced class.
 pub fn class_skills(class: ClassId) -> Vec<&'static SkillDef> {
-    let mut v: Vec<_> = SKILLS.iter().filter(|s| s.class == ClassId::Novice || s.class == class).collect();
+    job_skills(class, None)
+}
+
+/// Every skill a class and advanced class can use, in level order.
+pub fn job_skills(class: ClassId, job: Option<Job>) -> Vec<&'static SkillDef> {
+    let mut v: Vec<_> = SKILLS.iter().filter(|s| (s.class == ClassId::Novice || s.class == class) && (s.job.is_none() || s.job == job)).collect();
     v.sort_by_key(|s| (s.class != ClassId::Novice, s.level));
     v
 }
 
 pub fn knows(class: ClassId, level: u32, s: &SkillDef) -> bool {
-    (s.class == ClassId::Novice || s.class == class) && level >= s.level
+    knows_job(class, None, level, s)
+}
+
+pub fn knows_job(class: ClassId, job: Option<Job>, level: u32, s: &SkillDef) -> bool {
+    (s.class == ClassId::Novice || s.class == class) && level >= s.level && (s.job.is_none() || s.job == job)
 }
 
 /// The attack a Strike skill performs for this class.
 pub fn skill_attack(class: ClassId, s: &SkillDef) -> Option<AttackDef> {
+    skill_attack_job(class, None, s)
+}
+
+/// The attack a Strike skill performs for this class and advanced class.
+pub fn skill_attack_job(class: ClassId, job: Option<Job>, s: &SkillDef) -> Option<AttackDef> {
     let SkillEffect::Strike { anim, damage, hits, reach, both_sides, lunge, kb, invuln, proj, .. } = s.effect else {
         return None;
     };
     let mut d = classes::attack_def(class, anim);
+    if let Some(j) = job {
+        // the advanced class's weapon speed applies to abilities too
+        let m = j.info().moves;
+        d.startup *= m.time;
+        d.active *= m.time;
+        d.recovery *= m.time;
+    }
     if proj.is_none() && (d.hw <= 0.0 || d.hh <= 0.0) {
         // Ranged classes' animations for this slot only fire projectiles;
         // a melee ability still needs a real hitbox in front of the caster.
@@ -466,7 +878,7 @@ mod tests {
     #[test]
     fn every_class_has_four_skills_and_strikes_work() {
         for &c in crate::classes::ALL_CLASSES {
-            let own: Vec<_> = SKILLS.iter().filter(|s| s.class == c).collect();
+            let own: Vec<_> = SKILLS.iter().filter(|s| s.class == c && s.job.is_none()).collect();
             assert_eq!(own.len(), 4, "{:?}", c);
             assert_eq!(own.iter().map(|s| s.level).min(), Some(crate::classes::CLASS_CHANGE_LEVEL));
             for s in class_skills(c) {
@@ -475,6 +887,19 @@ mod tests {
                     assert!(d.total() < 2.0, "{} too long", s.id);
                 }
                 assert!(s.mp > 0.0 && s.cooldown > 0.0);
+            }
+        }
+        for &j in crate::jobs::ALL_JOBS {
+            let own: Vec<_> = SKILLS.iter().filter(|s| s.job == Some(j)).collect();
+            assert_eq!(own.len(), 2, "{:?} has 2 active abilities", j);
+            assert!(own.iter().all(|s| s.class == j.base() && s.level >= crate::jobs::JOB_LEVEL));
+            for s in &own {
+                if let Some(d) = skill_attack_job(j.base(), Some(j), s) {
+                    assert!(d.damage > 0.0 || d.projectile.is_some(), "{} does nothing", s.id);
+                    assert!(d.total() < 2.2, "{} too long", s.id);
+                }
+                assert!(knows_job(j.base(), Some(j), 60, s));
+                assert!(!knows_job(j.base(), None, 60, s), "{} needs the advanced class", s.id);
             }
         }
         for (i, a) in SKILLS.iter().enumerate() {

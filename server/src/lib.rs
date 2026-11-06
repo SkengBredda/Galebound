@@ -32,6 +32,9 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod admin;
+pub use admin::{DUEL_COUNTDOWN_SECS, DUEL_SECS};
+
 /// Monster simulation rate.
 pub const TICK_HZ: u32 = 60;
 /// Monster snapshots per second.
@@ -105,6 +108,10 @@ pub enum Command {
     Say(String),
     List,
     Stop,
+    /// Give (true) or take (false) a player's admin role.
+    Admin(String, bool),
+    Admins,
+    Kick(String),
 }
 
 struct Client {
@@ -184,6 +191,13 @@ pub struct Server {
     guild_dirty: HashSet<String>,
     /// For tests: pretend it's this day.
     pub day_override: Option<u32>,
+    /// Lowercase names of players with the admin role (admins.txt).
+    admins: HashSet<String>,
+    /// Muted players (lowercase name) and when it wears off.
+    muted: HashMap<String, Instant>,
+    /// Admins with god mode on (lowercase names).
+    god: HashSet<String>,
+    duels: Vec<admin::Duel>,
 }
 
 impl Server {
@@ -206,8 +220,9 @@ impl Server {
         let names = accounts.iter().flat_map(|a| a.characters.iter().map(|c| c.name.to_lowercase())).collect();
         let mut social = SocialStore::load(cfg.data_dir.clone());
         for c in accounts.iter().flat_map(|a| a.characters.iter()) {
-            social.remember(&c.name, c.level, c.class.key());
+            social.remember(&c.name, c.level, c.job.map(|j| j.key()).unwrap_or(c.class.key()));
         }
+        let cfg_dir = cfg.data_dir.clone();
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7);
         Ok(Server {
             cfg,
@@ -226,6 +241,10 @@ impl Server {
             invites: Vec::new(),
             guild_dirty: HashSet::new(),
             day_override: None,
+            admins: admin::load_admins(&cfg_dir),
+            muted: HashMap::new(),
+            god: HashSet::new(),
+            duels: Vec::new(),
         })
     }
 
@@ -262,8 +281,22 @@ impl Server {
                         Command::Stop => stop.store(true, Ordering::Relaxed),
                         Command::Say(t) => self.broadcast_all(&ServerMsg::System { text: format!("[Server] {}", t) }),
                         Command::List => {
-                            let names: Vec<String> = self.clients.iter().filter(|c| c.in_world()).map(|c| format!("{} ({})", c.name(), c.map)).collect();
+                            let names: Vec<String> = self
+                                .clients
+                                .iter()
+                                .filter(|c| c.in_world())
+                                .map(|c| format!("{}{} ({})", c.name(), if self.is_admin(&c.name()) { " [admin]" } else { "" }, c.map))
+                                .collect();
                             self.say(format!("{} / {} players online: {}", names.len(), self.cfg.max_players, names.join(", ")));
+                        }
+                        Command::Admin(name, on) => {
+                            let t = self.set_admin(&name, on, "The host");
+                            self.say(t);
+                        }
+                        Command::Admins => self.list_admins(),
+                        Command::Kick(name) => {
+                            let t = self.kick(&name, "", "the host");
+                            self.say(t);
                         }
                     }
                 }
@@ -320,6 +353,7 @@ impl Server {
         // monsters and loot run at the same calmer pace as the clients
         let dt = 1.0 / TICK_HZ as f32 * physics::GAME_SPEED;
         self.update_zones(dt);
+        self.update_duels(1.0 / TICK_HZ as f32);
         self.tick += 1;
         if self.tick % (TICK_HZ / SNAPSHOT_HZ) as u64 == 0 {
             self.snapshots();
@@ -535,6 +569,8 @@ impl Server {
                     self.social_cmd(i, cmd);
                 }
             }
+            ClientMsg::Admin { cmd } => self.admin_cmd(i, &cmd),
+            ClientMsg::DuelHit { target, damage, kbx, kby } => self.duel_hit(i, target, damage, kbx, kby),
             ClientMsg::Act(mut a) => {
                 let c = &self.clients[i];
                 if !c.in_world() || c.pos.dead || c.map.is_empty() {
@@ -544,6 +580,7 @@ impl Server {
                 let map = c.map.clone();
                 self.broadcast_map(&map, &ServerMsg::Act(a), Some(c.id));
             }
+            ClientMsg::Aid { skill, x, y } => self.aid(i, &skill, V2::new(x, y)),
             ClientMsg::Revive { target } => {
                 let me = &self.clients[i];
                 if !me.in_world() || me.pos.dead {
@@ -565,7 +602,7 @@ impl Server {
                     return;
                 }
                 let text: String = text.trim().chars().filter(|c| !c.is_control()).take(net::CHAT_MAX).collect();
-                if text.is_empty() {
+                if text.is_empty() || self.check_mute(i) {
                     return;
                 }
                 let from = self.clients[i].name();
@@ -620,10 +657,14 @@ impl Server {
         self.say(format!("{} entered the world ({} online)", name, self.players_online()));
         self.broadcast_all(&ServerMsg::System { text: format!("{} has joined.", name) });
         if let Some(c) = self.clients[i].character() {
-            let (lv, cl) = (c.level, c.class.key().to_string());
+            let (lv, cl) = (c.level, c.job.map(|j| j.key()).unwrap_or(c.class.key()).to_string());
             self.social.remember(&name, lv, &cl);
         }
-        // social state, and tell friends we're here
+        // who the admins are (for their badge), and social state
+        self.send_admins(Some(i));
+        if self.is_admin(&name) {
+            self.sys(i, "You're an admin. Press F9 for the Admin Panel, or type /help.".into());
+        }
         self.send_friends(i);
         self.clients[i].send(&ServerMsg::Party(None));
         match self.social.guild_of(&name) {
@@ -644,6 +685,8 @@ impl Server {
         }
         let name = self.clients[i].name();
         let (id, map) = (self.clients[i].id, self.clients[i].map.clone());
+        self.forfeit_duel(id, " (they left)");
+        self.god.remove(&name.to_lowercase());
         self.broadcast_map(&map, &ServerMsg::PlayerGone { id }, Some(id));
         self.leave_party(&name);
         self.cancel_trade(id, &format!("{} left", name));
@@ -663,6 +706,9 @@ impl Server {
 
     fn change_map(&mut self, i: usize, map: String, pos: PlayerPos) {
         let id = self.clients[i].id;
+        if self.duel_of(id).is_some() {
+            self.forfeit_duel(id, " (they left the area)");
+        }
         let old = std::mem::replace(&mut self.clients[i].map, map.clone());
         self.clients[i].pos = pos;
         if !old.is_empty() {
@@ -717,7 +763,7 @@ impl Server {
     /// Monster HP multiplier for a private map copy: +60% per extra party member.
     fn instance_hp_mult(&self, key: &str) -> f32 {
         let Some((base, owner)) = key.split_once('#') else { return 1.0 };
-        if base != world::VAULT_MAP {
+        if !world::is_dungeon(base) {
             return 1.0;
         }
         let n = self.party_of(owner).map(|p| self.parties[p].members.len()).unwrap_or(1).max(1);
@@ -729,6 +775,8 @@ impl Server {
         for key in keys {
             // where the players on this map are
             let players: Vec<(V2, bool)> = self.clients.iter().filter(|c| c.in_world() && c.map == key).map(|c| (c.center(), !c.pos.dead)).collect();
+            // Paladins (Provoke) count as three times closer: monsters go for them first
+            let threat: Vec<f32> = self.clients.iter().filter(|c| c.in_world() && c.map == key).map(|c| if is_tank(&c.info) { 3.0 } else { 1.0 }).collect();
             let mut z = self.zones.remove(&key).unwrap();
             if players.is_empty() {
                 z.empty_for += dt;
@@ -746,9 +794,24 @@ impl Server {
             for e in z.enemies.iter_mut() {
                 // each monster goes for the nearest player who's still standing
                 let c = e.body.center();
-                let target = players.iter().filter(|p| p.1).map(|p| p.0).min_by(|a, b| (a.x - c.x).abs().total_cmp(&(b.x - c.x).abs()));
+                let target = players
+                    .iter()
+                    .zip(threat.iter())
+                    .filter(|(p, _)| p.1)
+                    .map(|(p, t)| (p.0, (p.0.x - c.x).abs() / t))
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(p, _)| p);
                 let ctx = enemies::Ctx { level: &lvl, player: target.unwrap_or(V2::new(-99999.0, -99999.0)), player_alive: target.is_some(), dt };
                 enemies::update(e, &ctx, &mut out);
+            }
+            // monsters a boss called up (Glacia's crystals, a revived Twin)
+            let hp_mult = self.instance_hp_mult(&key);
+            for sp in std::mem::take(&mut out.spawns) {
+                let id = self.new_id();
+                let mut e = Enemy::new(id, sp.kind, sp.x, sp.y, None, &mut self.rng);
+                e.max_hp *= hp_mult;
+                e.hp = e.max_hp * sp.hp_frac;
+                z.enemies.push(e);
             }
             for s in out.shots {
                 self.broadcast_map(
@@ -846,6 +909,32 @@ impl Server {
 
     // ------------------------------------------------------------------ combat and loot
 
+    /// A support ability or Mender turret pulse: pass it on to party
+    /// members on the same map nearby.
+    fn aid(&mut self, i: usize, skill: &str, at: V2) {
+        use galebound_core::skills::{self, SkillEffect, SummonKind};
+        let c = &self.clients[i];
+        if !c.in_world() || c.pos.dead || !at.x.is_finite() || !at.y.is_finite() {
+            return;
+        }
+        let ok = matches!(skills::skill(skill).map(|s| s.effect), Some(SkillEffect::Party { .. }) | Some(SkillEffect::Summon { kind: SummonKind::Mender, .. }));
+        if !ok || (c.center() - at).len() > HIT_RANGE {
+            return;
+        }
+        let (name, map) = (c.name(), c.map.clone());
+        let Some(p) = self.party_of(&name) else { return };
+        for m in self.parties[p].members.clone() {
+            if social::eq(&m, &name) {
+                continue;
+            }
+            if let Some(o) = self.clients.iter().find(|o| social::eq(&o.name(), &m) && o.in_world() && o.map == map && !o.pos.dead) {
+                if (o.center() - at).len() <= galebound_core::sim::AID_RANGE {
+                    o.send(&ServerMsg::Aid { from: name.clone(), skill: skill.to_string() });
+                }
+            }
+        }
+    }
+
     fn hit(&mut self, i: usize, enemy: u32, damage: f32, kb: V2, hitstun: f32) {
         let c = &self.clients[i];
         if !c.in_world() || c.pos.dead || !damage.is_finite() {
@@ -870,6 +959,9 @@ impl Server {
         if e.hp <= 0.0 {
             e.state = EState::Dying;
             e.state_t = 0.0;
+            let kind = e.kind;
+            // Glacia's crystals and the Twins react to deaths
+            enemies::on_death(kind, &mut z.enemies);
             self.kill(&key, enemy);
         }
     }
@@ -1213,6 +1305,12 @@ impl Server {
         let me = self.clients[i].name();
         let my_id = self.clients[i].id;
         let clean = |t: &str| -> String { t.trim().chars().filter(|c| !c.is_control()).take(net::CHAT_MAX).collect() };
+        if matches!(cmd, SocialCmd::Whisper { .. } | SocialCmd::PartyChat { .. } | SocialCmd::GuildChat { .. }) && self.check_mute(i) {
+            return;
+        }
+        if matches!(cmd, SocialCmd::DuelRequest { .. } | SocialCmd::DuelAnswer { .. } | SocialCmd::DuelYield) {
+            return self.duel_social(i, cmd);
+        }
         match cmd {
             SocialCmd::Whisper { to, text } => {
                 let text = clean(&text);
@@ -1610,6 +1708,7 @@ impl Server {
                 let Some(p) = self.profile(j) else { return };
                 self.clients[i].send(&ServerMsg::Profile(p));
             }
+            SocialCmd::DuelRequest { .. } | SocialCmd::DuelAnswer { .. } | SocialCmd::DuelYield => {}
             SocialCmd::Refresh => {
                 self.send_friends(i);
                 match self.party_of(&me) {
@@ -1632,7 +1731,7 @@ impl Server {
         let need = galebound_core::sim::exp_to_next(save.level).max(1);
         Some(ProfileNet {
             name: c.name(),
-            class: if c.info.class.is_empty() { save.class.key().to_string() } else { c.info.class.clone() },
+            class: if c.info.class.is_empty() { save.job.map(|j| j.key()).unwrap_or(save.class.key()).to_string() } else { c.info.class.clone() },
             level,
             exp_frac: if level == save.level { (save.exp as f32 / need as f32).clamp(0.0, 1.0) } else { 0.0 },
             play_seconds: save.play_seconds,
@@ -1721,4 +1820,9 @@ mod tests {
         assert!(!s.social.guilds[g].quest_paid);
         std::fs::remove_dir_all(dir).ok();
     }
+}
+
+/// A Paladin of level 30+ has Provoke: monsters target them first.
+fn is_tank(info: &galebound_core::net::PlayerInfo) -> bool {
+    info.class == "paladin" && info.level >= galebound_core::jobs::JOB_LEVEL
 }

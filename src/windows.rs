@@ -55,6 +55,8 @@ pub struct Windows {
     pub pets: bool,
     pet_sel: usize,
     map_sel: Option<&'static str>,
+    /// World map region shown (0 Lowlands, 1 Highlands); None = where you are.
+    map_region: Option<u8>,
     map_cache: Option<WorldCache>,
     // 0.13.0: crafting, house and quest log
     craft_tab: usize,
@@ -184,6 +186,7 @@ impl Windows {
 
     pub fn toggle_map(&mut self) {
         self.world_map = !self.world_map;
+        self.map_region = None;
     }
 
     pub fn toggle_pets(&mut self, sim: &Sim) {
@@ -424,7 +427,8 @@ impl Windows {
             self.character = false;
         }
         let info = sim.player.info.clone();
-        gfx::text(&format!("{}  -  Lv.{} {}", sim.save.name, sim.save.level, info.name), x + 24.0, y + 46.0, 16.0, widgets::ink());
+        let cname = sim.save.job.map(|j| j.name()).unwrap_or(info.name);
+        gfx::text(&format!("{}  -  Lv.{} {}", sim.save.name, sim.save.level, cname), x + 24.0, y + 46.0, 16.0, widgets::ink());
         let sub = if sim.save.class == ClassId::Novice {
             format!("Change class at Lv.{}", galebound_core::classes::CLASS_CHANGE_LEVEL)
         } else {
@@ -497,36 +501,72 @@ impl Windows {
     // ------------------------------------------------------------------ abilities
 
     fn abilities_window(&mut self, sim: &mut Sim) {
-        let list = skills::class_skills(sim.save.class);
-        let row_h = 70.0;
-        let (w, h) = (480.0, 84.0 + list.len() as f32 * row_h);
+        use galebound_core::jobs;
+        let (class, job, level) = (sim.save.class, sim.save.job, sim.save.level);
+        let list = skills::job_skills(class, job);
+        let passives = job.map(jobs::job_passives).unwrap_or_default();
+        let row_h = 66.0;
+        let cols = if list.len() > 5 { 2 } else { 1 };
+        let rows = list.len().div_ceil(cols);
+        let col_w = 460.0;
+        let extra = if !passives.is_empty() { 34.0 + passives.len() as f32 * 44.0 } else if class != ClassId::Novice { 40.0 } else { 0.0 };
+        let (w, h) = (24.0 + col_w * cols as f32, 84.0 + rows as f32 * row_h + extra);
         let (x, y) = ((gfx::VW - w) * 0.5, (BAR_Y - 20.0 - h).max(44.0));
         widgets::panel(x, y, w, h);
         self.hit((x, y, w, h), Target::Window);
-        widgets::title("Abilities", x + w * 0.5, y + 14.0, 22.0);
+        let title = match job {
+            Some(j) => format!("Abilities - {}", j.name()),
+            None => "Abilities".to_string(),
+        };
+        widgets::title(&title, x + w * 0.5, y + 14.0, 22.0);
         gfx::text_centered("Drag onto the hotbar, or click to add", x + w * 0.5, y + 44.0, 13.0, widgets::ink_soft());
         let hover = self.hover();
         for (i, s) in list.iter().enumerate() {
-            let ry = y + 66.0 + i as f32 * row_h;
-            let known = skills::knows(sim.save.class, sim.save.level, s);
+            let (cx, ri) = (x + 12.0 + (i / rows) as f32 * col_w, i % rows);
+            let cw = col_w - 8.0;
+            let ry = y + 66.0 + ri as f32 * row_h;
+            let known = skills::knows_job(class, job, level, s);
             let hv = hover == Some(Target::Skill(s.id));
             if hv {
-                gfx::rrect(x + 16.0, ry - 4.0, w - 32.0, row_h - 4.0, 6.0, rgba(64, 156, 120, 40));
+                gfx::rrect(cx + 4.0, ry - 4.0, cw - 8.0, row_h - 4.0, 6.0, rgba(64, 156, 120, 40));
             }
-            slot_bg(x + 22.0, ry, SLOT, hv, None);
-            gfx::tex(&skill_tex(s), x + 27.0, ry + 5.0, 1.0, false, if known { WHITE } else { Color::new(0.45, 0.45, 0.5, 1.0) });
+            slot_bg(cx + 10.0, ry, SLOT, hv, None);
+            gfx::tex(&skill_tex(s), cx + 15.0, ry + 5.0, 1.0, false, if known { WHITE } else { Color::new(0.45, 0.45, 0.5, 1.0) });
             let nc = if known { widgets::ink() } else { rgb(150, 140, 130) };
-            gfx::text(s.name, x + 80.0, ry, 16.0, nc);
+            gfx::text(s.name, cx + 68.0, ry, 16.0, nc);
             let meta = if known {
                 format!("{}  -  {} MP  -  {}s cooldown", s.kind_label(), s.mp as i32, s.cooldown)
             } else {
-                format!("Learn at Lv.{}{}", s.level, if s.class != sim.save.class { "" } else { "" })
+                format!("Learn at Lv.{}", s.level)
             };
-            gfx::text(&meta, x + 80.0, ry + 20.0, 12.0, if known { widgets::accent() } else { rgb(200, 110, 30) });
-            for (k, l) in gfx::wrap(s.desc, w - 110.0, 12.0).iter().take(2).enumerate() {
-                gfx::text(l, x + 80.0, ry + 34.0 + k as f32 * 16.0, 12.0, widgets::ink_soft());
+            gfx::text(&meta, cx + 68.0, ry + 20.0, 12.0, if known { widgets::accent() } else { rgb(200, 110, 30) });
+            for (k, l) in gfx::wrap(s.desc, cw - 80.0, 12.0).iter().take(2).enumerate() {
+                gfx::text(l, cx + 68.0, ry + 34.0 + k as f32 * 15.0, 12.0, widgets::ink_soft());
             }
-            self.hit((x + 16.0, ry - 4.0, w - 32.0, row_h - 4.0), Target::Skill(s.id));
+            self.hit((cx + 4.0, ry - 4.0, cw - 8.0, row_h - 4.0), Target::Skill(s.id));
+        }
+        let mut py = y + 72.0 + rows as f32 * row_h;
+        if !passives.is_empty() {
+            gfx::text("Passive abilities (always on)", x + 24.0, py, 15.0, widgets::ink());
+            py += 26.0;
+            for p in passives {
+                let known = level >= p.level;
+                gfx::rrect(x + 22.0, py, 36.0, 36.0, 6.0, if known { rgb(214, 196, 120) } else { rgb(190, 186, 176) });
+                gfx::text_centered(if known { "P" } else { "-" }, x + 40.0, py + 9.0, 16.0, widgets::ink());
+                let head = if known { p.name.to_string() } else { format!("{}  (Lv.{})", p.name, p.level) };
+                gfx::text(&head, x + 70.0, py + 1.0, 15.0, if known { widgets::ink() } else { rgb(150, 140, 130) });
+                gfx::text(p.desc, x + 70.0, py + 20.0, 12.0, widgets::ink_soft());
+                py += 44.0;
+            }
+        } else if class != ClassId::Novice {
+            let [a, b] = jobs::jobs_for(class);
+            gfx::text(
+                &format!("At Lv.{}: advance into a {} or a {} (your instructor or Grandmaster Aldric in Skyreach).", jobs::JOB_LEVEL, a.name(), b.name()),
+                x + 24.0,
+                py + 4.0,
+                13.0,
+                widgets::accent(),
+            );
         }
     }
 
@@ -548,7 +588,7 @@ impl Windows {
             gfx::text_wrapped(
                 &format!(
                     "You don't have a pet yet. The Pet Shop in Breezehollow and in every class town sells pets for {} gold, and Pet Food for {} gold.",
-                    thousands(pets::PET_PRICE * items::PRICE_MULT), thousands(pets::FOOD_PRICE * items::PRICE_MULT)
+                    thousands(pets::PET_SHOP_PRICE), thousands(pets::FOOD_PRICE * items::PRICE_MULT)
                 ),
                 x + 40.0,
                 y + 80.0,
@@ -804,7 +844,13 @@ impl Windows {
         gfx::rrect(x - 4.0, y - 4.0, w + 8.0, h + 8.0, 16.0, rgba(0, 0, 0, 90));
         widgets::panel(x, y, w, h);
         self.hit((x, y, w, h), Target::Window);
-        widgets::title("World Map", x + 430.0, y + 14.0, 26.0);
+        widgets::title("World Map", x + w - 230.0, y + 14.0, 26.0);
+        let link = if self.map_region.unwrap_or(world::world_node_for(sim.map.key).map(|n| n.region).unwrap_or(0)) == 0 {
+            "Cloudstep Pass (east end of the Crossroads) climbs to the Highlands"
+        } else {
+            "Cloudstep Pass leads back down to Wayfarer's Crossroads"
+        };
+        gfx::text(link, x + 470.0, y + 22.0, 12.0, widgets::ink_soft());
         if widgets::button(ui, x + w - 52.0, y + 12.0, 34.0, 30.0, "X", ButtonStyle::Secondary, true) {
             self.world_map = false;
         }
@@ -815,8 +861,21 @@ impl Windows {
         let sx = (mw - 60.0) / 960.0;
         let sy = (mh - 60.0) / 560.0;
         let at = |p: (f32, f32)| (mx + 30.0 + p.0 * sx, my + 30.0 + p.1 * sy);
+        // region tabs (the Lowlands and the Skyreach Highlands)
+        let here_region = world::world_node_for(sim.map.key).map(|n| n.region).unwrap_or(0);
+        let region = self.map_region.unwrap_or(here_region);
+        for (ri, name) in world::REGIONS.iter().enumerate() {
+            let style = if ri as u8 == region { ButtonStyle::Primary } else { ButtonStyle::Secondary };
+            if widgets::button(ui, x + 24.0 + ri as f32 * 210.0, y + 12.0, 200.0, 32.0, name, style, true) {
+                self.map_region = Some(ri as u8);
+                self.map_sel = None;
+            }
+        }
         // routes
         for &(a, b) in &cache.edges {
+            if world::WORLD[a].region != region || world::WORLD[b].region != region {
+                continue;
+            }
             let (pa, pb) = (at(world::WORLD[a].pos), at(world::WORLD[b].pos));
             gfx::line(pa.0, pa.1, pb.0, pb.1, 5.0, rgb(196, 170, 120));
             gfx::line(pa.0, pa.1, pb.0, pb.1, 2.0, rgb(150, 116, 74));
@@ -824,7 +883,7 @@ impl Windows {
         let here = world::world_node_for(sim.map.key).map(|n| n.key);
         let (mxp, myp) = gfx::mouse();
         let mut hovered = None;
-        for n in world::WORLD {
+        for n in world::WORLD.iter().filter(|n| n.region == region) {
             let (px, py) = at(n.pos);
             let r: f32 = match n.kind {
                 world::NodeKind::Town => 13.0,
@@ -856,8 +915,8 @@ impl Windows {
                 }
                 _ => vec![name.to_string()],
             };
-            let col_idx = ((n.pos.0 - 110.0) / 190.0).round() as i32;
-            let above = col_idx % 2 == 1 && n.kind != world::NodeKind::Hunting;
+            let col_idx = ((n.pos.0 - 90.0) / 160.0).round() as i32;
+            let above = region == 0 && col_idx % 2 == 1 && n.kind != world::NodeKind::Hunting && n.pos.1 < 450.0;
             let lh = 16.0;
             let tc = if Some(n.key) == here { rgb(255, 236, 140) } else { rgb(255, 255, 255) };
             for (li, l) in lines.iter().enumerate() {

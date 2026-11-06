@@ -15,6 +15,7 @@ use crate::save::{CharacterSave, QuestState, Settings};
 use crate::enemies::{self, EnemyKind};
 use crate::net::{self, ClientMsg, DropNet, EnemyNet, PlayerInfo, PlayerPos, ServerMsg};
 use crate::world::{self, Map};
+use crate::jobs::{self, Job};
 
 pub const TICK: f32 = 1.0 / 120.0;
 pub const PLAYER_W: f32 = 28.0;
@@ -61,6 +62,15 @@ const MP_PER_SHOT: f32 = 0.35;
 
 #[path = "sim_life.rs"]
 mod life;
+#[path = "sim_pvp.rs"]
+mod pvp;
+#[path = "sim_combat.rs"]
+mod combat;
+#[path = "sim_jobs.rs"]
+mod jobsim;
+pub use jobsim::{PassiveState, Summon, AID_RANGE};
+pub use combat::{Boom, BoomKind, Zap, ZapKind};
+pub use pvp::DuelState;
 
 /// A climbable the player can grab right now (`up` = pressing Up, else Down).
 fn find_climb(climbs: &[world::Climb], body: &Body, up: bool) -> Option<usize> {
@@ -78,8 +88,12 @@ fn find_climb(climbs: &[world::Climb], body: &Body, up: bool) -> Option<usize> {
     })
 }
 
+/// EXP needed to go from `level` to the next. 0.15.0: +30% from level 20
+/// on, to slow levelling down through the 20s (and keep the curve rising).
 pub fn exp_to_next(level: u32) -> u32 {
-    (30.0 * (level as f32).powf(1.55)).round() as u32
+    let base = 30.0 * (level as f32).powf(1.55);
+    let slow = if level >= 20 { 1.3 } else { 1.0 };
+    (base * slow).round() as u32
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -327,6 +341,8 @@ pub enum Team {
 
 #[derive(Clone, Debug)]
 pub struct Projectile {
+    /// Weapon, ability or companion effect (the graphics options).
+    pub fx: crate::save::FxCat,
     pub team: Team,
     pub pos: V2,
     pub vel: V2,
@@ -350,6 +366,8 @@ pub struct Projectile {
     /// Distance flown so far and the most it may fly (see [`max_range`]).
     pub travelled: f32,
     pub range: f32,
+    /// Explodes on impact, hitting everything within this radius (0 = no).
+    pub blast: f32,
 }
 
 /// How far a projectile of this style may fly before it fizzles out.
@@ -362,8 +380,17 @@ pub fn max_range(style: ProjStyle, team: Team) -> f32 {
         ProjStyle::Knife => 420.0,
         ProjStyle::Orb => 480.0,
         ProjStyle::Star => 560.0,
+        ProjStyle::Lightning | ProjStyle::Meteor => 1200.0,
         ProjStyle::Caltrop => 260.0,
         ProjStyle::Shockwave => 520.0,
+        ProjStyle::Spike => 620.0,
+        ProjStyle::Bullet => 820.0,
+        ProjStyle::Card => 620.0,
+        ProjStyle::Cannonball => 640.0,
+        ProjStyle::Snowball => 1400.0,
+        ProjStyle::Icicle | ProjStyle::Fireball => 900.0,
+        ProjStyle::LavaPool => 40.0,
+        ProjStyle::Flame => 520.0,
     };
     if team == Team::Enemy { r.min(620.0) } else { r }
 }
@@ -447,6 +474,7 @@ impl ActiveDialog {
             DialogAction::Craft(_) => Some(["Cook a meal", "Just rest"]),
             DialogAction::House => Some(["Arrange furniture", "Goodbye"]),
             DialogAction::EnterVault => Some(["Enter the Tempest Vault", "Not yet"]),
+            DialogAction::EnterDungeon(m) => Some([world::dungeon(m).map(|d| d.enter).unwrap_or("Enter"), "Not yet"]),
             DialogAction::Waystone => Some(["Travel", "Cancel"]),
             DialogAction::SummonBoss(_) => Some(["Summon it (100 gold)", "Not now"]),
             DialogAction::ClassChange(c) => Some([
@@ -456,10 +484,15 @@ impl ActiveDialog {
                     ClassId::Stormfist => "Become a Stormfist",
                     ClassId::Windrunner => "Become a Windrunner",
                     ClassId::Aethermancer => "Become an Aethermancer",
+                    ClassId::Gunslinger => "Become a Gunslinger",
                     ClassId::Novice => "Stay a Novice",
                 },
                 "Not yet",
             ]),
+            DialogAction::Advance(c) => {
+                let [a, b] = jobs::jobs_for(c);
+                Some([a.info().choice, b.info().choice])
+            }
             _ => None,
         }
     }
@@ -536,17 +569,48 @@ pub struct Sim {
     /// Online: the private copy of this map we're in ("#owner"), for houses
     /// and dungeon runs. Empty for shared maps.
     pub instance: String,
+    /// 0.14.0: who has the admin role (from the server).
+    pub admins: Vec<String>,
+    /// Admin Panel data: the player list and command results.
+    pub admin_rows: Vec<net::AdminRow>,
+    pub admin_log: Vec<String>,
+    /// Admin god mode: nothing hurts you.
+    pub god: bool,
+    /// The duel you're in, if any.
+    pub duel: Option<DuelState>,
+    /// The next map change goes into this private copy (an admin teleport).
+    forced_instance: Option<String>,
+    /// Lightning arcs and explosion rings (visual only).
+    pub zaps: Vec<Zap>,
+    /// Sideways drag on the player this tick (the Stormwarden's vortex).
+    pub boss_pull: f32,
+    /// The Rime Colossus's blizzard: frost built up (0-1) and seconds left frozen.
+    pub frost: f32,
+    pub frozen: f32,
+    pub booms: Vec<Boom>,
+    /// Turrets and companions (0.15.0).
+    pub summons: Vec<Summon>,
+    /// Running state of the advanced-class passives.
+    pub pstate: PassiveState,
 }
 
 fn derive_stats(save: &CharacterSave, buffs: &[Buff]) -> Derived {
     let mut mods = save.inventory.gear_mods();
     // A fed pet's passives count like gear.
     if let Some(p) = save.active_pet.and_then(|i| save.pets.get(i)) {
-        mods = mods + p.stat_mods();
+        // the Beast Master's Alpha Bond doubles them
+        let times = match jobs::find_fx(save.job, save.level, |f| matches!(f, jobs::PassiveFx::PetBoost(_))) {
+            Some(jobs::PassiveFx::PetBoost(x)) => x.round().max(1.0) as u32,
+            _ => 1,
+        };
+        for _ in 0..times {
+            mods = mods + p.stat_mods();
+        }
     }
     for b in buffs {
         mods = mods + b.mods;
     }
+    mods = mods + jobs::passive_mods(save.job, save.level);
     stats::derive(save.class, save.level, save.stats, &mods)
 }
 
@@ -670,6 +734,19 @@ impl Sim {
             house_open: false,
             storage_open: false,
             instance: String::new(),
+            admins: Vec::new(),
+            admin_rows: Vec::new(),
+            admin_log: Vec::new(),
+            god: false,
+            duel: None,
+            forced_instance: None,
+            zaps: Vec::new(),
+            boss_pull: 0.0,
+            frost: 0.0,
+            frozen: 0.0,
+            booms: Vec::new(),
+            summons: Vec::new(),
+            pstate: PassiveState::default(),
         };
         sim.on_load();
         // Logged out as a tombstone? Still one.
@@ -804,6 +881,10 @@ impl Sim {
         self.shake = (self.shake - dt * 30.0).max(0.0);
 
         self.update_others(dt);
+        if let Some(d) = self.duel.as_mut() {
+            d.secs = (d.secs - dt).max(0.0);
+        }
+        self.update_zaps(dt);
         for c in &mut self.chat {
             c.age += dt;
         }
@@ -833,7 +914,13 @@ impl Sim {
 
         // The world runs a little slower than real time (see GAME_SPEED).
         let gdt = dt * physics::GAME_SPEED;
+        self.boss_hazards();
+        // frozen solid by a blizzard: no moving, no attacking
+        let still = InputState::default();
+        let input = if self.frozen > 0.0 { &still } else { input };
         self.update_player(input, gdt);
+        self.passive_tick(gdt);
+        self.update_summons(gdt);
         self.update_drops(gdt);
         self.update_pet(dt);
         self.update_enemies(gdt);
@@ -945,6 +1032,14 @@ impl Sim {
                         }
                         close = true;
                     }
+                    DialogAction::EnterDungeon(m) => {
+                        if choice == 0 {
+                            if let Err(e) = self.enter_dungeon(m) {
+                                self.info_float(&e);
+                            }
+                        }
+                        close = true;
+                    }
                     DialogAction::Waystone => {
                         if choice == 0 {
                             self.teleport_open = true;
@@ -956,6 +1051,13 @@ impl Sim {
                             if let Err(e) = self.change_class(class) {
                                 self.info_float(&e);
                             }
+                        }
+                        close = true;
+                    }
+                    DialogAction::Advance(class) => {
+                        let job = jobs::jobs_for(class)[choice.min(1)];
+                        if let Err(e) = self.advance_class(job) {
+                            self.info_float(&e);
                         }
                         close = true;
                     }
@@ -1262,11 +1364,12 @@ impl Sim {
 
         // Attack start
         if let Some(heavy) = start_attack {
+            let job = self.save.job;
             let p = &mut self.player;
             let grounded = p.body.on_ground;
             let side = ax != 0.0;
             let kind = AttackKind::select(heavy, grounded, side, down);
-            let def = classes::attack_def(p.class, kind);
+            let def = classes::attack_for(p.class, job, kind);
             p.attack_buffer = None;
             if kind == AttackKind::AirHeavyNeutral && p.recovery_used {
                 // One recovery per airtime.
@@ -1323,7 +1426,11 @@ impl Sim {
         if p.state != PState::Climb {
             physics::apply_gravity(&mut p.body, dt, fast_fall, gscale * physics::PLAYER_GRAVITY);
             let lvl = Level { solids: &solids, platforms: &self.map.platforms, bounds: self.map.bounds() };
+            // the vortex drags you along without touching your own speed
+            let pull = if p.state == PState::Dead { 0.0 } else { self.boss_pull };
+            p.body.vel.x += pull;
             physics::move_and_collide(&mut p.body, &lvl, dt);
+            p.body.vel.x -= pull;
         }
         if p.body.on_ground && p.state != PState::Dead {
             self.last_ground = p.body.feet();
@@ -1398,7 +1505,8 @@ impl Sim {
             let (center, facing, magic, class) = (p.body.center(), p.facing, p.info.magic, p.class);
             let skill = a.skill;
             let mult = p.info.power * p.stats.attack_mult(p.info.magic);
-            self.attack_effects(None, Team::Player, &def, kind, skill, center, facing, mult, magic, class);
+            let job = self.save.job;
+            self.attack_effects(None, Team::Player, &def, kind, skill, center, facing, mult, magic, class, job);
             if self.online {
                 self.outbox.push(ClientMsg::Act(net::ActNet {
                     id: 0,
@@ -1433,6 +1541,7 @@ impl Sim {
             Some(SkillEffect::Strike { crit_bonus, .. }) => (crit_bonus, true),
             _ => (0.0, false),
         };
+        let palm = a.skill.map(|s| s.id) == Some("thunder_palm");
         if a.phase() == AttackPhase::Active && def.damage > 0.0 {
             let hb = attack_hitbox(p, &def);
             let mut hits: Vec<(usize, f32)> = Vec::new();
@@ -1446,6 +1555,15 @@ impl Sim {
                 }
             }
             let mult = p.info.power * p.stats.attack_mult(p.info.magic);
+            // a duel opponent in the hitbox
+            let foe_hit = self.duel_foe().filter(|(id, b)| hb.overlaps(b) && !a.hit_ids.contains(&Self::foe_tag_for(*id)));
+            if let Some((foe, b)) = foe_hit {
+                let dir = if def.both_sides { (b.center().x - p.body.center().x).signum() } else { p.facing };
+                let dir = if dir == 0.0 { p.facing } else { dir };
+                self.player.attack.as_mut().unwrap().hit_ids.push(Self::foe_tag_for(foe));
+                self.duel_strike(foe, b.center(), def.damage * mult, V2::new(def.kbx * dir, def.kby), kind.is_heavy() || from_skill, crit_bonus);
+            }
+            let first_hit = hits.first().map(|h| h.0);
             for (i, dir) in hits {
                 let id = self.enemies[i].id;
                 self.player.attack.as_mut().unwrap().hit_ids.push(id);
@@ -1454,7 +1572,11 @@ impl Sim {
                     self.player.mp = (self.player.mp + MP_PER_HIT).min(self.player.max_mp);
                 }
             }
+            if let (true, Some(i)) = (palm, first_hit) {
+                self.chain_lightning(i, def.damage * mult, V2::new(def.kbx, def.kby), crit_bonus);
+            }
         }
+        self.palm_sparks();
         let p = &mut self.player;
         let a = p.attack.as_ref().unwrap();
         if a.t >= def.total() {
@@ -1468,7 +1590,7 @@ impl Sim {
     /// visible swing and any projectiles. `team` is Player for your own
     /// attacks (they hit monsters) and Ally for other players' (just shown).
     #[allow(clippy::too_many_arguments)]
-    fn attack_effects(&mut self, owner: Option<u32>, team: Team, def: &AttackDef, kind: AttackKind, skill: Option<&'static SkillDef>, c: V2, facing: f32, mult: f32, magic: bool, class: ClassId) {
+    fn attack_effects(&mut self, owner: Option<u32>, team: Team, def: &AttackDef, kind: AttackKind, skill: Option<&'static SkillDef>, c: V2, facing: f32, mult: f32, magic: bool, class: ClassId, job: Option<Job>) {
         let (fx, hits) = match skill.map(|s| (s.fx, s.effect)) {
             Some((fx, SkillEffect::Strike { hits, .. })) => (Some(fx), hits),
             _ => (None, 1),
@@ -1496,15 +1618,38 @@ impl Sim {
             Some(SkillEffect::Strike { damage, crit_bonus, .. }) => (damage, def.kbx, def.kby, def.hitstun, crit_bonus),
             _ => {
                 let (d, x, y, h) = classes::projectile_damage(class, kind);
-                (d, x, y, h, 0.0)
+                (d * jobs::projectile_mult(job), x, y, h, 0.0)
             }
         };
+        // the Gambler's Wild Card: anywhere from half to four times the damage
+        let mut mult = mult;
+        if team == Team::Player && skill.map(|s| s.id) == Some("wild_card") {
+            let roll = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0][(self.rng.f() * 6.0) as usize % 6];
+            mult *= roll;
+            self.float(V2::new(c.x, c.y - 90.0), format!("x{} card!", roll), FloatKind::Crit);
+        }
+        if self.sky_cast(team, &pd, c, facing, dmg * mult, V2::new(kbx, kby), hs, crit_bonus, magic) {
+            return;
+        }
         let n = pd.count.max(1);
+        let first = self.projectiles.len();
+        // Heavy Ordnance: Engineers' cannon shots explode (other players' too, for the look)
+        let blast = match team {
+            Team::Player if pd.style == ProjStyle::Cannonball => self.shot_blast(),
+            Team::Ally if pd.style == ProjStyle::Cannonball && job == Some(Job::Engineer) => 70.0,
+            _ => 0.0,
+        };
+        let fx_cat = if skill.is_some() { crate::save::FxCat::Skill } else { crate::save::FxCat::Weapon };
+        // Feral Volley: every few ranged attacks fire a second volley
+        let volleys = if team == Team::Player && skill.is_none() && self.extra_shot() { 2 } else { 1 };
+        for rep in 0..volleys {
         for i in 0..n {
             let off = if n > 1 { (i as f32 / (n - 1) as f32 - 0.5) * pd.spread } else { 0.0 };
+            let off = off - rep as f32 * 70.0;
             let caltrop = pd.style == ProjStyle::Caltrop;
-            let spawn = V2::new(c.x + facing * 22.0, c.y - 4.0);
+            let spawn = V2::new(c.x + facing * 22.0, c.y - 4.0 - rep as f32 * 12.0);
             self.projectiles.push(Projectile {
+                fx: fx_cat,
                 team,
                 pos: spawn,
                 vel: V2::new(
@@ -1527,39 +1672,69 @@ impl Sim {
                 crit_bonus,
                 magic,
                 travelled: 0.0,
+                blast,
                 range: max_range(pd.style, team),
             });
+        }
+        }
+        // aim assist: turn straight shots toward a target in the cone
+        for k in first..self.projectiles.len() {
+            let mut p = self.projectiles[k].clone();
+            self.aim_projectile(&mut p, facing);
+            self.projectiles[k] = p;
         }
     }
 
     /// Another player attacked or used an ability: show it.
     fn other_acted(&mut self, a: net::ActNet) {
         let Some(o) = self.others.iter().find(|o| o.id == a.id) else { return };
-        let class = ClassId::from_key(&o.info.class).unwrap_or(ClassId::Novice);
+        let (class, job) = jobs::class_and_job(&o.info.class);
         let c = V2::new(a.x, a.y);
         let facing = if a.facing < 0 { -1.0 } else { 1.0 };
         let skill = if a.skill.is_empty() { None } else { skills::skill(&a.skill) };
+        let show_fx = self.settings.fx_shown(crate::save::FxCat::Skill, false);
         if a.kind == net::ACT_SKILL {
             if let Some(s) = skill {
-                let fx = if matches!(s.effect, SkillEffect::Heal { .. }) { FxKind::Heal } else { FxKind::LevelUp };
-                self.burst(c, fx, 18, 200.0);
-                self.float(V2::new(c.x, c.y - 64.0), s.name.to_string(), FloatKind::Exp);
+                match s.effect {
+                    // their turret / hawk appears for you to see too
+                    SkillEffect::Summon { kind, secs, damage, period } => {
+                        self.ghost_summon(a.id, c, facing, kind, secs, damage, period, job);
+                    }
+                    SkillEffect::Party { .. } if show_fx => {
+                        self.burst(c, FxKind::Heal, 40, 300.0);
+                        self.booms.push(Boom { pos: c, radius: 160.0, life: 0.5, max_life: 0.5, kind: BoomKind::Thunder, fx: crate::save::FxCat::Skill, mine: false });
+                    }
+                    _ if show_fx => {
+                        let fx = if matches!(s.effect, SkillEffect::Heal { .. }) { FxKind::Heal } else { FxKind::LevelUp };
+                        self.burst(c, fx, 18, 200.0);
+                    }
+                    _ => {}
+                }
+                if show_fx {
+                    self.float(V2::new(c.x, c.y - 64.0), s.name.to_string(), FloatKind::Exp);
+                }
             }
             return;
         }
         let Some(kind) = AttackKind::from_index(a.kind) else { return };
         let def = match skill {
-            Some(s) => match skills::skill_attack(class, s) {
+            Some(s) => match skills::skill_attack_job(class, job, s) {
                 Some(d) => d,
                 None => return,
             },
-            None => classes::attack_def(class, kind),
+            None => classes::attack_for(class, job, kind),
         };
         if let Some(s) = skill {
-            self.float(V2::new(c.x, c.y - 64.0), s.name.to_string(), FloatKind::Exp);
+            if show_fx {
+                self.float(V2::new(c.x, c.y - 64.0), s.name.to_string(), FloatKind::Exp);
+            }
+            // Thunder Palm: their lightning leaps between the monsters in front of them too
+            if s.id == "thunder_palm" && show_fx {
+                self.ghost_chain(c, facing);
+            }
         }
         let magic = class.info().magic;
-        self.attack_effects(Some(a.id), Team::Ally, &def, kind, skill, c, facing, 0.0, magic, class);
+        self.attack_effects(Some(a.id), Team::Ally, &def, kind, skill, c, facing, 0.0, magic, class, job);
     }
 
     fn update_swings(&mut self, dt: f32) {
@@ -1585,9 +1760,16 @@ impl Sim {
 
     fn damage_enemy_crit(&mut self, i: usize, base: f32, kb: V2, hitstun: f32, heavy: bool, crit_bonus: f32) {
         let st = self.player.stats;
-        let crit = self.rng.f() * 100.0 < (st.crit_chance + crit_bonus).min(100.0);
+        let (pmult, pcrit, force_crit) = self.passive_attack(i);
+        let crit = force_crit || self.rng.f() * 100.0 < (st.crit_chance + crit_bonus + pcrit).min(100.0);
         let var = self.rng.range(0.9, 1.1);
-        let dmg = (base * var * if crit { st.crit_damage / 100.0 } else { 1.0 }).round().max(1.0);
+        let mut dmg = (base * pmult * var * if crit { st.crit_damage / 100.0 } else { 1.0 }).round().max(1.0);
+        // the Gatekeeper's shield soaks up hits from the front; Glacia's
+        // ice shield, all of them; an eclipsing Twin, half
+        let guard = enemies::damage_mult(&self.enemies[i], self.player.body.center().x);
+        if guard < 1.0 {
+            dmg = if guard <= 0.0 { 0.0 } else { (dmg * guard).round().max(1.0) };
+        }
         let e = &mut self.enemies[i];
         let center = e.body.center();
         let kind = e.kind;
@@ -1610,9 +1792,20 @@ impl Sim {
         if self.settings.show_damage_numbers {
             self.float(V2::new(center.x, center.y - 30.0), format!("{}", dmg as i32), if crit { FloatKind::Crit } else { FloatKind::Damage });
         }
+        if guard < 1.0 {
+            let why = match self.enemies[i].state {
+                EState::Encased => "Shielded! Smash the Frost Crystals",
+                EState::Eclipse => "Eclipse! Finish it fast",
+                _ => "Blocked! Hit it from behind",
+            };
+            self.float(V2::new(center.x, center.y - 58.0), why.to_string(), FloatKind::Exp);
+        }
+        if kind != EnemyKind::TrainingDummy {
+            self.passive_after_hit(i, dmg, crit, kb);
+        }
         if kind == EnemyKind::TrainingDummy {
             self.quest_event(QuestEvent::DummyHit { heavy });
-        } else if !self.online && self.enemies[i].hp <= 0.0 {
+        } else if !self.online && i < self.enemies.len() && self.enemies[i].hp <= 0.0 {
             self.kill_enemy(i);
         }
     }
@@ -1627,6 +1820,7 @@ impl Sim {
         let kind = e.kind;
         let c = e.body.center();
         let def = kind.def();
+        enemies::on_death(kind, &mut self.enemies);
         let (exp, gold) = (def.exp, def.gold);
         self.save.tally.kills += 1;
         if def.boss {
@@ -1658,9 +1852,13 @@ impl Sim {
     }
 
     fn gain_exp(&mut self, amount: u32) {
+        if self.save.level >= classes::LEVEL_CAP {
+            self.save.exp = 0;
+            return;
+        }
         self.save.exp += amount;
         let mut gained = 0u32;
-        while self.save.exp >= exp_to_next(self.save.level) {
+        while self.save.level < classes::LEVEL_CAP && self.save.exp >= exp_to_next(self.save.level) {
             self.save.exp -= exp_to_next(self.save.level);
             self.save.level += 1;
             gained += 1;
@@ -1682,6 +1880,13 @@ impl Sim {
             self.learn_new_skills(old_level);
             if self.save.level >= classes::CLASS_CHANGE_LEVEL && old_level < classes::CLASS_CHANGE_LEVEL && self.save.class == ClassId::Novice {
                 self.toast("Class change available!", "Visit Aurel in Breezehollow, then head west to the class towns.");
+            }
+            if self.save.level >= jobs::JOB_LEVEL && old_level < jobs::JOB_LEVEL && self.save.job.is_none() && self.save.class != ClassId::Novice {
+                self.toast("Advancement available!", "Return to your class instructor to choose your advanced class.");
+            }
+            if self.save.level >= classes::LEVEL_CAP {
+                self.save.exp = 0;
+                self.toast("Maximum level!", "You've reached the level cap. Legends are made in the Celestial Spire.");
             }
             self.wants_save = true;
         }
@@ -1830,16 +2035,26 @@ impl Sim {
 
     /// Abilities the character can use right now.
     pub fn known_skills(&self) -> Vec<&'static SkillDef> {
-        skills::class_skills(self.save.class).into_iter().filter(|s| skills::knows(self.save.class, self.save.level, s)).collect()
+        let (c, j, l) = (self.save.class, self.save.job, self.save.level);
+        skills::job_skills(c, j).into_iter().filter(|s| skills::knows_job(c, j, l, s)).collect()
     }
 
     /// Announce skills learned since `old_level` and put them in empty hotbar slots.
     fn learn_new_skills(&mut self, old_level: u32) {
         let class = self.save.class;
-        let new: Vec<&'static SkillDef> = skills::class_skills(class)
+        let job = self.save.job;
+        let new: Vec<&'static SkillDef> = skills::job_skills(class, job)
             .into_iter()
-            .filter(|s| skills::knows(class, self.save.level, s) && (s.level > old_level || (old_level == 0 && s.class == class)))
+            .filter(|s| {
+                skills::knows_job(class, job, self.save.level, s)
+                    && (s.level > old_level || (old_level == 0 && if job.is_some() { s.job == job } else { s.class == class }))
+            })
             .collect();
+        if old_level > 0 {
+            for p in jobs::passives(job, self.save.level).filter(|p| p.level > old_level) {
+                self.toast("New passive!", &format!("{} - {}", p.name, p.desc));
+            }
+        }
         for s in new {
             let on_bar = self.save.hotbar.iter().any(|h| *h == HotbarSlot::Skill(s.id.to_string()));
             if !on_bar {
@@ -1898,8 +2113,12 @@ impl Sim {
     /// Use an ability. Returns true if it went off.
     pub fn use_skill(&mut self, s: &'static SkillDef) -> bool {
         let class = self.save.class;
-        if !skills::knows(class, self.save.level, s) {
-            self.info_float(&format!("Learn at Lv.{}", s.level));
+        let job = self.save.job;
+        if !skills::knows_job(class, job, self.save.level, s) {
+            match s.job {
+                Some(j) if Some(j) != job => self.info_float(&format!("{} only", j.name())),
+                _ => self.info_float(&format!("Learn at Lv.{}", s.level)),
+            }
             return false;
         }
         let p = &self.player;
@@ -1921,7 +2140,7 @@ impl Sim {
         let c = p.body.center();
         match s.effect {
             SkillEffect::Strike { anim, .. } => {
-                let Some(def) = skills::skill_attack(class, s) else { return false };
+                let Some(def) = skills::skill_attack_job(class, job, s) else { return false };
                 let p = &mut self.player;
                 p.state = PState::Attack;
                 p.state_t = 0.0;
@@ -1946,6 +2165,9 @@ impl Sim {
                     self.float(V2::new(c.x, c.y - 50.0), format!("+{}", h as i32), FloatKind::Heal);
                 }
             }
+            SkillEffect::Party { mods, secs, hp } => self.party_skill(s, mods, secs, hp),
+            SkillEffect::Summon { kind, secs, damage, period } => self.summon(kind, secs, damage, period),
+            SkillEffect::Gamble => self.gamble(s),
         }
         if self.online && !matches!(s.effect, SkillEffect::Strike { .. }) {
             // attacks are announced when they swing; buffs and heals now
@@ -2034,7 +2256,7 @@ impl Sim {
             Special::Pet(species) => self.adopt_pet(species),
             Special::PetFood => self.feed_pet().map(|_| ()),
             Special::HouseDeed => self.use_house_deed(),
-            Special::Cache => self.open_cache(),
+            Special::Cache => self.open_cache(def.id),
         };
         match r {
             Ok(()) => true,
@@ -2052,6 +2274,11 @@ impl Sim {
         if let Some(c) = def.class {
             if c != self.save.class {
                 return Some(format!("{} only", c.info().name));
+            }
+        }
+        if let Some(j) = def.job {
+            if Some(j) != self.save.job {
+                return Some(format!("{} only", j.name()));
             }
         }
         if self.save.level < def.level {
@@ -2310,6 +2537,9 @@ impl Sim {
         p.attack = None;
         p.invuln = 0.8;
         self.save.map = self.map.key.to_string();
+        self.summons.clear();
+        let arrived = self.map.key;
+        self.quest_event(QuestEvent::Reached(arrived));
         self.shop_open = None;
         self.teleport_open = false;
         self.craft_open = None;
@@ -2508,6 +2738,7 @@ impl Sim {
             ServerMsg::Shot(s) => {
                 let style = crate::classes::ProjStyle::from_u32(s.style);
                 self.projectiles.push(Projectile {
+                    fx: crate::save::FxCat::Weapon,
                     team: Team::Enemy,
                     pos: V2::new(s.x, s.y),
                     vel: V2::new(s.vx, s.vy),
@@ -2527,7 +2758,8 @@ impl Sim {
                     crit_bonus: 0.0,
                     magic: matches!(style, ProjStyle::Orb | ProjStyle::Star | ProjStyle::Bolt),
                     travelled: 0.0,
-                    range: max_range(style, Team::Enemy),
+                    blast: 0.0,
+                range: max_range(style, Team::Enemy),
                 });
             }
             ServerMsg::Shake { amount } => {
@@ -2610,7 +2842,12 @@ impl Sim {
                     self.push_chat(&from, &text);
                 }
             }
-            ServerMsg::System { text } => self.push_line(net::CH_SYSTEM, "", "", &text),
+            ServerMsg::System { text } => {
+                if let Some(a) = text.strip_prefix("[Announcement] ") {
+                    self.toast("Announcement", a);
+                }
+                self.push_line(net::CH_SYSTEM, "", "", &text);
+            }
             ServerMsg::ChatCh { channel, from, to, text } => {
                 if !(channel == net::CH_WHISPER && self.social.is_blocked(&from)) {
                     self.push_line(channel, &from, &to, &text);
@@ -2647,6 +2884,8 @@ impl Sim {
             }
             ServerMsg::TradeDone { with, give, give_gold, get, get_gold } => self.trade_done(&with, &give, give_gold, &get, get_gold),
             ServerMsg::Grant { gold, cost, items, reason } => self.grant(gold, cost, &items, &reason),
+            ServerMsg::Aid { from, skill } => self.receive_aid(&from, &skill),
+            m @ (ServerMsg::Admins { .. } | ServerMsg::AdminPlayers(_) | ServerMsg::AdminLog { .. } | ServerMsg::AdminDo { .. } | ServerMsg::Duel { .. } | ServerMsg::DuelHit { .. }) => self.pvp_apply(m),
             _ => {}
         }
     }
@@ -2934,7 +3173,10 @@ impl Sim {
             look: look.to_string(),
             weapon: self.save.inventory.equip[EquipSlot::Weapon.index()].clone().unwrap_or_default(),
             level: self.save.level,
-            class: self.save.class.key().to_string(),
+            class: match self.save.job {
+                Some(j) => j.key().to_string(),
+                None => self.save.class.key().to_string(),
+            },
             pet: pet.map(|p| p.species.key().to_string()).unwrap_or_default(),
             pet_name: pet.map(|p| p.name.clone()).unwrap_or_default(),
             pet_level: pet.map(|p| p.level).unwrap_or(0),
@@ -3343,10 +3585,11 @@ impl Sim {
     /// Damage the player from an enemy/hazard.
     fn hurt_player(&mut self, dmg: f32, from_x: f32, kb: V2, magic: bool) {
         let p = &mut self.player;
-        if p.is_invulnerable() {
+        if p.is_invulnerable() || self.god {
             return;
         }
         let taken = p.stats.damage_taken(magic);
+        let Some(dmg) = self.passive_hurt(dmg) else { return };
         let dmg = (dmg * taken * self.rng.range(0.9, 1.1)).round().max(1.0);
         let p = &mut self.player;
         p.hp -= dmg;
@@ -3371,7 +3614,7 @@ impl Sim {
         if self.settings.screen_shake {
             self.shake = self.shake.max(5.0);
         }
-        if self.player.hp <= 0.0 {
+        if self.player.hp <= 0.0 && !self.duel_guard() {
             self.player.hp = 0.0;
             self.player_died();
         }
@@ -3424,8 +3667,16 @@ impl Sim {
         for e in self.enemies.iter_mut() {
             enemies::update(e, &ctx, &mut out);
         }
+        for sp in std::mem::take(&mut out.spawns) {
+            let id = self.next_id;
+            self.next_id += 1;
+            let mut e = Enemy::new(id, sp.kind, sp.x, sp.y, None, &mut self.rng);
+            e.hp = e.max_hp * sp.hp_frac;
+            self.enemies.push(e);
+        }
         for s in out.shots {
             self.projectiles.push(Projectile {
+                fx: crate::save::FxCat::Weapon,
                 team: Team::Enemy,
                 pos: s.pos,
                 vel: s.vel,
@@ -3445,6 +3696,7 @@ impl Sim {
                 crit_bonus: 0.0,
                 magic: matches!(s.style, ProjStyle::Orb | ProjStyle::Star | ProjStyle::Bolt),
                 travelled: 0.0,
+                blast: 0.0,
                 range: max_range(s.style, Team::Enemy),
             });
         }
@@ -3500,7 +3752,10 @@ impl Sim {
 
     fn update_projectiles(&mut self, dt: f32) {
         let solids = self.solids_with_gates();
+        let foe = self.duel_foe();
+        let mut foe_hits: Vec<(u32, V2, f32, V2, bool, f32)> = Vec::new();
         let mut hits_enemy: Vec<(usize, f32, V2, f32, bool, f32)> = Vec::new();
+        let mut bursts: Vec<combat::Burst> = Vec::new();
         let mut hurt: Option<(f32, f32, V2, bool)> = None;
         let pr = self.player.body.aabb();
         let player_inv = self.player.is_invulnerable();
@@ -3520,6 +3775,17 @@ impl Sim {
             }
             let r = p.aabb();
             let in_solid = solids.iter().any(|s| s.overlaps(&r));
+            if p.blast > 0.0 && p.team != Team::Enemy {
+                // blasts go off on the ground, at the end of their flight, or on a monster
+                let on_foe = p.team == Team::Player
+                    && (self.enemies.iter().any(|e| e.state != EState::Dying && r.overlaps(&e.body.aabb())) || foe.map(|f| r.overlaps(&f.1)).unwrap_or(false));
+                let on_other = p.team == Team::Ally && self.enemies.iter().any(|e| e.state != EState::Dying && r.overlaps(&e.body.aabb()));
+                if in_solid || on_foe || on_other || p.travelled > p.range || p.life <= 0.0 {
+                    bursts.push(combat::Burst { pos: p.pos, radius: p.blast, damage: p.damage, kb: p.kb, heavy: p.heavy, crit_bonus: p.crit_bonus, team: p.team, style: p.style });
+                    p.life = 0.0;
+                }
+                continue;
+            }
             if in_solid {
                 match p.style {
                     ProjStyle::Caltrop if p.team != Team::Enemy => {
@@ -3542,6 +3808,18 @@ impl Sim {
             }
             match p.team {
                 Team::Player => {
+                    if let Some((fid, fb)) = foe {
+                        let tag = Self::foe_tag_for(fid);
+                        if !p.hit_ids.contains(&tag) && r.overlaps(&fb) {
+                            p.hit_ids.push(tag);
+                            let dir = if p.vel.x.abs() > 1.0 { p.vel.x.signum() } else { (fb.center().x - p.pos.x).signum() };
+                            foe_hits.push((fid, fb.center(), p.damage, V2::new(p.kb.x * dir, p.kb.y), p.heavy, p.crit_bonus));
+                            if !p.pierce {
+                                p.life = 0.0;
+                                continue;
+                            }
+                        }
+                    }
                     for (ei, e) in self.enemies.iter().enumerate() {
                         if e.state == EState::Dying || p.hit_ids.contains(&e.id) {
                             continue;
@@ -3567,6 +3845,10 @@ impl Sim {
                     }
                 }
             }
+        }
+        self.apply_bursts(bursts);
+        for (fid, at, dmg, kb, heavy, crit_bonus) in foe_hits {
+            self.duel_strike(fid, at, dmg, kb, heavy, crit_bonus);
         }
         for (ei, dmg, kb, hs, heavy, crit_bonus) in hits_enemy {
             if ei < self.enemies.len() && self.enemies[ei].state != EState::Dying {
@@ -4027,11 +4309,57 @@ mod tests {
             }
         }
         assert!(s.save.has_flag("summit_cleared"), "quest chain stalled; quests: {:?}", s.save.quests.iter().map(|q| (&q.id, q.state)).collect::<Vec<_>>());
-        for q in quests::QUESTS {
+        let givers: Vec<&str> = maps.iter().flat_map(|m| world::load_map(m).unwrap().npcs.into_iter().map(|n| n.id)).collect();
+        for q in quests::QUESTS.iter().filter(|q| givers.contains(&q.giver)) {
             assert_eq!(s.save.quest(q.id).map(|e| e.state), Some(QuestState::Done), "{} not completed", q.id);
         }
         for f in ["fields_open", "woods_open", "cliffs_open", "gate_open"] {
             assert!(s.save.has_flag(f), "flag {} never set", f);
+        }
+    }
+
+    /// The 0.15.0 quests (Dustwind Gulch and the Highlands) can all be done.
+    #[test]
+    fn highland_quests_complete() {
+        let mut s = new_sim(ClassId::Gunslinger);
+        s.save.level = 60;
+        let maps = ["wayfarers_crossroads", "dustwind_gulch", "skyreach_citadel"];
+        for _round in 0..60 {
+            for m in maps {
+                let map = world::load_map(m).unwrap();
+                for n in &map.npcs {
+                    let d = quests::talk(n.id, n.name, &mut s.save);
+                    match d.action {
+                        DialogAction::OfferQuest(id) => quests::accept(&mut s.save, id),
+                        DialogAction::CompleteQuest(id) => {
+                            quests::complete(&mut s.save, id);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let active: Vec<String> = s.save.quests.iter().filter(|q| q.state == QuestState::Active).map(|q| q.id.clone()).collect();
+            for id in active {
+                let def = quests::quest_def(&id).unwrap();
+                for _ in 0..def.objective.target() {
+                    match def.objective {
+                        quests::Objective::Kill(k, _) => {
+                            quests::on_event(&mut s.save, QuestEvent::Killed(k));
+                        }
+                        quests::Objective::Reach(r) => {
+                            quests::on_event(&mut s.save, QuestEvent::Reached(r));
+                        }
+                        quests::Objective::Advance => {
+                            s.save.job = Some(Job::Sniper);
+                            quests::on_event(&mut s.save, QuestEvent::Advanced);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for id in ["cactus_trouble", "stinger_bounty", "skyward_bound", "the_second_path", "throne_of_ice", "dragonfire", "eclipse"] {
+            assert_eq!(s.save.quest(id).map(|e| e.state), Some(QuestState::Done), "{} not completed", id);
         }
     }
 
@@ -4095,16 +4423,6 @@ mod tests {
     }
 
     #[test]
-    fn no_map_has_more_than_four_flyers() {
-        for key in world::all_map_keys() {
-            let m = world::load_map(key).unwrap();
-            let n: usize = m.spawns.iter().filter(|z| z.kind.def().ai.is_floater()).map(|z| z.max).sum::<usize>()
-                + m.fixed_enemies.iter().filter(|f| f.0.def().ai.is_floater()).count();
-            assert!(n <= world::MAX_FLYERS, "{} has {} flyers", key, n);
-        }
-    }
-
-    #[test]
     fn projectiles_have_a_maximum_range() {
         for style in [ProjStyle::Arrow, ProjStyle::Bolt, ProjStyle::Knife, ProjStyle::Orb, ProjStyle::Star] {
             let mut s = new_sim(ClassId::Windrunner);
@@ -4112,9 +4430,11 @@ mod tests {
             run(&mut s, 0.3, InputState::default());
             let c = s.player.body.center();
             s.projectiles.push(Projectile {
+                fx: crate::save::FxCat::Weapon,
                 team: Team::Player, pos: V2::new(c.x, c.y - 200.0), vel: V2::new(900.0, 0.0), w: 10.0, h: 10.0, gravity: 0.0,
                 life: 30.0, max_life: 30.0, pierce: true, damage: 1.0, kb: V2::ZERO, hitstun: 0.0, style, hit_ids: vec![],
-                grounded: false, heavy: false, crit_bonus: 0.0, magic: false, travelled: 0.0, range: max_range(style, Team::Player),
+                grounded: false, heavy: false, crit_bonus: 0.0, magic: false, travelled: 0.0, blast: 0.0,
+                range: max_range(style, Team::Player),
             });
             run(&mut s, 3.0, InputState::default());
             assert!(s.projectiles.is_empty(), "{:?} flew forever", style);
@@ -4348,15 +4668,15 @@ mod tests {
     fn shops_buy_sell_and_equip() {
         let mut s = new_sim(ClassId::Novice);
         s.save.level = 6;
-        // prices are 9x their base (0.13.0): a 90g jerkin costs 810g
-        s.save.gold = 4500;
+        // prices are 5x their base: a 90g jerkin costs 450g
+        s.save.gold = 1000;
         s.recompute_stats();
         s.change_map("ironhold", 400.0);
         take_portal(&mut s, "ironhold_armor_in");
         talk_and_accept(&mut s, "ironhold_armor");
         assert_eq!(s.shop_open, Some("ironhold_armor"));
         assert!(s.buy("leather_vest", 1).is_ok());
-        assert_eq!(s.save.gold, 3690);
+        assert_eq!(s.save.gold, 550);
         assert!(s.buy("plate_armor", 1).is_err(), "can't afford");
         assert!(s.buy("hp_potion", 1).is_err(), "not sold here");
         let pdef = s.player.stats.pdef;
@@ -4611,12 +4931,12 @@ mod tests {
         s.change_map("dawnwind_glade", 3300.0);
         talk_and_accept(&mut s, "quartermaster_hesper");
         assert_eq!(s.shop_open, Some(items::GLADE_SHOP));
-        // First 10 trainee potions are 40% off (135 -> 81 gold).
-        assert_eq!(s.unit_price("trainee_hp_potion"), 81);
-        assert_eq!(s.buy("trainee_hp_potion", 6).unwrap(), 6 * 81);
-        assert_eq!(s.buy("trainee_mp_potion", 6).unwrap(), 4 * 97 + 2 * 162, "4 discounted left, then full price");
+        // First 10 trainee potions are 40% off (75 -> 45 gold).
+        assert_eq!(s.unit_price("trainee_hp_potion"), 45);
+        assert_eq!(s.buy("trainee_hp_potion", 6).unwrap(), 6 * 45);
+        assert_eq!(s.buy("trainee_mp_potion", 6).unwrap(), 4 * 54 + 2 * 90, "4 discounted left, then full price");
         assert_eq!(s.trainee_discounts_left(), 0);
-        assert_eq!(s.unit_price("trainee_hp_potion"), 135);
+        assert_eq!(s.unit_price("trainee_hp_potion"), 75);
         // Level 8 gear is on sale.
         assert!(s.buy("ironwood_blade", 1).is_ok());
         assert!(s.equip_problem("ironwood_blade").is_some(), "needs level 8");
@@ -4692,14 +5012,14 @@ mod tests {
     #[test]
     fn buying_and_adopting_a_pet_that_loots_for_you() {
         let mut s = new_sim(ClassId::Vanguard);
-        s.save.gold = 89_999;
+        s.save.gold = 14_999;
         s.change_map("breezehollow", 2500.0);
         talk_and_accept(&mut s, "pet_keeper_breezehollow");
         assert_eq!(s.shop_open, Some(items::PET_SHOP));
-        assert!(s.buy("pet_breeze_fox", 1).is_err(), "90,000 gold");
-        s.save.gold = 92_700;
-        assert_eq!(s.buy("pet_breeze_fox", 1).unwrap(), 90_000);
-        assert_eq!(s.buy("pet_food", 3).unwrap(), 2_700);
+        assert!(s.buy("pet_breeze_fox", 1).is_err(), "15,000 gold");
+        s.save.gold = 16_500;
+        assert_eq!(s.buy("pet_breeze_fox", 1).unwrap(), 15_000);
+        assert_eq!(s.buy("pet_food", 3).unwrap(), 1_500);
         assert_eq!(s.save.gold, 0);
         // Use it from the bag to adopt: it comes out straight away.
         let i = s.save.inventory.slots.iter().position(|x| x.id == "pet_breeze_fox").unwrap();

@@ -4,7 +4,7 @@ exclude = ["third_party"]
 
 [package]
 name = "galebound"
-version = "0.13.0"
+version = "0.15.1"
 edition = "2021"
 description = "Galebound Online - a side-scrolling action MMO prototype"
 
@@ -30,8 +30,8 @@ miniquad = { path = "third_party/miniquad" }
 [package.metadata.android]
 package_name = "com.galebound.online"
 label = "Galebound Online"
-version_code = 1300
-version_name = "0.13.0"
+version_code = 1501
+version_name = "0.15.1"
 min_sdk_version = 21
 target_sdk_version = 33
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]

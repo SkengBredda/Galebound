@@ -7,6 +7,7 @@
 //! crate only draws, reads input and moves between screens.
 
 mod art;
+mod art2;
 mod charsprite;
 mod display;
 mod font;
@@ -38,7 +39,7 @@ use macroquad::prelude::{get_time, is_quit_requested, next_frame, prevent_quit, 
 use screens::{create::CreateScreen, login::LoginScreen, play::PlayScreen, select::SelectScreen};
 
 pub const GAME_TITLE: &str = "Galebound Online";
-pub const VERSION: &str = "0.13.0";
+pub const VERSION: &str = "0.15.1";
 
 /// How long to wait for the server to answer a menu action.
 pub const REPLY_WAIT: Duration = Duration::from_secs(8);
@@ -114,6 +115,7 @@ fn window_conf() -> Conf {
 async fn main() {
     prevent_quit();
     gfx::init(display::saved_resolution());
+    gfx::set_zoom(display::saved_zoom());
     let mut app = App { account: None, net: None, time: 0.0, quit: false, save_error: None };
     let mut screen = Screen::Login(LoginScreen::new(&app));
 

@@ -52,6 +52,8 @@ pub enum Motion {
     Throw,
     /// Heel drop: the front leg stamps straight down (fist and bow classes).
     Stomp,
+    /// Hundred Fists: rapid punches, front fist then back fist, one per hit.
+    Flurry,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -100,7 +102,7 @@ impl Anim {
 pub fn motion_for(class: ClassId, kind: AttackKind) -> Motion {
     use AttackKind::*;
     let w = class.info().weapon;
-    let ranged = matches!(w, Weapon::Bow | Weapon::Staff);
+    let ranged = matches!(w, Weapon::Bow | Weapon::Staff | Weapon::DualPistols);
     let ranged_motion = if w == Weapon::Bow { Motion::Shoot } else { Motion::Cast };
     match kind {
         LightNeutral => Motion::Jab,
@@ -119,6 +121,7 @@ pub fn motion_for(class: ClassId, kind: AttackKind) -> Motion {
         },
         HeavySide => match class {
             ClassId::Stormfist => Motion::Kick,
+            ClassId::Gunslinger => Motion::Spin,
             ClassId::Vanguard | ClassId::Duskblade | ClassId::Novice => Motion::Thrust,
             _ => ranged_motion,
         },
@@ -409,6 +412,14 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
         if weapon == Some(Weapon::TwinDaggers) {
             dagger(&mut c, r.ba.hand, dir(r.ba.fore_deg + p.back_weapon));
         }
+        if weapon == Some(Weapon::DualPistols) {
+            pistol(&mut c, r.ba.hand, dir(r.ba.fore_deg + p.back_weapon - 50.0));
+        }
+        if weapon == Some(Weapon::CosmicOrbs) {
+            let h = r.ba.hand;
+            c.disc(h.0 - 2.0, h.1 - 5.0, 2.6, rgb(200, 150, 255));
+            c.set(h.0.round() as i32 - 3, h.1.round() as i32 - 6, rgb(255, 255, 255));
+        }
         if weapon == Some(Weapon::Gauntlets) {
             gauntlet(&mut c, r.ba.hand);
         }
@@ -458,6 +469,12 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
         shield(&mut c, (h.0 + 2.0, h.1 - 1.0));
         stamp(&mut out, c, 0.0);
     }
+    if weapon == Some(Weapon::Greatshield) {
+        let mut c = new();
+        let h = r.ba.hand;
+        greatshield(&mut c, (h.0 + 3.0, h.1 - 2.0));
+        stamp(&mut out, c, 0.0);
+    }
     // 9. Front arm + weapon
     {
         let wd = dir(r.fa.fore_deg + p.weapon);
@@ -468,13 +485,13 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
         let mut wcs = wc.clone();
         cel(&mut wcs);
         let weapon_layer = wcs.outlined(INK);
-        let behind = weapon == Some(Weapon::Bow);
+        let behind = matches!(weapon, Some(Weapon::Bow) | Some(Weapon::Greatbow));
         if behind {
             out.draw(&weapon_layer, 0, 0);
         }
         let mut c = new();
         draw_arm(&mut c, &look, &pal, &r.fa, false);
-        if weapon == Some(Weapon::Gauntlets) {
+        if matches!(weapon, Some(Weapon::Gauntlets) | Some(Weapon::Nunchucks)) {
             gauntlet(&mut c, r.fa.hand);
         }
         stamp(&mut out, c, 0.0);
@@ -489,8 +506,10 @@ pub fn render(look: &Appearance, weapon: Option<Weapon>, anim: Anim, frame: u8) 
             SwooshAt::Shoulder => (
                 r.fa.sh,
                 match weapon {
-                    Some(Weapon::SwordShield) | Some(Weapon::Staff) => 30.0,
-                    Some(Weapon::TwinDaggers) => 24.0,
+                    Some(Weapon::Greatsword) | Some(Weapon::Kusarigama) => 34.0,
+                    Some(Weapon::WarStaff) | Some(Weapon::Katana) => 32.0,
+                    Some(Weapon::SwordShield) | Some(Weapon::Staff) | Some(Weapon::Greatshield) => 30.0,
+                    Some(Weapon::TwinDaggers) | Some(Weapon::Nunchucks) => 24.0,
                     _ => 19.0,
                 },
             ),
@@ -1572,7 +1591,189 @@ fn draw_weapon(c: &mut Canvas, w: Weapon, a: &Arm, d: P2, back: &Arm, p: &Pose) 
             c.disc(tip.0, tip.1, 3.4, rgb(130, 220, 255));
             c.set(tip.0.round() as i32 - 1, tip.1.round() as i32 - 1, rgb(255, 255, 255));
         }
+        // ------------------------------------------------------------ 0.15.0
+        Weapon::DualPistols => pistol(c, hand, add_angle(d, -50.0)),
+        Weapon::Greatsword => {
+            // a broad two-hander: wide blade, long grip, heavy crossguard
+            let perp = (d.1, -d.0);
+            let guard = add(hand, d, 2.5);
+            let tip = add(hand, d, 22.0);
+            c.taper(guard, tip, 5.0, 1.6, steel());
+            c.linef(add(hand, d, 4.0), add(hand, d, 19.5), rgb(255, 255, 255));
+            c.linef(add(add(hand, d, 6.0), perp, 1.6), add(add(hand, d, 17.0), perp, 1.0), rgb(150, 160, 180));
+            c.capsule(add(guard, perp, -4.6), add(guard, perp, 4.6), 2.2, rgb(160, 60, 50));
+            c.capsule(add(hand, d, -5.0), add(hand, d, 1.0), 1.9, rgb(70, 46, 40));
+            let pommel = add(hand, d, -5.5);
+            c.disc(pommel.0, pommel.1, 1.7, rgb(214, 170, 70));
+        }
+        Weapon::Greatshield => {
+            // a short arming sword; the greatshield is on the other arm
+            let guard = add(hand, d, 2.0);
+            let tip = add(hand, d, 17.0);
+            c.taper(guard, tip, 3.2, 1.2, steel());
+            let perp = (d.1, -d.0);
+            c.capsule(add(guard, perp, -2.8), add(guard, perp, 2.8), 1.8, rgb(232, 196, 90));
+        }
+        Weapon::Nunchucks => {
+            // one stick in the hand, the other swinging on its chain
+            let wood = rgb(60, 40, 34);
+            let top = add(hand, d, 7.0);
+            c.capsule(add(hand, d, -1.0), top, 1.5, wood);
+            let swing = add_angle(d, 65.0 + p.weapon * 0.3);
+            let link = add(top, d, 1.5);
+            let end = add(link, swing, 3.0);
+            c.linef(top, end, rgb(200, 200, 210));
+            c.capsule(end, add(end, swing, 7.0), 1.5, wood);
+            c.disc(top.0, top.1, 1.0, rgb(240, 204, 90));
+        }
+        Weapon::WarStaff => {
+            // a long ironshod quarterstaff
+            let base = add(hand, d, -11.0);
+            let tip = add(hand, d, 18.0);
+            c.capsule(base, tip, 2.2, rgb(96, 64, 40));
+            for k in [-11.0f32, -7.5, 14.5, 18.0] {
+                let q = add(hand, d, k);
+                c.disc(q.0, q.1, 2.4, rgb(150, 156, 170));
+            }
+            let mid = add(hand, d, 4.0);
+            c.disc(mid.0, mid.1, 1.4, rgb(200, 60, 50));
+        }
+        Weapon::Katana => {
+            // a slim, gently curved blade
+            let perp = (d.1, -d.0);
+            let guard = add(hand, d, 2.0);
+            let mid = add(add(hand, d, 11.0), perp, 0.8);
+            let tip = add(add(hand, d, 20.0), perp, 2.2);
+            c.taper(guard, mid, 2.2, 1.8, steel());
+            c.taper(mid, tip, 1.8, 0.8, steel());
+            c.linef(add(hand, d, 4.0), mid, rgb(255, 255, 255));
+            c.disc(guard.0, guard.1, 1.8, rgb(40, 36, 44));
+            c.capsule(add(hand, d, -4.0), add(hand, d, 1.0), 1.5, rgb(170, 40, 50));
+        }
+        Weapon::Kusarigama => {
+            // a sickle, with its chain trailing behind
+            let perp = (d.1, -d.0);
+            let top = add(hand, d, 9.0);
+            c.capsule(add(hand, d, -1.0), top, 1.5, rgb(70, 50, 40));
+            let curve = [(0.0f32, 0.0f32), (2.0, 2.5), (5.0, 3.5), (8.0, 2.5), (10.0, 0.0)];
+            for w in curve.windows(2) {
+                let a = add(add(top, perp, w[0].0), d, w[0].1);
+                let b = add(add(top, perp, w[1].0), d, w[1].1);
+                c.capsule(a, b, 1.1, steel());
+            }
+            for k in 0..5 {
+                let q = add(add(hand, d, -2.0 - k as f32 * 2.2), perp, -(k as f32) * 1.1);
+                c.disc(q.0, q.1, 0.8, rgb(180, 184, 196));
+            }
+        }
+        Weapon::Crossbow => {
+            // stock along the arm, bow arms across the front
+            let perp = (d.1, -d.0);
+            let stock_end = add(hand, d, -5.0);
+            let front = add(hand, d, 11.0);
+            c.capsule(stock_end, front, 2.0, rgb(110, 72, 44));
+            let a = add(add(front, perp, 7.0), d, -2.0);
+            let b = add(add(front, perp, -7.0), d, -2.0);
+            c.capsule(a, front, 1.4, rgb(70, 70, 84));
+            c.capsule(b, front, 1.4, rgb(70, 70, 84));
+            c.linef(a, add(hand, d, 4.0), rgb(236, 236, 236));
+            c.linef(b, add(hand, d, 4.0), rgb(236, 236, 236));
+            c.linef(add(hand, d, 4.0), add(front, d, 2.0), rgb(210, 220, 236));
+        }
+        Weapon::Greatbow => {
+            let perp = (d.1, -d.0);
+            let wood = rgb(84, 56, 40);
+            let pts: Vec<P2> = (0..=12)
+                .map(|i| {
+                    let t = i as f32 / 12.0 * 2.0 - 1.0;
+                    let bulge = (1.0 - t * t) * 5.0;
+                    (hand.0 + perp.0 * t * 13.0 + d.0 * bulge, hand.1 + perp.1 * t * 13.0 + d.1 * bulge)
+                })
+                .collect();
+            for i in 0..pts.len() - 1 {
+                c.capsule(pts[i], pts[i + 1], 2.5, wood);
+            }
+            c.disc(pts[0].0, pts[0].1, 1.6, rgb(214, 170, 70));
+            c.disc(pts[12].0, pts[12].1, 1.6, rgb(214, 170, 70));
+            let drawn = p.back_arm.bend > 120.0;
+            let nock = if drawn { add(back.hand, dir(back.fore_deg), 0.8) } else { add(hand, d, -1.0) };
+            c.linef(pts[0], nock, rgb(238, 238, 238));
+            c.linef(nock, pts[12], rgb(238, 238, 238));
+            if drawn {
+                c.linef(nock, add(hand, d, 8.0), rgb(186, 136, 84));
+            }
+        }
+        Weapon::CosmicOrbs => {
+            // glowing orbs floating just above the open hand
+            let perp = (d.1, -d.0);
+            for (k, col) in [(0.0f32, rgb(150, 200, 255)), (1.0, rgb(255, 210, 120))] {
+                let q = add(add(hand, d, 4.0 + k * 3.0), perp, 3.0 + k * 3.5);
+                c.disc(q.0, q.1, 2.8 - k * 0.6, col);
+                c.set(q.0.round() as i32 - 1, q.1.round() as i32 - 1, rgb(255, 255, 255));
+            }
+        }
+        Weapon::Cards => {
+            // a fanned hand of cards
+            let perp = (d.1, -d.0);
+            for k in [-1.0f32, 0.0, 1.0] {
+                let dd = add_angle(d, k * 18.0);
+                let pp = (dd.1, -dd.0);
+                let base = add(hand, dd, 1.5);
+                let top = add(hand, dd, 7.0);
+                c.poly(&[add(base, pp, -1.8), add(base, pp, 1.8), add(top, pp, 1.8), add(top, pp, -1.8)], rgb(250, 248, 240));
+                let m = add(hand, dd, 4.5);
+                c.set(m.0.round() as i32, m.1.round() as i32, if k == 0.0 { rgb(200, 40, 50) } else { rgb(30, 30, 40) });
+            }
+            let _ = perp;
+        }
+        Weapon::HandCannon => {
+            // a stubby, thick-barrelled cannon with brass bands
+            let back_end = add(hand, d, -3.0);
+            let muzzle = add(hand, d, 12.0);
+            c.capsule(back_end, muzzle, 3.4, rgb(70, 72, 84));
+            for k in [1.0f32, 7.0] {
+                let q = add(hand, d, k);
+                c.disc(q.0, q.1, 3.6, rgb(200, 160, 70));
+            }
+            c.disc(muzzle.0, muzzle.1, 3.9, rgb(50, 50, 58));
+            c.disc(muzzle.0, muzzle.1, 1.8, rgb(20, 20, 24));
+        }
+        Weapon::OmniRifle => {
+            // a long rifle with a scope and a glowing core
+            let perp = (d.1, -d.0);
+            c.capsule(add(hand, d, -7.0), add(hand, d, 4.0), 2.0, rgb(80, 70, 90));
+            c.capsule(add(hand, d, 4.0), add(hand, d, 18.0), 1.2, rgb(150, 156, 176));
+            let sc = add(add(hand, d, 5.0), perp, -2.6);
+            c.capsule(sc, add(sc, d, 6.0), 1.1, rgb(40, 40, 48));
+            let core = add(hand, d, 2.0);
+            c.disc(core.0, core.1, 1.3, rgb(120, 230, 255));
+        }
     }
+}
+
+fn add_angle(d: P2, deg: f32) -> P2 {
+    let (s, co) = deg.to_radians().sin_cos();
+    (d.0 * co - d.1 * s, d.0 * s + d.1 * co)
+}
+
+fn pistol(c: &mut Canvas, hand: P2, d: P2) {
+    // barrel forward, grip down into the hand
+    let perp = (d.1, -d.0);
+    let muzzle = add(add(hand, d, 8.0), perp, -2.0);
+    let breech = add(hand, perp, -2.0);
+    c.capsule(breech, muzzle, 1.5, rgb(64, 64, 76));
+    c.capsule(hand, add(hand, perp, -2.4), 1.4, rgb(120, 76, 44));
+    c.set(muzzle.0.round() as i32, muzzle.1.round() as i32, rgb(210, 220, 236));
+    let cyl = add(add(hand, d, 2.0), perp, -2.0);
+    c.disc(cyl.0, cyl.1, 1.4, rgb(214, 170, 70));
+}
+
+fn greatshield(c: &mut Canvas, at: P2) {
+    // a tall tower shield with a gold cross
+    c.ellipse(at.0, at.1, 6.6, 9.4, rgb(150, 150, 168));
+    c.ellipse(at.0, at.1, 5.4, 8.2, rgb(230, 230, 240));
+    c.rect(at.0.round() as i32 - 1, at.1.round() as i32 - 6, 2, 12, rgb(220, 180, 70));
+    c.rect(at.0.round() as i32 - 4, at.1.round() as i32 - 2, 8, 2, rgb(220, 180, 70));
 }
 
 fn dagger(c: &mut Canvas, hand: P2, d: P2) {
@@ -1646,7 +1847,7 @@ mod tests {
 
     fn all_anims() -> Vec<Anim> {
         let mut v = vec![Anim::Idle, Anim::Battle, Anim::Run, Anim::JumpUp, Anim::Fall, Anim::Dodge, Anim::Hurt, Anim::Dead, Anim::Talk];
-        for m in [Motion::Jab, Motion::Thrust, Motion::Sweep, Motion::Uppercut, Motion::Spin, Motion::Spike, Motion::Slam, Motion::Kick, Motion::Cast, Motion::Shoot, Motion::Dive, Motion::Rise, Motion::Throw, Motion::Stomp] {
+        for m in [Motion::Jab, Motion::Thrust, Motion::Sweep, Motion::Uppercut, Motion::Spin, Motion::Spike, Motion::Slam, Motion::Kick, Motion::Cast, Motion::Shoot, Motion::Dive, Motion::Rise, Motion::Throw, Motion::Stomp, Motion::Flurry] {
             v.push(Anim::Attack(m));
         }
         v
@@ -1658,6 +1859,7 @@ mod tests {
     fn all_combinations_render_inside_canvas() {
         let weapons: Vec<Option<Weapon>> = std::iter::once(None)
             .chain(EVERY_CLASS.iter().map(|c| Some(c.info().weapon)))
+            .chain(galebound_core::jobs::ALL_JOBS.iter().map(|j| Some(j.info().weapon)))
             .chain([Some(Weapon::Club), Some(Weapon::WoodSword)])
             .collect();
         for &slot in SLOTS {

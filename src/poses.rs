@@ -215,7 +215,7 @@ fn idle(frame: usize, weapon: Option<Weapon>) -> Pose {
             p.front_arm = limb(14.0, 34.0 + breathe * 3.0);
             p.weapon = 128.0;
         }
-        Some(Weapon::Gauntlets) | None => {}
+        _ => {}
     }
     p
 }
@@ -531,6 +531,30 @@ fn attack(m: Motion, f: usize, weapon: Option<Weapon>) -> Pose {
                 _ => Pose { lean: 6.0, front_arm: limb(60.0, 60.0), back_arm: limb(40.0, 60.0), ..air },
             }
         }
+        Motion::Flurry => {
+            // frame 1: front fist out, frame 2: back fist out, so the hands
+            // visibly swap on every hit
+            let stance = Pose { front_leg: limb(22.0, 10.0), back_leg: limb(-22.0, 10.0), ..base };
+            match f {
+                0 => Pose { lean: 2.0, front_arm: limb(30.0, 130.0), back_arm: limb(36.0, 130.0), ..stance },
+                1 => Pose {
+                    lean: 10.0,
+                    front_arm: limb(86.0, 4.0),
+                    back_arm: limb(38.0, 132.0),
+                    aim: Some((40.0, -8.0)),
+                    swoosh: swoosh(70.0, 96.0, Shoulder),
+                    ..stance
+                },
+                2 => Pose {
+                    lean: 12.0,
+                    front_arm: limb(30.0, 130.0),
+                    back_arm: limb(86.0, 6.0),
+                    swoosh: swoosh(70.0, 96.0, Shoulder),
+                    ..stance
+                },
+                _ => Pose { lean: 4.0, front_arm: limb(45.0, 90.0), back_arm: limb(40.0, 120.0), ..base },
+            }
+        }
         Motion::Stomp => {
             // heel drop: knee up, then the front leg stamps straight down
             let air = Pose { plant: Plant::Air, back_leg: limb(55.0, 110.0), ..base };
@@ -641,9 +665,24 @@ fn attack(m: Motion, f: usize, weapon: Option<Weapon>) -> Pose {
 
 // =================================================================== lookup
 
+/// The weapon whose poses a 0.15.0 weapon borrows: two pistols are held
+/// like twin daggers, guns and orbs are held out like a staff, and so on.
+pub fn family(w: Weapon) -> Weapon {
+    match w {
+        Weapon::DualPistols => Weapon::TwinDaggers,
+        Weapon::Greatsword | Weapon::Greatshield => Weapon::SwordShield,
+        Weapon::Katana | Weapon::Kusarigama => Weapon::WoodSword,
+        Weapon::Nunchucks => Weapon::Gauntlets,
+        Weapon::Greatbow => Weapon::Bow,
+        Weapon::WarStaff | Weapon::Crossbow | Weapon::CosmicOrbs | Weapon::Cards | Weapon::HandCannon | Weapon::OmniRifle => Weapon::Staff,
+        other => other,
+    }
+}
+
 /// The pose for an animation frame. This is what the drawing code calls.
 pub fn pose_for(anim: Anim, frame: u8, weapon: Option<Weapon>) -> Pose {
     let f = frame as usize;
+    let weapon = weapon.map(family);
     match anim {
         Anim::Idle => idle(f, weapon),
         Anim::Battle => battle(f, weapon),

@@ -4,3 +4,7 @@ Cargo.lock.bak
 /pose_preview.png
 /sheet.png
 /GaleBound_Windows
+
+# release builds
+/GaleBound */
+/GaleBound*.zip

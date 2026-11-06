@@ -36,9 +36,25 @@ const UI_S: f32 = CW / VW;
 pub const WORLD_PX: f32 = 0.85;
 /// World zoom relative to UI space.
 pub const WORLD_ZOOM: f32 = WORLD_PX / UI_S;
-/// Size of the visible world area in world units.
-pub const VIEW_W: f32 = CW / WORLD_PX;
-pub const VIEW_H: f32 = CH / WORLD_PX;
+/// Zoom levels offered in the Graphics menu (1.0 = the standard view).
+/// Lower values zoom out to show more of the world.
+pub const ZOOMS: &[(f32, &str)] = &[(0.7, "70%"), (0.8, "80%"), (0.9, "90%"), (1.0, "100%"), (1.15, "115%"), (1.3, "130%")];
+
+/// Size of the visible world area in world units (depends on the zoom).
+pub fn view_w() -> f32 {
+    CW / (WORLD_PX * zoom())
+}
+pub fn view_h() -> f32 {
+    CH / (WORLD_PX * zoom())
+}
+
+/// The current world zoom (see [`ZOOMS`]).
+pub fn zoom() -> f32 {
+    ZOOM.with(|z| z.get())
+}
+pub fn set_zoom(z: f32) {
+    ZOOM.with(|c| c.set(z.clamp(0.5, 2.0)));
+}
 
 #[derive(Clone, Copy)]
 struct Xf {
@@ -61,6 +77,7 @@ thread_local! {
     /// Render pixels per logical canvas pixel.
     static RS: Cell<f32> = const { Cell::new(2.0) };
     static ST: RefCell<Option<State>> = const { RefCell::new(None) };
+    static ZOOM: Cell<f32> = const { Cell::new(1.0) };
 }
 
 #[inline]
@@ -163,10 +180,11 @@ pub fn end_frame() {
 /// The camera is snapped to whole canvas pixels so nothing shimmers.
 pub fn set_cam(cx: f32, cy: f32) {
     // snap to whole render pixels (finer at higher resolutions: smoother scrolling)
-    let k = WORLD_PX * rs();
+    let z = zoom();
+    let k = WORLD_PX * z * rs();
     let sx = (cx * k).round() / k;
     let sy = (cy * k).round() / k;
-    XF.with(|x| x.set(Xf { cx: sx, cy: sy, z: WORLD_ZOOM }));
+    XF.with(|x| x.set(Xf { cx: sx, cy: sy, z: WORLD_ZOOM * z }));
 }
 /// Back to UI space (no camera, no zoom).
 pub fn clear_cam() {
@@ -465,7 +483,8 @@ pub fn screen_to_virtual(x: f32, y: f32) -> (f32, f32) {
 /// The mouse position in world units, for a camera at (cx, cy).
 pub fn mouse_world(cx: f32, cy: f32) -> (f32, f32) {
     let (mx, my) = mouse();
-    (mx / WORLD_ZOOM + cx, my / WORLD_ZOOM + cy)
+    let z = WORLD_ZOOM * zoom();
+    (mx / z + cx, my / z + cy)
 }
 
 pub fn mouse_in(x: f32, y: f32, w: f32, h: f32) -> bool {

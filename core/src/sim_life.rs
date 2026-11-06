@@ -6,7 +6,10 @@ use super::*;
 use crate::crafting::{self, Craft, Station};
 use crate::housing::{self, HOUSE_MAP};
 use crate::items::Furniture;
+#[allow(unused_imports)]
 use crate::world::{VAULT_GATE_FLAG, VAULT_LEVEL, VAULT_MAP};
+#[allow(unused_imports)]
+use crate::math::Rng;
 
 /// Buff id used for the Well Rested bonus.
 pub const RESTED_BUFF: &str = "well_rested";
@@ -32,9 +35,9 @@ fn is_food(id: &str) -> bool {
     matches!(items::item(id).map(|d| d.kind), Some(ItemKind::Consumable(Effect::Food { .. })))
 }
 
-/// The Tempest Vault's two bosses (no quest to turn in).
+/// Dungeon bosses (no quest to turn in).
 pub fn is_vault_boss(k: EnemyKind) -> bool {
-    matches!(k, EnemyKind::Gatekeeper | EnemyKind::Stormwarden)
+    world::is_dungeon_boss(k)
 }
 
 /// What a crafting attempt made.
@@ -59,9 +62,11 @@ impl Sim {
         if self.save.rested > 0.0 {
             self.push_rested(self.save.rested);
         }
-        // Dungeon runs don't survive logging out: back to the crossroads.
-        if world::base_key(&self.save.map) == VAULT_MAP && self.map.key == VAULT_MAP {
-            self.change_map("wayfarers_crossroads", 4200.0);
+        // Dungeon runs don't survive logging out: back to where you came in.
+        if let Some(d) = world::dungeon(&self.save.map) {
+            if self.map.key == d.map {
+                self.change_map(d.home, d.home_x - 100.0);
+            }
         }
         // An old save that already has a class shouldn't be stuck on "Choose Your Path".
         quests::sync_class_quests(&mut self.save);
@@ -75,9 +80,13 @@ impl Sim {
 
     /// Houses are private to their owner; a vault run belongs to a party.
     pub(super) fn set_instance(&mut self) {
+        if let Some(i) = self.forced_instance.take() {
+            self.instance = i;
+            return;
+        }
         if self.map.key == HOUSE_MAP {
             self.instance = format!("#{}", self.save.name);
-        } else if self.map.key == VAULT_MAP {
+        } else if world::is_dungeon(self.map.key) {
             if self.instance.is_empty() {
                 self.instance = format!("#{}", self.save.name);
             }
@@ -97,25 +106,38 @@ impl Sim {
 
     /// A monster you helped kill died (offline or online).
     pub(super) fn on_killed(&mut self, k: EnemyKind) {
-        match k {
-            EnemyKind::Gatekeeper => {
-                self.save.set_flag(VAULT_GATE_FLAG);
-                self.toast("The Gatekeeper falls!", "The inner gate grinds open. The Stormwarden waits beyond.");
-                self.shake = 10.0;
+        self.passive_kill();
+        if let Some(d) = world::highlands::gate_of(k) {
+            if let Some((_, flag)) = d.gate {
+                self.save.set_flag(flag);
             }
-            EnemyKind::Stormwarden => {
+            let next = d.finals.iter().map(|b| b.name()).collect::<Vec<_>>().join(" and ");
+            self.toast(&format!("{} falls!", k.name()), &format!("The inner gate grinds open. {} waits beyond.", next));
+            self.shake = 10.0;
+        }
+        if let Some(d) = world::highlands::final_of(k) {
+            // the Twins: both must fall (the other may still be eclipsing)
+            if enemies::twin_alive(k, &self.enemies) {
+                self.toast(&format!("{} falls!", k.name()), "Its twin begins an eclipse - finish it within 10 seconds!");
+                return;
+            }
+            if d.map == VAULT_MAP {
                 self.save.vault_clears += 1;
-                let left = self.save.inventory.add("vault_cache", 1);
-                if left > 0 {
-                    let c = self.player.body.center();
-                    self.spawn_drop(DropKind::Item("vault_cache"), left, c, 40.0);
-                }
-                self.toast("Tempest Vault cleared!", "A Vault Cache is yours. Open it from your bag for Gold and Red tier treasure.");
-                self.sys_line("You received a Tempest Vault Cache.".to_string());
-                self.shake = 12.0;
-                self.wants_save = true;
+            } else {
+                self.save.set_flag(&format!("cleared_{}", d.map));
+                self.save.tally.dungeon_clears += 1;
             }
-            _ => {}
+            let cache = d.cache;
+            let left = self.save.inventory.add(cache, 1);
+            if left > 0 {
+                let c = self.player.body.center();
+                self.spawn_drop(DropKind::Item(cache), left, c, 40.0);
+            }
+            let cname = items::item(cache).map(|i| i.name).unwrap_or("cache");
+            self.toast(&format!("{} cleared!", d.name), &format!("A {} is yours. Open it from your bag.", cname));
+            self.sys_line(format!("You received a {}.", cname));
+            self.shake = 12.0;
+            self.wants_save = true;
         }
     }
 
@@ -353,33 +375,59 @@ impl Sim {
 
     /// Go into the vault: your party leader's copy if you're in a party.
     pub fn enter_vault(&mut self) -> Result<(), String> {
-        if self.save.level < VAULT_LEVEL {
-            return Err(format!("You must be level {} to enter.", VAULT_LEVEL));
+        self.enter_dungeon(VAULT_MAP)
+    }
+
+    /// Go into a co-op dungeon: your party leader's copy if you're in a party.
+    pub fn enter_dungeon(&mut self, map: &str) -> Result<(), String> {
+        let d = world::dungeon(map).ok_or_else(|| "No such dungeon".to_string())?;
+        if self.save.level < d.level {
+            return Err(format!("You must be level {} to enter.", d.level));
         }
         let owner = self.party.as_ref().map(|p| p.leader.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| self.save.name.clone());
         self.instance = format!("#{}", owner);
         // every run starts with the inner gate shut
-        self.save.flags.retain(|f| f != VAULT_GATE_FLAG);
-        self.change_map(VAULT_MAP, 200.0);
+        if let Some((_, flag)) = d.gate {
+            self.save.flags.retain(|f| f != flag);
+        }
+        self.forced_instance = Some(self.instance.clone());
+        self.change_map(d.map, 200.0);
         if self.party.is_some() {
-            self.sys_line(format!("Entered {}'s Tempest Vault. Party members who enter join you.", owner));
+            self.sys_line(format!("Entered {}'s {}. Party members who enter join you.", owner, d.name));
         }
         Ok(())
     }
 
-    /// Open a Vault Cache: Gale Shards, maybe Gold or Red gear.
-    pub(super) fn open_cache(&mut self) -> Result<(), String> {
+    /// Open a dungeon cache: shards, maybe dungeon gear.
+    pub(super) fn open_cache(&mut self, id: &str) -> Result<(), String> {
         if !self.save.inventory.room_for("galeheart_ring", 2) {
             return Err("Make room in your bag first (2 slots)".into());
         }
-        self.save.inventory.remove("vault_cache", 1);
-        let mut got: Vec<(&'static str, u32)> = vec![("gale_shard", 3 + (self.rng.f() * 4.0) as u32)];
+        let pick = |rng: &mut Rng, list: &'static [&'static str]| list[(rng.f() * list.len() as f32) as usize % list.len()];
+        let mut got: Vec<(&'static str, u32)> = vec![];
         let roll = self.rng.f();
-        if roll < CACHE_RED {
-            got.push((items::RED_LOOT[(self.rng.f() * items::RED_LOOT.len() as f32) as usize % items::RED_LOOT.len()], 1));
-        } else if roll < CACHE_RED + CACHE_GOLD {
-            got.push((items::GOLD_LOOT[(self.rng.f() * items::GOLD_LOOT.len() as f32) as usize % items::GOLD_LOOT.len()], 1));
+        match id {
+            "frozen_cache" | "cinder_cache" | "celestial_cache" => {
+                let (shard, loot) = match id {
+                    "frozen_cache" => ("rime_shard", items::RIME_LOOT),
+                    "cinder_cache" => ("ember_shard", items::CINDER_LOOT),
+                    _ => ("star_shard", items::CELESTIAL_LOOT),
+                };
+                got.push((shard, 3 + (self.rng.f() * 4.0) as u32));
+                if roll < CACHE_HIGH {
+                    got.push((pick(&mut self.rng, loot), 1));
+                }
+            }
+            _ => {
+                got.push(("gale_shard", 3 + (self.rng.f() * 4.0) as u32));
+                if roll < CACHE_RED {
+                    got.push((pick(&mut self.rng, items::RED_LOOT), 1));
+                } else if roll < CACHE_RED + CACHE_GOLD {
+                    got.push((pick(&mut self.rng, items::GOLD_LOOT), 1));
+                }
+            }
         }
+        self.save.inventory.remove(id, 1);
         if self.rng.f() < CACHE_TROPHY {
             got.push(("furn_trophy", 1));
         }
@@ -397,7 +445,7 @@ impl Sim {
             }
         }
         self.burst(c, FxKind::LevelUp, 30, 260.0);
-        self.sys_line(format!("Vault Cache: {}", names.join(", ")));
+        self.sys_line(format!("{}: {}", items::item(id).map(|i| i.name).unwrap_or("Cache"), names.join(", ")));
         self.wants_save = true;
         Ok(())
     }
@@ -418,6 +466,8 @@ impl Sim {
 pub const CACHE_RED: f32 = 0.06;
 pub const CACHE_GOLD: f32 = 0.45;
 pub const CACHE_TROPHY: f32 = 0.03;
+/// Chance a 0.15.0 dungeon cache holds a piece of that dungeon's gear.
+pub const CACHE_HIGH: f32 = 0.35;
 
 #[cfg(test)]
 mod tests {
@@ -601,5 +651,59 @@ mod tests {
         assert_eq!(ad.choices().unwrap()[1], "Craft");
         let d = quests::talk("inn_ironhold", "Bess", &mut s.save);
         assert_eq!(d.action, DialogAction::Craft(Station::Kitchen));
+    }
+}
+
+#[cfg(test)]
+mod ladders {
+    use super::*;
+    use crate::input::Action;
+    use crate::classes::ClassId;
+    use crate::appearance::Appearance;
+
+    fn run(s: &mut Sim, secs: f32, i: InputState) -> f32 {
+        let mut maxjump: f32 = 0.0;
+        let n = (secs * 60.0) as i32;
+        for k in 0..n {
+            let x0 = s.player.body.pos.x;
+            let inp = if k == 0 { i.clone() } else { let mut j = InputState::default(); for a in [Action::Left, Action::Right, Action::Up, Action::Jump] { if i.held(a) { j.set(a, true, false); } } j };
+            s.tick(&inp);
+            maxjump = maxjump.max((s.player.body.pos.x - x0).abs());
+        }
+        maxjump
+    }
+
+    /// Jumping left or right off any ladder, at any height, never moves you
+    /// more than a normal step in one frame (0.14.0: it used to throw you
+    /// through the ledge next to the ladder).
+    #[test]
+    fn jumping_off_ladders_never_teleports() {
+        let mut bad = vec![];
+        for w in world::all_map_keys() {
+            let Some(m) = world::load_map(w) else { continue };
+            for (ci, c) in m.climbs.iter().enumerate() {
+                for dir in [Action::Left, Action::Right] {
+                    for frac in [0.05f32, 0.2, 0.5, 0.8, 0.95] {
+                        let mut save = CharacterSave::new("P", Appearance::default());
+                        save.level = 30; save.class = ClassId::Windrunner;
+                        save.map = w.to_string();
+                        let mut s = Sim::new(save, Settings::default(), 1);
+                        s.tick(&InputState::default());
+                        s.player.state = PState::Climb; s.player.climb = ci;
+                        s.player.body.pos.x = c.x - PLAYER_W * 0.5;
+                        s.player.body.pos.y = c.top + (c.bottom - c.top) * frac - PLAYER_H;
+                        s.player.body.vel = V2::ZERO;
+                        s.player.invuln = 99.0;
+                        let mut i = InputState::default();
+                        i.set(Action::Jump, true, true); i.set(dir, true, true);
+                        let j = run(&mut s, 0.8, i);
+                        if j > 30.0 {
+                            bad.push(format!("{} ladder {} {:?} at {:.0}%: moved {:.0} in one frame", w, ci, dir, frac * 100.0, j));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
     }
 }

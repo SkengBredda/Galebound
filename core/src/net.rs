@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 /// Bumped whenever the messages change; client and server must match.
-pub const PROTOCOL: u32 = 4;
+pub const PROTOCOL: u32 = 6;
 pub const DEFAULT_PORT: u16 = 7777;
 /// Default player limit for a server.
 pub const MAX_PLAYERS: usize = 16;
@@ -293,6 +293,11 @@ pub enum SocialCmd {
     Profile { name: String },
     /// Ask for the friends list, party and guild again.
     Refresh,
+    /// Challenge a player on your map to a duel.
+    DuelRequest { name: String },
+    DuelAnswer { from: String, accept: bool },
+    /// Give up (also sent when your HP runs out in a duel).
+    DuelYield,
 }
 
 impl SocialCmd {
@@ -330,6 +335,9 @@ impl SocialCmd {
             TradeConfirm => ("tok", vec![]),
             TradeCancel => ("tcancel", vec![]),
             Profile { name } => ("profile", vec![name.clone()]),
+            DuelRequest { name } => ("dreq", vec![name.clone()]),
+            DuelAnswer { from, accept } => ("dans", vec![from.clone(), b(*accept)]),
+            DuelYield => ("dyield", vec![]),
             Refresh => ("refresh", vec![]),
         }
     }
@@ -368,6 +376,9 @@ impl SocialCmd {
             "tok" => TradeConfirm,
             "tcancel" => TradeCancel,
             "profile" => Profile { name: s(0)? },
+            "dreq" => DuelRequest { name: s(0)? },
+            "dans" => DuelAnswer { from: s(0)?, accept: s(1)? == "1" },
+            "dyield" => DuelYield,
             "refresh" => Refresh,
             _ => return None,
         })
@@ -379,6 +390,44 @@ pub const INV_FRIEND: u32 = 0;
 pub const INV_PARTY: u32 = 1;
 pub const INV_GUILD: u32 = 2;
 pub const INV_TRADE: u32 = 3;
+pub const INV_DUEL: u32 = 4;
+
+/// Duel phases in [`ServerMsg::Duel`].
+pub const DUEL_OVER: u32 = 0;
+pub const DUEL_COUNTDOWN: u32 = 1;
+pub const DUEL_FIGHT: u32 = 2;
+
+/// A row of the admin panel's player list.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct AdminRow {
+    pub name: String,
+    pub level: u32,
+    pub class: String,
+    pub map: String,
+    pub admin: bool,
+    /// Seconds of mute left (0 = can talk).
+    pub muted: u32,
+}
+
+fn encode_rows(rows: &[AdminRow]) -> String {
+    rows.iter().map(|r| format!("{},{},{},{},{},{}", r.name.replace([',', ';'], ""), r.level, r.class, r.map, r.admin as u8, r.muted)).collect::<Vec<_>>().join(";")
+}
+
+fn decode_rows(s: &str) -> Vec<AdminRow> {
+    s.split(';')
+        .filter_map(|p| {
+            let v: Vec<&str> = p.split(',').collect();
+            (v.len() == 6).then(|| AdminRow {
+                name: v[0].to_string(),
+                level: v[1].parse().unwrap_or(1),
+                class: v[2].to_string(),
+                map: v[3].to_string(),
+                admin: v[4] == "1",
+                muted: v[5].parse().unwrap_or(0),
+            })
+        })
+        .collect()
+}
 
 // ------------------------------------------------------------------ messages
 
@@ -412,6 +461,14 @@ pub enum ClientMsg {
     Ping { t: f64 },
     Act(ActNet),
     Social(SocialCmd),
+    /// An admin command line, without the slash (e.g. "kick Bob"). The
+    /// server checks you're an admin.
+    Admin { cmd: String },
+    /// In a duel, your attack hit your opponent.
+    DuelHit { target: u32, damage: f32, kbx: f32, kby: f32 },
+    /// A support ability (or a Mender turret pulse) at (x, y): the server
+    /// passes it to party members on the same map within `AID_RANGE`.
+    Aid { skill: String, x: f32, y: f32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -463,6 +520,22 @@ pub enum ServerMsg {
     /// The server gives you something (guild rewards), or charges you
     /// (`cost`, e.g. founding a guild).
     Grant { gold: u32, cost: u32, items: Vec<(String, u32)>, reason: String },
+    /// Everyone with the admin role (sent on joining and when it changes).
+    Admins { names: Vec<String> },
+    /// The admin panel's player list.
+    AdminPlayers(Vec<AdminRow>),
+    /// The result of an admin command (shown in the panel and the System tab).
+    AdminLog { text: String },
+    /// An admin did something to you: "tp" (go to `map` at x, y), "heal",
+    /// "level" (set your level to `n`), "god" (`n` = 1 on, 0 off).
+    AdminDo { action: String, map: String, x: f32, y: f32, n: f32 },
+    /// A duel's state: `phase` is DUEL_COUNTDOWN / DUEL_FIGHT with `secs`
+    /// left, or DUEL_OVER with the winner's name in `name` ("" = a draw).
+    Duel { foe: u32, name: String, phase: u32, secs: f32 },
+    /// Your duel opponent hit you.
+    DuelHit { from: u32, damage: f32, kbx: f32, kby: f32 },
+    /// A party member's support ability reached you.
+    Aid { from: String, skill: String },
 }
 
 fn put_info(w: W, p: &PlayerInfo) -> W {
@@ -535,6 +608,9 @@ impl ClientMsg {
             Chat { text } => W::new("chat").s(text),
             Ping { t } => W::new("ping").n(t),
             Act(a) => put_act(W::new("act"), a),
+            Admin { cmd } => W::new("admin").s(cmd),
+            DuelHit { target, damage, kbx, kby } => W::new("duelhit").n(target).f(*damage).f(*kbx).f(*kby),
+            Aid { skill, x, y } => W::new("aid").s(skill).f(*x).f(*y),
             Social(c) => {
                 let (verb, args) = c.parts();
                 let mut w = W::new("soc").s(verb);
@@ -572,6 +648,9 @@ impl ClientMsg {
             "chat" => Chat { text: r.s()? },
             "ping" => Ping { t: r.d()? },
             "act" => Act(get_act(&mut r)?),
+            "admin" => Admin { cmd: r.s()? },
+            "duelhit" => DuelHit { target: r.u()?, damage: r.f()?, kbx: r.f()?, kby: r.f()? },
+            "aid" => Aid { skill: r.s()?, x: r.f()?, y: r.f()? },
             "soc" => {
                 let verb = r.s()?;
                 let mut args = Vec::new();
@@ -648,6 +727,13 @@ impl ServerMsg {
                 .s(&crate::social::encode_items(get))
                 .n(get_gold),
             Grant { gold, cost, items, reason } => W::new("grant").n(gold).n(cost).s(&crate::social::encode_items(items)).s(reason),
+            Admins { names } => W::new("admins").s(&names.join(",")),
+            AdminPlayers(rows) => W::new("aplayers").s(&encode_rows(rows)),
+            AdminLog { text } => W::new("alog").s(text),
+            AdminDo { action, map, x, y, n } => W::new("ado").s(action).s(map).f(*x).f(*y).f(*n),
+            Duel { foe, name, phase, secs } => W::new("duel").n(foe).s(name).n(phase).f(*secs),
+            DuelHit { from, damage, kbx, kby } => W::new("duelhit").n(from).f(*damage).f(*kbx).f(*kby),
+            Aid { from, skill } => W::new("aid").s(from).s(skill),
         }
         .0
     }
@@ -739,6 +825,13 @@ impl ServerMsg {
                 get_gold: r.u()?,
             },
             "grant" => Grant { gold: r.u()?, cost: r.u()?, items: crate::social::decode_items(&r.s()?), reason: r.s()? },
+            "admins" => Admins { names: r.s()?.split(',').filter(|n| !n.is_empty()).map(String::from).collect() },
+            "aplayers" => AdminPlayers(decode_rows(&r.s()?)),
+            "alog" => AdminLog { text: r.s()? },
+            "ado" => AdminDo { action: r.s()?, map: r.s()?, x: r.f()?, y: r.f()?, n: r.f()? },
+            "duel" => Duel { foe: r.u()?, name: r.s()?, phase: r.u()?, secs: r.f()? },
+            "duelhit" => DuelHit { from: r.u()?, damage: r.f()?, kbx: r.f()?, kby: r.f()? },
+            "aid" => Aid { from: r.s()?, skill: r.s()? },
             _ => return None,
         })
     }
@@ -974,6 +1067,12 @@ mod tests {
             ClientMsg::Social(SocialCmd::GuildRank { name: "Kaito".into(), rank: 1 }),
             ClientMsg::Social(SocialCmd::PartyLeave),
             ClientMsg::Social(SocialCmd::TradeOffer { items: vec![], gold: 0 }),
+            ClientMsg::Social(SocialCmd::DuelRequest { name: "Mia Rose".into() }),
+            ClientMsg::Social(SocialCmd::DuelAnswer { from: "Kaito".into(), accept: true }),
+            ClientMsg::Social(SocialCmd::DuelYield),
+            ClientMsg::Admin { cmd: "give Mia Rose elixir 3".into() },
+            ClientMsg::DuelHit { target: 4, damage: 31.5, kbx: -200.0, kby: -150.0 },
+            ClientMsg::Aid { skill: "sanctuary".into(), x: 10.5, y: -3.0 },
         ];
         for m in cms {
             assert_eq!(ClientMsg::decode(&m.encode()), Some(m.clone()), "{:?}", m);
@@ -992,6 +1091,14 @@ mod tests {
             ServerMsg::Trade { state: Some(crate::social::TradeNet { with: "K".into(), mine: vec![("elixir".into(), 2)], ..Default::default() }), reason: String::new() },
             ServerMsg::Trade { state: None, reason: "Kaito cancelled".into() },
             ServerMsg::TradeDone { with: "K".into(), give: vec![("elixir".into(), 1)], give_gold: 5, get: vec![], get_gold: 70 },
+            ServerMsg::Admins { names: vec!["Ana".into(), "Mia Rose".into()] },
+            ServerMsg::Admins { names: vec![] },
+            ServerMsg::AdminPlayers(vec![AdminRow { name: "Ana".into(), level: 20, class: "vanguard".into(), map: "tempest_vault#Ana".into(), admin: true, muted: 0 }, AdminRow { name: "Bo".into(), muted: 300, ..Default::default() }]),
+            ServerMsg::AdminLog { text: "Kicked Bo".into() },
+            ServerMsg::AdminDo { action: "tp".into(), map: "ironhold".into(), x: 300.0, y: 640.0, n: 0.0 },
+            ServerMsg::Duel { foe: 7, name: String::new(), phase: DUEL_COUNTDOWN, secs: 3.0 },
+            ServerMsg::DuelHit { from: 7, damage: 20.0, kbx: 1.0, kby: -1.0 },
+            ServerMsg::Aid { from: "Mia Rose".into(), skill: "mender_turret".into() },
             ServerMsg::Grant { gold: 400, cost: 0, items: vec![("elixir".into(), 2), ("revive_scroll".into(), 1)], reason: "Guild quest".into() },
             ServerMsg::Left,
             ServerMsg::PlayerInfo(info),
